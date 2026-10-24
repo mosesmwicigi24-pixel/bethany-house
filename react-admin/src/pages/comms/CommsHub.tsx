@@ -17,7 +17,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { get } from "@/api/client";
-import { channelApi, type Channel, type ChannelMessage, type ChannelUser, type ChannelAttachment, type ChannelRead, type LinkedEntity, type EntitySearchResult, type EntityPreview } from "@/api/channels";
+import { channelApi, quickRepliesApi, type QuickReply, type Channel, type ChannelMessage, type ChannelUser, type ChannelAttachment, type ChannelRead, type LinkedEntity, type EntitySearchResult, type EntityPreview } from "@/api/channels";
 import { EntityChipWithPreview, ENTITY_CHIP } from "@/components/comms/EntityChipWithPreview";
 import { commentApi, type MentionUser } from "@/api/comments";
 import { useAuthStore } from "@/store/auth.store";
@@ -732,6 +732,142 @@ function MentionPopup({ query, onSelect }: { query: string; onSelect: (u: Mentio
     );
 }
 
+// ─── Quick replies (WhatsApp Business direction, PR 4) ───────────────────────
+//
+// Saved messages for the whole business, inserted with `/`. {order},
+// {customer} and {name} are filled from the thread at insert time; a value
+// the thread does not have is left blank rather than left as a brace.
+
+export function fillQuickReply(body: string, fill: Record<string, string>): string {
+    return body.replace(/\{(order|customer|name)\}/gi, (_, k: string) => fill[k.toLowerCase()] ?? "");
+}
+
+function QuickReplyPopup({ query, fill, onSelect, onManage }: {
+    query: string; fill: Record<string, string>; onSelect: (q: QuickReply) => void; onManage: () => void;
+}) {
+    const { isAdmin } = usePermissions();
+    const { data, isLoading } = useQuery({ queryKey: ["quick-replies"], queryFn: () => quickRepliesApi.list(), staleTime: 60_000 });
+    const needle = query.trim().toLowerCase();
+    const rows = (data?.quick_replies ?? []).filter(q => !needle || q.title.toLowerCase().includes(needle) || q.body.toLowerCase().includes(needle));
+    return (
+        <div className="absolute bottom-full left-0 right-0 sm:right-auto sm:w-96 mb-2 bg-white rounded-xl border border-surface-200 shadow-xl py-1 z-50 max-h-56 overflow-y-auto" role="listbox" aria-label="Quick replies">
+            <p className="px-3 pt-1.5 pb-1 text-2xs font-bold uppercase tracking-wider text-surface-400">Quick replies</p>
+            {isLoading ? <p className="px-3 py-2 text-xs text-surface-400">Loading…</p>
+                : rows.length === 0 ? <p className="px-3 py-2 text-xs text-surface-400">{needle ? "No quick reply matches." : "No quick replies saved yet."}</p>
+                : rows.map(q => (
+                    <button key={q.id} role="option" onMouseDown={e => { e.preventDefault(); onSelect(q); }}
+                        className="w-full px-3 py-2 hover:bg-surface-50 text-left">
+                        <p className="text-xs font-semibold text-surface-800 truncate">{q.title}</p>
+                        <p className="text-2xs text-surface-500 line-clamp-1">{fillQuickReply(q.body, fill)}</p>
+                    </button>
+                ))}
+            {isAdmin && (
+                <button onMouseDown={e => { e.preventDefault(); onManage(); }} className="w-full px-3 py-2 text-left text-2xs font-bold text-brand-600 hover:bg-brand-50 border-t border-surface-100">
+                    Manage quick replies
+                </button>
+            )}
+        </div>
+    );
+}
+
+function QuickRepliesModal({ onClose }: { onClose: () => void }) {
+    const qc = useQueryClient();
+    const toast = useToastStore();
+    const { isAdmin } = usePermissions();
+    const { data } = useQuery({ queryKey: ["quick-replies"], queryFn: () => quickRepliesApi.list() });
+    const [editing, setEditing] = useState<{ id: number | null; title: string; body: string } | null>(null);
+    const done = () => { qc.invalidateQueries({ queryKey: ["quick-replies"] }); setEditing(null); };
+    const save = useMutation({
+        mutationFn: (e: { id: number | null; title: string; body: string }) => e.id ? quickRepliesApi.update(e.id, { title: e.title, body: e.body }) : quickRepliesApi.create({ title: e.title, body: e.body }),
+        onSuccess: done,
+        onError: (err: unknown) => toast.error((err as { message?: string })?.message || "Could not save that quick reply."),
+    });
+    const remove = useMutation({ mutationFn: (id: number) => quickRepliesApi.remove(id), onSuccess: done,
+        onError: () => toast.error("Could not delete that quick reply.") });
+    const rows = data?.quick_replies ?? [];
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center bg-black/30" onClick={onClose} role="dialog" aria-modal="true" aria-label="Quick replies">
+            <div className="w-full sm:w-[480px] max-h-[85vh] flex flex-col bg-white rounded-t-[20px] sm:rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-200">
+                    <span className="text-sm font-bold text-surface-900">Quick replies</span>
+                    <span className="text-2xs text-surface-400">type / in a message</span>
+                    {isAdmin && !editing && <button onClick={() => setEditing({ id: null, title: "", body: "" })} className="ml-auto px-3 py-1 rounded-full text-xs font-bold bg-brand-500 text-white hover:bg-brand-600">Add</button>}
+                    <button onClick={onClose} aria-label="Close" className={clsx("w-7 h-7 rounded-full text-surface-400 hover:bg-surface-100", (!isAdmin || editing) && "ml-auto")}>✕</button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-4 py-3">
+                    {editing ? (
+                        <div className="flex flex-col gap-2">
+                            <input value={editing.title} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="Title, e.g. Ready for collection" maxLength={80}
+                                className="input text-sm" aria-label="Title" />
+                            <textarea value={editing.body} onChange={e => setEditing({ ...editing, body: e.target.value })} rows={4} maxLength={2000}
+                                placeholder="Hello {customer}, your order {order} is ready for collection." className="input text-sm resize-none" aria-label="Message" />
+                            <p className="text-2xs text-surface-400">{"{order}, {customer} and {name} are filled from the conversation."}</p>
+                            <div className="flex gap-2 justify-end">
+                                <button onClick={() => setEditing(null)} className="btn-secondary text-xs">Cancel</button>
+                                <button onClick={() => save.mutate(editing)} disabled={save.isPending || editing.title.trim().length < 2 || !editing.body.trim()} className="btn-primary text-xs">{save.isPending ? "Saving…" : "Save"}</button>
+                            </div>
+                        </div>
+                    ) : rows.length === 0 ? (
+                        <p className="text-sm text-surface-400 text-center py-6">{isAdmin ? "No quick replies yet. Add the messages you send every day." : "No quick replies yet. An admin can add them."}</p>
+                    ) : rows.map(q => (
+                        <div key={q.id} className="flex items-start gap-2 py-2 border-b border-surface-100 last:border-0">
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-surface-900">{q.title}</p>
+                                <p className="text-xs text-surface-500 whitespace-pre-wrap">{q.body}</p>
+                            </div>
+                            {isAdmin && (
+                                <div className="flex gap-1 shrink-0">
+                                    <button onClick={() => setEditing({ id: q.id, title: q.title, body: q.body })} className="text-2xs font-bold text-surface-600 hover:text-brand-600 px-2 py-1">Edit</button>
+                                    <button onClick={() => remove.mutate(q.id)} className="text-2xs font-bold text-surface-400 hover:text-danger px-2 py-1">Delete</button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function ForwardModal({ channelId, messageId, onClose }: { channelId: number; messageId: number; onClose: () => void }) {
+    const qc = useQueryClient();
+    const toast = useToastStore();
+    const [q, setQ] = useState("");
+    const channels = (qc.getQueryData<{ channels: Channel[] }>(["channels"])?.channels ?? []).filter(c => c.id !== channelId);
+    const needle = q.trim().toLowerCase();
+    const rows = channels.filter(c => !needle || c.name.toLowerCase().includes(needle));
+    const fwd = useMutation({
+        mutationFn: (to: number) => channelApi.forward(channelId, messageId, to),
+        onSuccess: (_r, to) => { toast.success(`Forwarded to ${channels.find(c => c.id === to)?.name ?? "the conversation"}.`); qc.invalidateQueries({ queryKey: ["channels"] }); onClose(); },
+        onError: (err: unknown) => toast.error((err as { message?: string })?.message || "Could not forward that message."),
+    });
+    return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center bg-black/30" onClick={onClose} role="dialog" aria-modal="true" aria-label="Forward to">
+            <div className="w-full sm:w-[400px] max-h-[75vh] flex flex-col bg-white rounded-t-[20px] sm:rounded-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-surface-200">
+                    <span className="text-sm font-bold text-surface-900">Forward to</span>
+                    <button onClick={onClose} aria-label="Close" className="ml-auto w-7 h-7 rounded-full text-surface-400 hover:bg-surface-100">✕</button>
+                </div>
+                <div className="px-3 pt-2">
+                    <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search conversations" aria-label="Search conversations"
+                        className="w-full bg-surface-100 rounded-lg px-3 py-2 text-sm outline-none focus:bg-white focus:ring-1 focus:ring-brand-300" />
+                </div>
+                <div className="flex-1 overflow-y-auto px-2 py-2">
+                    {rows.length === 0 ? <p className="text-sm text-surface-400 text-center py-6">No other conversation.</p> : rows.map(c => (
+                        <button key={c.id} onClick={() => fwd.mutate(c.id)} disabled={fwd.isPending}
+                            className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-surface-50 text-left disabled:opacity-50">
+                            {c.type === "dm"
+                                ? <div className={clsx("w-9 h-9 rounded-full bg-gradient-to-br flex items-center justify-center text-2xs font-bold text-white", avatarGradient(c.name))}>{initialsOf(c.name)}</div>
+                                : <div className="w-9 h-9 rounded-xl bg-surface-800 text-white flex items-center justify-center text-sm font-bold">#</div>}
+                            <span className="text-sm text-surface-800 truncate">{c.name}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Rich composer: parse body tokens into visual pill nodes ─────────────────
 //
 // Converts raw @[Name](user:id) and #[Label](entity:type:id) tokens into
@@ -1077,8 +1213,10 @@ function htmlToMarkdown(html: string): string {
 }
 
 
-function Composer({ channelId, channelName, channelType, channelContextType, channelMemberIds, replyTo, onClearReply, onSent, onEditLast, incomingFiles, onIncomingHandled, draftRef, insertRef }: {
+function Composer({ channelId, channelName, channelType, channelContextType, channelMemberIds, replyTo, onClearReply, onSent, onEditLast, incomingFiles, onIncomingHandled, draftRef, insertRef, fill }: {
     channelId: number;
+    /** Values for a quick reply's {order}, {customer} and {name}. */
+    fill?: Record<string, string>;
     /** ↑ in an empty composer edits your last message (desk). */
     onEditLast?: () => void;
     /** Files dropped on the thread, handed to the composer to upload. */
@@ -1102,6 +1240,9 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
     const [mentionStart, setStart]      = useState(0);
     const [entityQ, setEntityQ]         = useState<string | null>(null);
     const [entityStart, setEntityStart] = useState(0);
+    // `/` at the start of the box opens the quick replies (WhatsApp Business).
+    const [slashQ, setSlashQ]           = useState<string | null>(null);
+    const [manageQuick, setManageQuick] = useState(false);
     // The composer holds SHORT, human tokens (`#POS-260715-IDQLG`, `@Jane Doe`)
     // — never the long wire form — so the mirror can draw them at exactly the
     // textarea's width: caret stays aligned, no dead space, tight highlight.
@@ -1282,7 +1423,16 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
             else setEntityQ(null);
         }
 
+        // Quick replies: the whole box is "/" plus what you have typed so far.
+        setSlashQ(val.startsWith("/") && !val.includes("\n") && !at ? val.slice(1) : null);
+
         if (user) whisperTyping(channelId, { id: user.id, name: user.first_name ?? "" });
+    };
+
+    const insertQuickReply = (q: QuickReply) => {
+        setBody(fillQuickReply(q.body, fill ?? {}));
+        setSlashQ(null);
+        setTimeout(() => { const ta = textareaRef.current; if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }, 0);
     };
 
     const doInsertMention = (u: MentionUser) => {
@@ -1439,6 +1589,8 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
             <div className="relative">
                 {mentionQ !== null && <MentionPopup query={mentionQ} onSelect={insertMention} />}
                 {entityQ  !== null && <EntityPickerPopup query={entityQ} onSelect={insertEntity} onDismiss={() => setEntityQ(null)} />}
+                {slashQ   !== null && <QuickReplyPopup query={slashQ} fill={fill ?? {}} onSelect={insertQuickReply} onManage={() => { setSlashQ(null); setManageQuick(true); }} />}
+                {manageQuick && <QuickRepliesModal onClose={() => setManageQuick(false)} />}
                 {/* Assist — a sheet on a phone, a card above the pill on a desk */}
                 <AssistSheet
                     channelId={channelId}
@@ -1533,7 +1685,7 @@ function Composer({ channelId, channelName, channelType, channelContextType, cha
                                         else if (!enterToSend && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (canSend && !sendMutation.isPending) sendMutation.mutate(); }
                                     }
                                 }
-                                if (e.key === "Escape") { setMentionQ(null); setEntityQ(null); }
+                                if (e.key === "Escape") { setMentionQ(null); setEntityQ(null); setSlashQ(null); }
                                 // ↑ in an empty box edits your last message, as on WhatsApp Web.
                                 if (e.key === "ArrowUp" && body === "" && mentionQ === null && entityQ === null && onEditLast) { e.preventDefault(); onEditLast(); }
                             }}
@@ -1836,6 +1988,15 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
 }) {
     const [hovering, setHovering]           = useState(false);
     const [sheet, setSheet]                 = useState(false);
+    // Business extras (PR 4): translate this one message; forward it to a space.
+    const [translation, setTranslation]     = useState<null | { lang: "en" | "sw"; text: string | null; error: string | null }>(null);
+    const [forwardOpen, setForwardOpen]     = useState(false);
+    const translateMutation = useMutation({
+        mutationFn: (lang: "en" | "sw") => channelApi.assist(channelId, { action: "translate", text: message.body, language: lang }),
+        onMutate: (lang) => { setTranslation({ lang, text: null, error: null }); },
+        onSuccess: (r, lang) => setTranslation({ lang, text: r.text, error: null }),
+        onError: (err: unknown, lang) => setTranslation({ lang, text: null, error: (err as { message?: string })?.message || "Assist could not translate this." }),
+    });
     const [confirmDelete, setConfirmDelete] = useState(false);
     // Touch: a long press opens the action sheet; a swipe to the right replies
     // (WhatsApp's two gestures). Pointer events, touch only — a mouse keeps the
@@ -1990,6 +2151,14 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                                     className="text-sm w-7 h-7 flex items-center justify-center rounded-lg hover:bg-surface-100 hover:scale-125 transition-all">{e}</button>
                             ))}
                             <div className="w-px h-4 bg-surface-200 mx-0.5" />
+                            <button onClick={() => translateMutation.mutate("sw")} title="Translate" aria-label="Translate"
+                                className="w-7 h-7 flex items-center justify-center rounded-lg text-brand-500 hover:bg-brand-50 transition-colors text-sm leading-none">✦</button>
+                            <button onClick={() => setForwardOpen(true)} title="Forward to a space" aria-label="Forward to a space"
+                                className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 10H11a8 8 0 00-8 8v2M21 10l-6 6M21 10l-6-6"/>
+                                </svg>
+                            </button>
                             <button onClick={() => onReply(message)} title="Reply" aria-label="Reply"
                                 className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors">
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2062,6 +2231,14 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                                     className="text-sm w-7 h-7 flex items-center justify-center rounded-lg hover:bg-surface-100 hover:scale-125 transition-all">{e}</button>
                             ))}
                             <div className="w-px h-4 bg-surface-200 mx-0.5" />
+                            <button onClick={() => translateMutation.mutate("sw")} title="Translate" aria-label="Translate"
+                                className="w-7 h-7 flex items-center justify-center rounded-lg text-brand-500 hover:bg-brand-50 transition-colors text-sm leading-none">✦</button>
+                            <button onClick={() => setForwardOpen(true)} title="Forward to a space" aria-label="Forward to a space"
+                                className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 10H11a8 8 0 00-8 8v2M21 10l-6 6M21 10l-6-6"/>
+                                </svg>
+                            </button>
                             <button onClick={() => onReply(message)} title="Reply" aria-label="Reply"
                                 className="w-7 h-7 flex items-center justify-center rounded-lg text-surface-400 hover:text-brand-600 hover:bg-surface-100 transition-colors">
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2118,6 +2295,8 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                             { label: "Reply", icon: "M3 10h10a8 8 0 018 8v2M3 10l6 6M3 10l6-6", run: () => onReply(message) },
                             { label: "Copy", icon: "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2M10 20h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z",
                               run: () => { try { void navigator.clipboard.writeText(stripMarkdown(message.body)); } catch { /* nothing to paste from */ } } },
+                            { label: "Translate", icon: "M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129", run: () => translateMutation.mutate("sw") },
+                            { label: "Forward to a space", icon: "M21 10H11a8 8 0 00-8 8v2M21 10l-6 6M21 10l-6-6", run: () => setForwardOpen(true) },
                             ...(canEdit ? [{ label: "Edit", icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z", run: beginEdit }] : []),
                             ...((isOwn || isAdmin) ? [{ label: "Delete", icon: "M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6", run: () => setConfirmDelete(true), danger: true }] : []),
                         ] as { label: string; icon: string; run: () => void; danger?: boolean }[]).map(a => (
@@ -2131,6 +2310,32 @@ function MessageBubble({ message, channelId, currentUserId, onReply, onDeleted, 
                         ))}
                     </div>
                 </div>
+            )}
+            {translation && (
+                /* The translation of this one message, with Kiswahili and English a
+                   tap apart. A sheet on a phone, a card on a desk. */
+                <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center bg-black/30" onClick={() => setTranslation(null)} role="dialog" aria-modal="true" aria-label="Translation">
+                    <div className="w-full sm:w-[420px] bg-white rounded-t-[20px] sm:rounded-2xl shadow-2xl px-4 pt-3 sm:p-5" style={{ paddingBottom: "max(16px, env(safe-area-inset-bottom, 0px))" }} onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="text-sm font-bold text-surface-900">✦ Translation</span>
+                            <button onClick={() => translateMutation.mutate(translation.lang === "sw" ? "en" : "sw")} className="ml-auto px-2.5 py-1 rounded-full text-2xs font-bold text-surface-600 border border-surface-200 hover:bg-surface-50">
+                                {translation.lang === "sw" ? "Kiswahili · en" : "English · sw"}
+                            </button>
+                            <button onClick={() => setTranslation(null)} aria-label="Close" className="w-7 h-7 rounded-full text-surface-400 hover:bg-surface-100">✕</button>
+                        </div>
+                        <p className="text-xs text-surface-500 line-clamp-2 mb-2">{stripMarkdown(message.body)}</p>
+                        {translation.error ? <p className="text-sm text-danger">{translation.error}</p>
+                            : translation.text === null ? <p className="text-sm text-surface-400" aria-live="polite">Translating…</p>
+                            : <p className="text-[15px] text-surface-900 whitespace-pre-wrap select-text">{translation.text}</p>}
+                        {translation.text && (
+                            <button onClick={() => { try { void navigator.clipboard.writeText(translation.text!); } catch { /* shown to select */ } }}
+                                className="mt-3 px-4 py-1.5 rounded-full text-xs font-bold bg-brand-500 text-white hover:bg-brand-600">Copy</button>
+                        )}
+                    </div>
+                </div>
+            )}
+            {forwardOpen && (
+                <ForwardModal channelId={channelId} messageId={message.id} onClose={() => setForwardOpen(false)} />
             )}
             {confirmDelete && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
@@ -3061,7 +3266,8 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     onSent={msg => { setMessages(prev => prev.some(m => String(m.id) === String(msg.id)) ? prev : [...prev, msg]); setTimeout(() => scrollToBottom(), 50); }}
                     onEditLast={() => { const last = [...messages].reverse().find(m => m.user?.id === user?.id && m.type !== "system"); if (last) setEditId(last.id); }}
                     incomingFiles={dropped} onIncomingHandled={() => setDropped(null)}
-                    draftRef={draftRef} insertRef={insertRef} />
+                    draftRef={draftRef} insertRef={insertRef}
+                    fill={{ order: orderCtx?.orderNumber ?? "", customer: orderCtx?.customer ?? "", name: channel.type === "dm" ? channel.name.split(" ")[0] : channel.name }} />
                 {dragging && (
                     <div className="absolute inset-0 z-20 bg-brand-50/80 border-4 border-dashed border-brand-300 flex items-center justify-center text-brand-700 font-bold text-lg pointer-events-none" aria-hidden="true">
                         Drop to attach
@@ -3345,9 +3551,9 @@ function ChatRow({ channel, active, onClick, currentUserName, snippet, onDismiss
     );
 }
 
-function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage, onNewSpace, onDismiss, recentlyDismissed, onUndismiss }: {
+function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage, onNewSpace, onQuickReplies, onDismiss, recentlyDismissed, onUndismiss }: {
     channels: Channel[]; activeId: number | null; onSelect: (id: number) => void; currentUserName?: string | null;
-    onNewMessage: () => void; onNewSpace: () => void;
+    onNewMessage: () => void; onNewSpace: () => void; onQuickReplies: () => void;
     onDismiss: (c: Channel) => void; recentlyDismissed: Channel[]; onUndismiss: (id: number) => void;
 }) {
     const [q, setQ]           = useState("");
@@ -3407,6 +3613,8 @@ function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage,
                         </button>
                         <button onClick={onNewSpace} title="New space" aria-label="New space"
                             className="w-8 h-8 rounded-full flex items-center justify-center text-surface-500 hover:text-brand-600 hover:bg-brand-50 transition-colors text-base font-bold">#</button>
+                        <button onClick={onQuickReplies} title="Quick replies" aria-label="Quick replies"
+                            className="w-8 h-8 rounded-full flex items-center justify-center text-surface-500 hover:text-brand-600 hover:bg-brand-50 transition-colors text-base font-bold">/</button>
                     </div>
                 </div>
                 <label className="mt-2.5 flex items-center gap-2 rounded-xl bg-surface-100 px-3 py-2 sm:py-1.5 text-[14px] sm:text-xs text-surface-500 focus-within:bg-white focus-within:ring-1 focus-within:ring-brand-300">
@@ -3463,6 +3671,9 @@ function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage,
                         <button onClick={() => { setFab(false); onNewSpace(); }} className="w-full flex items-center gap-3 px-2 py-3 rounded-xl text-[15px] text-surface-800 active:bg-surface-50">
                             <span className="w-9 h-9 rounded-full bg-surface-100 text-surface-700 flex items-center justify-center font-bold">#</span>New space
                         </button>
+                        <button onClick={() => { setFab(false); onQuickReplies(); }} className="w-full flex items-center gap-3 px-2 py-3 rounded-xl text-[15px] text-surface-800 active:bg-surface-50">
+                            <span className="w-9 h-9 rounded-full bg-surface-100 text-surface-700 flex items-center justify-center font-bold">/</span>Quick replies
+                        </button>
                     </div>
                 </div>
             )}
@@ -3482,6 +3693,7 @@ export default function CommsHub() {
     useVisualViewport();
     const [showNewSpace, setShowNewSpace]   = useState(false);
     const [showDirectory, setShowDirectory] = useState(false);
+    const [showQuick, setShowQuick]         = useState(false);
     const [activeId, setActiveId]           = useState<number | null>(channelId ? parseInt(channelId) : null);
     // The URL is the truth: /comms is the list, /comms/:id the thread. On a
     // phone that is two screens (WhatsApp); on a desk, two panes.
@@ -3575,6 +3787,7 @@ export default function CommsHub() {
                     currentUserName={currentUserName}
                     onNewMessage={() => setShowDirectory(true)}
                     onNewSpace={() => setShowNewSpace(true)}
+                    onQuickReplies={() => setShowQuick(true)}
                     onDismiss={handleDismissThread}
                     recentlyDismissed={recentlyDismissed}
                     onUndismiss={handleUndismissThread}
@@ -3620,6 +3833,7 @@ export default function CommsHub() {
 
             {showNewSpace && <NewSpaceModal currentUserId={user?.id} onClose={() => setShowNewSpace(false)} onCreated={c => { refetch(); selectChannel(c.id); }} />}
             {showDirectory && <UserDirectory onClose={() => setShowDirectory(false)} onOpenDm={id => { refetch(); selectChannel(id); }} />}
+            {showQuick && <QuickRepliesModal onClose={() => setShowQuick(false)} />}
         </div>
     );
 }

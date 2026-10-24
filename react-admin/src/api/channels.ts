@@ -134,10 +134,30 @@ export interface SearchHit {
     count:      number;
 }
 
+/** A saved message inserted with `/` (GET /channels/quick-replies). Body may hold {order}, {customer}, {name}. */
+export interface QuickReply {
+    id:         number;
+    title:      string;
+    body:       string;
+    created_by: number | null;
+    updated_at: string;
+}
+
+export const quickRepliesApi = {
+    list:   () => get<{ quick_replies: QuickReply[] }>("/v1/admin/channels/quick-replies"),
+    create: (p: { title: string; body: string }) => post<{ quick_reply: QuickReply }>("/v1/admin/channels/quick-replies", p),
+    update: (id: number, p: { title: string; body: string }) => patch<{ quick_reply: QuickReply }>(`/v1/admin/channels/quick-replies/${id}`, p),
+    remove: (id: number) => del<{ message: string }>(`/v1/admin/channels/quick-replies/${id}`),
+};
+
 export const channelApi = {
     /** List all my channels. */
     list: () =>
         get<{ channels: Channel[] }>("/v1/admin/channels"),
+
+    /** Post a message again in another conversation you belong to, headed with where it came from. */
+    forward: (channelId: number, messageId: number, toChannelId: number) =>
+        post<{ message: ChannelMessage; channel_id: number }>(`/v1/admin/channels/${channelId}/messages/${messageId}/forward`, { to_channel_id: toChannelId }),
 
     /** Message text across my conversations — the chat list's search box. */
     search: (q: string) =>
