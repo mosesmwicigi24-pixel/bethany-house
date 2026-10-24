@@ -1219,6 +1219,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/entries',      [TimeClockController::class, 'teamEntries']);
                 Route::get('/entries/{id}', [TimeClockController::class, 'showEntry']);
                 Route::get('/flagged',      [TimeClockController::class, 'flagged']);
+                Route::get('/live',         [TimeClockController::class, 'live']);
 
                 Route::put('/entries/{id}', [TimeClockController::class, 'updateEntry'])
                     ->middleware('permission:attendance.manage,sanctum');

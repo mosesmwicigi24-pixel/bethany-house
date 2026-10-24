@@ -169,6 +169,7 @@ const NotificationsPage = lazy(
     () => import("@/pages/notifications/NotificationsPage"),
 );
 const CommsHub = lazy(() => import("@/pages/comms/CommsHub"));
+const ClockPage = lazy(() => import("@/pages/me/ClockPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
 );
@@ -932,6 +933,16 @@ export default function App() {
                             element={
                                 <Suspense fallback={<PageLoader />}>
                                     <CommsHub />
+                                </Suspense>
+                            }
+                        />
+                        {/* Time clock: ungated like Messages — /time-clock checks no
+                            permission; every staff member clocks in. */}
+                        <Route
+                            path="/me/clock"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <ClockPage />
                                 </Suspense>
                             }
                         />

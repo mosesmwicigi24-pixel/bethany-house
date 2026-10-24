@@ -37,6 +37,23 @@ function formatMinutes(min: number | null) {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+const FLAG_SHORT: Record<string, string> = {
+    accuracy_low: "imprecise fix", edge: "near the edge", sent_late: "sent late", mock_location: "mock location", auto_clock_out: "auto closed",
+};
+
+function FlagChips({ entry }: { entry: TimeEntry }) {
+    if (!entry.flags?.length) return null;
+    return (
+        <span className="inline-flex flex-wrap gap-1 mt-0.5">
+            {entry.flags.map((f, i) => (
+                <span key={f} className="text-2xs font-semibold px-1.5 py-0.5 rounded-full bg-warning-light text-warning" title={entry.flag_labels?.[i]}>
+                    {FLAG_SHORT[f] ?? f}
+                </span>
+            ))}
+        </span>
+    );
+}
+
 // ── Correction modal ───────────────────────────────────────────────────────────
 
 function CorrectionModal({ entry, onClose }: { entry: TimeEntry; onClose: () => void }) {
@@ -98,9 +115,11 @@ function CorrectionModal({ entry, onClose }: { entry: TimeEntry; onClose: () => 
                         {entry.overridden_by ? ` approved by ${entry.overridden_by}` : ""}.
                     </div>
                 )}
-                {entry.flagged_reason && (
+                {(entry.flagged_reason || entry.flags?.length > 0) && (
                     <div className="rounded-lg bg-danger-light text-danger text-xs px-3 py-2">
-                        Flagged: {entry.flagged_reason}
+                        Flagged: {entry.flagged_reason ?? entry.flag_labels?.join("; ")}
+                        {entry.clock_in_accuracy_meters !== null && <span className="block mt-1 text-2xs opacity-80">Phone accuracy at clock-in ±{Math.round(Number(entry.clock_in_accuracy_meters))} m{entry.clock_in_distance_meters !== null ? `, ${Math.round(Number(entry.clock_in_distance_meters))} m from the outlet` : ""}.</span>}
+                        <span className="block mt-1 text-2xs opacity-80">Marking it Completed clears the flag; the reasons stay in the audit trail.</span>
                     </div>
                 )}
 
@@ -185,12 +204,20 @@ export default function AttendancePage() {
         refetchInterval: 60_000,
     });
 
+    // Who is in right now, across the outlets this manager runs (not just
+    // the page of entries below). Refreshes every half minute.
+    const { data: live } = useQuery({
+        queryKey: ["attendance-live"],
+        queryFn: () => attendanceApi.live(),
+        refetchInterval: 30_000,
+    });
+
     const entries = data?.data ?? [];
     const meta = data as unknown as { current_page: number; last_page: number; total: number; from: number; to: number } | undefined;
     const outlets = outletsData?.data ?? [];
     const flaggedCount = flaggedData?.data?.length ?? 0;
 
-    const activeNow = entries.filter((e) => e.status === "active").length;
+    const activeNow = live?.count ?? entries.filter((e) => e.status === "active").length;
 
     return (
         <div className="space-y-5 animate-fade-in">
@@ -207,7 +234,7 @@ export default function AttendancePage() {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <div className="card p-4 text-center">
                     <p className="text-2xl font-bold text-info">{activeNow}</p>
-                    <p className="text-xs text-surface-500 mt-0.5">Clocked in now (page)</p>
+                    <p className="text-xs text-surface-500 mt-0.5">Clocked in now{live && live.on_break > 0 ? ` · ${live.on_break} on break` : ""}</p>
                 </div>
                 <button
                     onClick={() => setStatusFilter(statusFilter === "flagged" ? "" : "flagged")}
@@ -224,6 +251,36 @@ export default function AttendancePage() {
                     <p className="text-xs text-surface-500 mt-0.5">Entries (filtered range)</p>
                 </div>
             </div>
+
+            {/* Who is in now */}
+            {live && (
+                <div className="card p-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <h2 className="text-sm font-bold text-surface-900">Who is in now</h2>
+                        {live.flagged > 0 && <span className="text-2xs font-semibold px-2 py-0.5 rounded-full bg-warning-light text-warning">{live.flagged} punch{live.flagged === 1 ? "" : "es"} to look at</span>}
+                    </div>
+                    {live.data.length === 0 ? (
+                        <p className="text-sm text-surface-400">Nobody is clocked in.</p>
+                    ) : (
+                        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {live.data.map((e) => (
+                                <li key={e.id} className="flex items-center gap-3 rounded-xl border border-line px-3 py-2">
+                                    <span className={clsx("w-2.5 h-2.5 rounded-full shrink-0", e.on_break ? "bg-warning" : "bg-success")} aria-hidden="true" />
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-semibold text-surface-900 truncate">{e.user?.name}</p>
+                                        <p className="text-2xs text-surface-500 truncate">
+                                            {e.outlet?.name} · since {formatTime(e.clock_in_at)}{e.on_break ? " · on break" : ""}
+                                            {e.clock_in_method === "override" ? " · override" : ""}
+                                        </p>
+                                        <FlagChips entry={e} />
+                                    </div>
+                                    <span className="text-sm tabular-nums text-surface-700">{formatMinutes(e.elapsed_minutes)}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
 
             {/* Filters */}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -312,6 +369,7 @@ export default function AttendancePage() {
                                                 <span className={clsx("text-xs font-medium px-2.5 py-1 rounded-full", status.bg, status.text)}>
                                                     {status.label}
                                                 </span>
+                                                <div><FlagChips entry={entry} /></div>
                                             </td>
                                             <td className="px-4 py-3 text-right">
                                                 <button
