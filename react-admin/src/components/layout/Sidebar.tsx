@@ -60,6 +60,13 @@ export const NAV: NavGroup[] = [
                 // (every staff account messages; threads are as private as
                 // their record). A slug here would be one the API never checks.
             },
+            {
+                label: "Clock in",
+                href: "/me/clock",
+                icon: "clock",
+                // Ungated for the same reason: /admin/time-clock is every
+                // staff member's own punch (Bethany People PR 1).
+            },
         ],
     },
 
@@ -850,6 +857,12 @@ const Icon = ({ name }: { name: string }) => {
         messages: (
             <>
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </>
+        ),
+        clock: (
+            <>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
             </>
         ),
         // Approvals - checkmark shield
