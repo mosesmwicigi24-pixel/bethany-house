@@ -92,3 +92,8 @@ Schedule::command(\App\Console\Commands\ExpireApprovalRequests::class)
 Schedule::command(\App\Console\Commands\ApplyDueProposals::class)
     ->everyMinute()
     ->withoutOverlapping();
+
+// ── Time clock: close forgotten shifts at the cut-off (config/attendance.php) ─
+Schedule::command(\App\Console\Commands\AttendanceAutoClockOut::class)
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();

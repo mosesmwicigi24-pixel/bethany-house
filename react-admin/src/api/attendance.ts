@@ -12,6 +12,8 @@ export interface TimeClockOutlet {
     geofence_radius_meters: number | null;
 }
 
+export type TimeEntryFlag = "accuracy_low" | "edge" | "sent_late" | "mock_location" | "auto_clock_out";
+
 export interface TimeEntry {
     id: number;
     outlet: { id: number; name: string; outlet_type: string } | null;
@@ -26,6 +28,11 @@ export interface TimeEntry {
     elapsed_minutes: number;
     on_break: boolean;
     flagged_reason: string | null;
+    /** Why a manager should look: accuracy_low, edge, sent_late, mock_location, auto_clock_out. */
+    flags: TimeEntryFlag[];
+    flag_labels: string[];
+    clock_in_accuracy_meters: number | null;
+    auto_closed_at: string | null;
     notes: string | null;
     // detailed view only
     breaks?: { started_at: string; ended_at: string | null }[];
@@ -34,6 +41,11 @@ export interface TimeEntry {
     clock_out_latitude?: number | null;
     clock_out_longitude?: number | null;
     clock_out_distance_meters?: number | null;
+    clock_out_accuracy_meters?: number | null;
+    clock_in_recorded_at?: string | null;
+    clock_out_recorded_at?: string | null;
+    device_info?: string | null;
+    app_version?: string | null;
     overridden_by?: string | null;
     corrected_by?: string | null;
 }
@@ -42,7 +54,29 @@ export interface TimeClockStatus {
     active_entry: TimeEntry | null;
     today_entries: TimeEntry[];
     today_worked_minutes: number;
+    week_worked_minutes: number;
+    last_entry: TimeEntry | null;
     outlets: TimeClockOutlet[];
+    rules: { auto_clock_out_time: string; late_sync_minutes: number };
+    server_time: string;
+}
+
+/** What the phone sends with a punch: where it is and how sure it is. */
+export interface Punch {
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+    /** The phone's clock when the punch was made, for one sent after being offline. */
+    recorded_at?: string;
+    mock_location?: boolean;
+}
+
+export interface LiveBoard {
+    data: TimeEntry[];
+    count: number;
+    on_break: number;
+    flagged: number;
+    server_time: string;
 }
 
 export interface GeofenceRejection {
@@ -60,19 +94,13 @@ export const timeClockApi = {
     outlets: () =>
         get<{ data: TimeClockOutlet[] }>("/v1/admin/time-clock/outlets"),
 
-    clockIn: (data: {
-        outlet_id: number;
-        latitude: number;
-        longitude: number;
-        force?: boolean;
-        reason?: string;
-    }) =>
+    clockIn: (data: Punch & { outlet_id: number; app_version?: string; force?: boolean; reason?: string }) =>
         post<{ message: string; entry: TimeEntry }>(
             "/v1/admin/time-clock/clock-in",
             data,
         ),
 
-    clockOut: (data: { latitude: number; longitude: number }) =>
+    clockOut: (data: Punch) =>
         post<{ message: string; entry: TimeEntry }>(
             "/v1/admin/time-clock/clock-out",
             data,
@@ -115,6 +143,8 @@ export const attendanceApi = {
 
     flagged: () =>
         get<{ data: TimeEntry[] }>("/v1/admin/attendance/flagged"),
+
+    live: () => get<LiveBoard>("/v1/admin/attendance/live"),
 
     update: (
         id: number,

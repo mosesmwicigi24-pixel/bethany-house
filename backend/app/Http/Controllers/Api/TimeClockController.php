@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Outlet;
 use App\Models\TimeEntry;
 use App\Services\ActivityLogService;
+use App\Services\Auth\Devices;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -40,11 +41,28 @@ class TimeClockController extends Controller
             ->orderByDesc('clock_in_at')
             ->get();
 
+        // This week, Monday to now, Nairobi days (app timezone).
+        $weekStart = now()->startOfWeek();
+        $week = TimeEntry::where('user_id', $user->id)
+            ->where('clock_in_at', '>=', $weekStart)
+            ->get();
+        $last = TimeEntry::with('outlet:id,name,outlet_type')
+            ->where('user_id', $user->id)
+            ->orderByDesc('clock_in_at')
+            ->first();
+
         return response()->json([
             'active_entry'   => $active ? $this->transformEntry($active) : null,
             'today_entries'  => $today->map(fn ($e) => $this->transformEntry($e)),
             'today_worked_minutes' => $today->sum(fn ($e) => $e->status === 'active' ? $e->elapsedMinutes() : ($e->worked_minutes ?? 0)),
+            'week_worked_minutes'  => $week->sum(fn ($e) => $e->status === 'active' ? $e->elapsedMinutes() : ($e->worked_minutes ?? 0)),
+            'last_entry'     => $last ? $this->transformEntry($last) : null,
             'outlets'        => $this->availableOutletsFor($user),
+            'rules'          => [
+                'auto_clock_out_time' => config('attendance.auto_clock_out_time'),
+                'late_sync_minutes'   => (int) config('attendance.late_sync_minutes'),
+            ],
+            'server_time'    => now()->toIso8601String(),
         ]);
     }
 
@@ -78,19 +96,35 @@ class TimeClockController extends Controller
 
     /**
      * POST /api/v1/admin/time-clock/clock-in
-     * { outlet_id, latitude, longitude, force?, reason? }
+     * { outlet_id, latitude, longitude, accuracy?, recorded_at?, mock_location?, app_version?, force?, reason? }
+     *
+     * The phone sends its fix and how sure it is; the server decides.
+     *   inside   distance <= radius                                  -> accepted
+     *   edge     distance <= radius + min(accuracy, radius)          -> accepted, flagged "edge"
+     *   outside  anything further                                    -> 422, override only for attendance.manage
+     * A fix less precise than the radius is accepted and flagged "accuracy_low";
+     * a punch sent late keeps the phone's time and is flagged "sent_late";
+     * a phone that says its location is mocked is flagged "mock_location".
+     * Flags never refuse an honest person at the gate; they put the punch in
+     * front of the manager with the evidence.
      */
     public function clockIn(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'outlet_id' => 'required|exists:outlets,id',
-            'latitude'  => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
-            'force'     => 'sometimes|boolean',
-            'reason'    => 'required_if:force,true|nullable|string|max:255',
+            'outlet_id'     => 'required|exists:outlets,id',
+            'latitude'      => 'required|numeric|between:-90,90',
+            'longitude'     => 'required|numeric|between:-180,180',
+            'accuracy'      => 'nullable|numeric|min:0|max:100000',
+            'recorded_at'   => 'nullable|date',
+            'mock_location' => 'sometimes|boolean',
+            'app_version'   => 'nullable|string|max:40',
+            'force'         => 'sometimes|boolean',
+            'reason'        => 'required_if:force,true|nullable|string|max:255',
         ]);
 
-        $user = $request->user();
+        $user  = $request->user();
+        $flags = [];
+        $accuracy = isset($validated['accuracy']) ? (float) $validated['accuracy'] : null;
 
         if (TimeEntry::where('user_id', $user->id)->active()->exists()) {
             return response()->json([
@@ -114,7 +148,15 @@ class TimeClockController extends Controller
 
             $radius = $outlet->geofence_radius_meters;
 
-            if ($radius !== null && $distance > $radius) {
+            if ($radius !== null && $accuracy !== null && $accuracy > $radius) {
+                $flags[] = 'accuracy_low';
+            }
+
+            $edgeAllowance = $radius !== null ? min($accuracy ?? 0, $radius) : 0;
+
+            if ($radius !== null && $distance > $radius && $distance <= $radius + $edgeAllowance) {
+                $flags[] = 'edge';
+            } elseif ($radius !== null && $distance > $radius) {
                 $canOverride = $user->can('attendance.manage') || $user->can('outlets.all_access');
 
                 if (!($validated['force'] ?? false) || !$canOverride) {
@@ -132,18 +174,32 @@ class TimeClockController extends Controller
             }
         }
 
+        if ($validated['mock_location'] ?? false) {
+            $flags[] = 'mock_location';
+        }
+
+        [$punchAt, $recordedAt, $late] = $this->punchTime($validated['recorded_at'] ?? null);
+        if ($late) {
+            $flags[] = 'sent_late';
+        }
+
         $entry = TimeEntry::create([
             'user_id'                 => $user->id,
             'outlet_id'               => $outlet->id,
-            'clock_in_at'              => now(),
+            'clock_in_at'              => $punchAt,
+            'clock_in_recorded_at'     => $recordedAt,
             'clock_in_latitude'        => $validated['latitude'],
             'clock_in_longitude'       => $validated['longitude'],
             'clock_in_distance_meters' => $distance !== null ? round($distance, 2) : null,
+            'clock_in_accuracy_meters' => $accuracy !== null ? round($accuracy, 2) : null,
             'clock_in_method'          => $method,
             'status'                   => 'active',
+            'flags'                    => $flags ?: null,
             'overridden_by'            => $overriddenBy,
             'notes'                    => $validated['reason'] ?? null,
             'device_info'              => substr((string) $request->userAgent(), 0, 250),
+            'device_id'                => app(Devices::class)->knownTo($user, $request)?->id,
+            'app_version'              => $validated['app_version'] ?? null,
         ]);
 
         if ($method === 'override') {
@@ -156,20 +212,25 @@ class TimeClockController extends Controller
         }
 
         return response()->json([
-            'message' => "Clocked in at {$outlet->name}.",
+            'message' => "Clocked in at {$outlet->name}." . ($flags ? ' Your manager will see a note on this punch.' : ''),
             'entry'   => $this->transformEntry($entry),
         ], 201);
     }
 
     /**
      * POST /api/v1/admin/time-clock/clock-out
-     * { latitude, longitude }
+     * { latitude, longitude, accuracy?, recorded_at?, mock_location? }
+     * Clocking out is never refused by distance: leaving is not a privilege.
+     * The fix is stored for the record and the same flags apply.
      */
     public function clockOut(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'latitude'  => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
+            'latitude'      => 'required|numeric|between:-90,90',
+            'longitude'     => 'required|numeric|between:-180,180',
+            'accuracy'      => 'nullable|numeric|min:0|max:100000',
+            'recorded_at'   => 'nullable|date',
+            'mock_location' => 'sometimes|boolean',
         ]);
 
         $user  = $request->user();
@@ -201,24 +262,35 @@ class TimeClockController extends Controller
             );
         }
 
-        $clockOutAt   = now();
+        [$clockOutAt, $recordedAt, $late] = $this->punchTime($validated['recorded_at'] ?? null, $entry->clock_in_at);
+        $flags = $entry->flags ?? [];
+        if ($late) $flags[] = 'sent_late';
+        if ($validated['mock_location'] ?? false) $flags[] = 'mock_location';
+        $radius = $outlet?->geofence_radius_meters;
+        if ($radius !== null && isset($validated['accuracy']) && (float) $validated['accuracy'] > $radius) $flags[] = 'accuracy_low';
+        $flags = array_values(array_unique($flags));
+
         $breakMinutes = 0;
         foreach ($breaks as $break) {
             if (!empty($break['started_at']) && !empty($break['ended_at'])) {
-                $breakMinutes += Carbon::parse($break['started_at'])->diffInMinutes(Carbon::parse($break['ended_at']));
+                $breakMinutes += (int) Carbon::parse($break['started_at'])->diffInMinutes(Carbon::parse($break['ended_at']));
             }
         }
-        $workedMinutes = max(0, $entry->clock_in_at->diffInMinutes($clockOutAt) - $breakMinutes);
+        $workedMinutes = max(0, (int) $entry->clock_in_at->diffInMinutes($clockOutAt) - $breakMinutes);
 
         $entry->update([
             'clock_out_at'              => $clockOutAt,
+            'clock_out_recorded_at'     => $recordedAt,
             'clock_out_latitude'        => $validated['latitude'],
             'clock_out_longitude'       => $validated['longitude'],
             'clock_out_distance_meters' => $distance !== null ? round($distance, 2) : null,
+            'clock_out_accuracy_meters' => isset($validated['accuracy']) ? round((float) $validated['accuracy'], 2) : null,
             'breaks'                    => $breaks,
             'total_break_minutes'       => $breakMinutes,
             'worked_minutes'            => $workedMinutes,
-            'status'                    => 'completed',
+            'flags'                     => $flags ?: null,
+            'flagged_reason'            => TimeEntry::describeFlags($flags),
+            'status'                    => $flags ? 'flagged' : 'completed',
         ]);
 
         return response()->json([
@@ -374,6 +446,34 @@ class TimeClockController extends Controller
     }
 
     /**
+     * GET /api/v1/admin/attendance/live
+     * Who is in right now, for the outlets the caller manages: every open
+     * entry with how long, on break or not, and any flags on the punch.
+     */
+    public function live(Request $request): JsonResponse
+    {
+        $user  = $request->user();
+        $query = TimeEntry::with(['user:id,first_name,last_name,avatar_url', 'outlet:id,name,outlet_type'])
+            ->active()
+            ->orderBy('clock_in_at');
+
+        if (!$user->can('outlets.all_access')) {
+            $managedOutletIds = DB::table('outlet_user')->where('user_id', $user->id)->pluck('outlet_id');
+            $query->whereIn('outlet_id', $managedOutletIds);
+        }
+
+        $entries = $query->get();
+
+        return response()->json([
+            'data'        => $entries->map(fn ($e) => $this->transformEntry($e, withUser: true)),
+            'count'       => $entries->count(),
+            'on_break'    => $entries->filter(fn ($e) => $e->hasOpenBreak())->count(),
+            'flagged'     => $entries->filter(fn ($e) => !empty($e->flags))->count(),
+            'server_time' => now()->toIso8601String(),
+        ]);
+    }
+
+    /**
      * PUT /api/v1/admin/attendance/entries/{id}
      * Manager correction: adjust clock times, resolve a flag, add notes.
      */
@@ -393,14 +493,22 @@ class TimeClockController extends Controller
 
         if (isset($validated['clock_in_at']))  $entry->clock_in_at  = $validated['clock_in_at'];
         if (array_key_exists('clock_out_at', $validated)) $entry->clock_out_at = $validated['clock_out_at'];
-        if (isset($validated['status']))       $entry->status       = $validated['status'];
+        if (isset($validated['status'])) {
+            $entry->status = $validated['status'];
+            if ($validated['status'] === 'completed') {
+                // The manager has looked: the reasons stay in the audit trail
+                // (activity_log keeps the before image) but no longer flag.
+                $entry->flags = null;
+                $entry->flagged_reason = null;
+            }
+        }
         if (array_key_exists('notes', $validated)) $entry->notes    = $validated['notes'];
 
         // Recompute worked time if either timestamp moved and we now have both ends.
         if ($entry->clock_in_at && $entry->clock_out_at) {
             $breakMinutes        = $entry->calculateBreakMinutes();
             $entry->total_break_minutes = $breakMinutes;
-            $entry->worked_minutes      = max(0, $entry->clock_in_at->diffInMinutes($entry->clock_out_at) - $breakMinutes);
+            $entry->worked_minutes      = max(0, (int) $entry->clock_in_at->diffInMinutes($entry->clock_out_at) - $breakMinutes);
             if ($entry->status === 'active') {
                 $entry->status = 'completed';
             }
@@ -433,6 +541,32 @@ class TimeClockController extends Controller
         abort_if(!$managed, 403, 'You do not manage this outlet.');
     }
 
+    /**
+     * The moment a punch counts from. A punch sent live counts from now. A
+     * punch the phone made offline carries its own time; that time is used,
+     * bounded to [now − late_sync_max_hours, now] (and never before the
+     * clock-in it closes), and the entry is flagged "sent_late" when the two
+     * clocks differ by more than late_sync_minutes.
+     *
+     * @return array{0: Carbon, 1: ?Carbon, 2: bool} [punch time, phone time as sent, late?]
+     */
+    private function punchTime(?string $recordedAt, ?Carbon $notBefore = null): array
+    {
+        $now = now();
+        if ($recordedAt === null) {
+            return [$now, null, false];
+        }
+        $sent  = Carbon::parse($recordedAt)->setTimezone(config('app.timezone'));
+        $floor = $now->copy()->subHours((int) config('attendance.late_sync_max_hours'));
+        if ($notBefore && $notBefore->gt($floor)) {
+            $floor = $notBefore->copy();
+        }
+        $punch = $sent->lt($floor) ? $floor : ($sent->gt($now) ? $now->copy() : $sent->copy());
+        $late  = abs($now->diffInMinutes($sent, false)) > (int) config('attendance.late_sync_minutes');
+
+        return [$punch, $sent, $late];
+    }
+
     private function formatMinutes(int $minutes): string
     {
         $h = intdiv($minutes, 60);
@@ -455,6 +589,10 @@ class TimeClockController extends Controller
             'elapsed_minutes'         => $entry->elapsedMinutes(),
             'on_break'                => $entry->hasOpenBreak(),
             'flagged_reason'          => $entry->flagged_reason,
+            'flags'                   => $entry->flags ?? [],
+            'flag_labels'             => array_values(array_filter(array_map(fn ($f) => TimeEntry::FLAG_LABELS[$f] ?? null, $entry->flags ?? []))),
+            'clock_in_accuracy_meters'=> $entry->clock_in_accuracy_meters,
+            'auto_closed_at'          => $entry->auto_closed_at?->toIso8601String(),
             'notes'                   => $entry->notes,
         ];
 
@@ -472,6 +610,11 @@ class TimeClockController extends Controller
             $data['clock_out_latitude']          = $entry->clock_out_latitude;
             $data['clock_out_longitude']         = $entry->clock_out_longitude;
             $data['clock_out_distance_meters']   = $entry->clock_out_distance_meters;
+            $data['clock_out_accuracy_meters']   = $entry->clock_out_accuracy_meters;
+            $data['clock_in_recorded_at']        = $entry->clock_in_recorded_at?->toIso8601String();
+            $data['clock_out_recorded_at']       = $entry->clock_out_recorded_at?->toIso8601String();
+            $data['device_info']                 = $entry->device_info;
+            $data['app_version']                 = $entry->app_version;
             $data['overridden_by']               = $entry->overriddenBy ? trim("{$entry->overriddenBy->first_name} {$entry->overriddenBy->last_name}") : null;
             $data['corrected_by']                = $entry->correctedBy ? trim("{$entry->correctedBy->first_name} {$entry->correctedBy->last_name}") : null;
         }

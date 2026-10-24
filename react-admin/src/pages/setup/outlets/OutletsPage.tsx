@@ -62,7 +62,7 @@ const DEFAULTS: FormValues = {
     is_pickup_location: true,
     latitude: null,
     longitude: null,
-    geofence_radius_meters: 100,
+    geofence_radius_meters: 50,
 };
 
 const TYPE_LABELS = {
@@ -441,12 +441,12 @@ export default function OutletsPage() {
                                     placeholder="36.8219460"
                                 />
                             </Field>
-                            <Field label="Geofence radius (m)" hint="Typical: 75-150m">
+                            <Field label="Clock-in zone (m)" hint="How close a phone must be to clock in. 50 m is the business default; 20 m is tighter than most phones can measure beside a building.">
                                 <FieldInput
                                     className="input"
                                     type="number"
                                     {...register("geofence_radius_meters", { valueAsNumber: true })}
-                                    placeholder="100"
+                                    placeholder="50"
                                 />
                             </Field>
                         </div>

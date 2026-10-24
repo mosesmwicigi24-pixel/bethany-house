@@ -14,34 +14,66 @@ class TimeEntry extends Model
         'user_id',
         'outlet_id',
         'clock_in_at',
+        'clock_in_recorded_at',
         'clock_in_latitude',
         'clock_in_longitude',
         'clock_in_distance_meters',
+        'clock_in_accuracy_meters',
         'clock_in_method',
         'clock_out_at',
+        'clock_out_recorded_at',
         'clock_out_latitude',
         'clock_out_longitude',
         'clock_out_distance_meters',
+        'clock_out_accuracy_meters',
         'breaks',
         'total_break_minutes',
         'worked_minutes',
         'status',
         'flagged_reason',
+        'flags',
         'notes',
         'device_info',
+        'device_id',
+        'app_version',
         'overridden_by',
         'corrected_by',
+        'auto_closed_at',
     ];
+
+    /**
+     * Why a manager should look at a punch. Stored as a list in `flags`;
+     * the human reading lands in `flagged_reason` when the entry closes.
+     */
+    public const FLAG_LABELS = [
+        'accuracy_low'  => 'Phone location was less precise than the clock-in zone',
+        'edge'          => 'Just outside the zone, within the phone\'s uncertainty',
+        'sent_late'     => 'Punch was made offline and sent later',
+        'mock_location' => 'Phone reported a mock location',
+        'auto_clock_out'=> 'Shift was closed automatically at the cut-off time',
+    ];
+
+    public static function describeFlags(array $flags): ?string
+    {
+        $labels = array_values(array_filter(array_map(fn ($f) => self::FLAG_LABELS[$f] ?? null, $flags)));
+        return $labels ? implode('; ', $labels) : null;
+    }
 
     protected $casts = [
         'clock_in_at'              => 'datetime',
         'clock_out_at'             => 'datetime',
+        'clock_in_recorded_at'     => 'datetime',
+        'clock_out_recorded_at'    => 'datetime',
+        'auto_closed_at'           => 'datetime',
+        'flags'                    => 'array',
         'clock_in_latitude'        => 'decimal:7',
         'clock_in_longitude'       => 'decimal:7',
         'clock_out_latitude'       => 'decimal:7',
         'clock_out_longitude'      => 'decimal:7',
         'clock_in_distance_meters' => 'decimal:2',
         'clock_out_distance_meters'=> 'decimal:2',
+        'clock_in_accuracy_meters' => 'decimal:2',
+        'clock_out_accuracy_meters'=> 'decimal:2',
         'breaks'                   => 'array',
     ];
 
@@ -68,6 +100,7 @@ class TimeEntry extends Model
     {
         return $this->belongsTo(User::class, 'corrected_by');
     }
+
 
     // =========================================================================
     // SCOPES
@@ -126,7 +159,7 @@ class TimeEntry extends Model
         $minutes = 0;
         foreach ($this->breaks ?? [] as $break) {
             if (!empty($break['started_at']) && !empty($break['ended_at'])) {
-                $minutes += Carbon::parse($break['started_at'])
+                $minutes += (int) Carbon::parse($break['started_at'])
                     ->diffInMinutes(Carbon::parse($break['ended_at']));
             }
         }
@@ -153,7 +186,7 @@ class TimeEntry extends Model
             return $this->worked_minutes ?? 0;
         }
 
-        $grossMinutes = $this->clock_in_at->diffInMinutes(now());
+        $grossMinutes = (int) $this->clock_in_at->diffInMinutes(now());
         return max(0, $grossMinutes - $this->calculateBreakMinutes());
     }
 }
