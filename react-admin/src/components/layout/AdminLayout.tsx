@@ -248,6 +248,11 @@ export function AdminLayout() {
     // The chat list is a screen too: no hub top bar or gutter on a phone (it
     // carries its own "Messages" header), but the tab bar stays.
     const phoneComms  = fillsWindow
+    // Desk: Messages collapses the admin sidebar to its icon rail so the
+    // three panes get the width (WhatsApp Web's shape). The rail's toggle
+    // expands it again for this visit only; the saved preference is untouched.
+    const [commsExpanded, setCommsExpanded] = useState(false)
+    const effectiveCollapsed = fillsWindow ? !commsExpanded : collapsed
 
     return (
         // h-screen-safe, not h-screen: the --vh machinery below has always been
@@ -296,15 +301,15 @@ export function AdminLayout() {
 
             {/* Desktop sidebar - in normal document flow */}
             <div className="hidden md:flex md:flex-col md:h-full md:shrink-0">
-                <Sidebar collapsed={collapsed} />
+                <Sidebar collapsed={effectiveCollapsed} />
             </div>
 
             {/* ── Main column ───────────────────────────────────────── */}
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                 <div className={phoneComms ? 'max-sm:hidden' : undefined}>
                     <Topbar
-                        collapsed={collapsed}
-                        onToggleCollapse={() => setCollapsed((v) => !v)}
+                        collapsed={effectiveCollapsed}
+                        onToggleCollapse={() => (fillsWindow ? setCommsExpanded((v) => !v) : setCollapsed((v) => !v))}
                         onMobileMenuToggle={() => setMobileOpen((v) => !v)}
                         breadcrumbs={breadcrumbs}
                     />
