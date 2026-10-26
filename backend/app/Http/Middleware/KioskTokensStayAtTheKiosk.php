@@ -20,7 +20,9 @@ class KioskTokensStayAtTheKiosk
     {
         $user = $request->user("sanctum");
         $token = $user?->currentAccessToken();
-        if ($token && method_exists($token, 'can') && !$token->can('*') && $token->can('kiosk') && !$request->is('api/v1/admin/kiosk', 'api/v1/admin/kiosk/*')) {
+        // Abilities read off the row, not through can(): that word is for Spatie permissions here.
+        $abilities = $token ? (array) ($token->abilities ?? []) : [];
+        if ($abilities && !in_array('*', $abilities, true) && in_array('kiosk', $abilities, true) && !$request->is('api/v1/admin/kiosk', 'api/v1/admin/kiosk/*')) {
             return response()->json(['message' => 'This tablet is set up as a clock-in kiosk. Sign in on your own device for the rest of the hub.'], 403);
         }
 
