@@ -10,6 +10,8 @@ use App\Models\PayrollLine;
 use App\Models\PayrollRun;
 use App\Models\PayStructure;
 use App\Models\PublicHoliday;
+use App\Models\AdvanceRepayment;
+use App\Models\StaffAdvance;
 use App\Models\StatutoryRateTable;
 use App\Models\Timesheet;
 use App\Models\User;
@@ -63,7 +65,12 @@ class Payroll
      * One person's line. $hours is the timesheet snapshot totals; $rates the
      * rows from StatutoryRateTable::inForce.
      */
-    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates): array
+    /**
+     * $deductions: [{advance_id, label, amount}] already capped by the caller
+     * (self::advanceDeductions). They come off net only; never off gross or
+     * taxable pay.
+     */
+    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates, array $deductions = []): array
     {
         $r2 = fn (float $v) => round($v, 2);
         $workingDays = self::workingDays($period);
@@ -145,7 +152,18 @@ class Payroll
             if ($amt > 0) $items[] = ['label' => $label, 'amount' => -$amt, 'kind' => 'deduction'];
         }
 
-        $net = $r2($gross - $paye - $nssfEmp - $shif - $hlEmp);
+        $netBefore = $r2($gross - $paye - $nssfEmp - $shif - $hlEmp);
+        // Advance and loan instalments: never more than what is left, in the order given.
+        $other = 0.0; $taken = [];
+        foreach ($deductions as $d) {
+            $amt = $r2(min((float) $d['amount'], max(0.0, $netBefore - $other)));
+            if ($amt <= 0) continue;
+            $other += $amt;
+            $taken[] = ['advance_id' => $d['advance_id'], 'label' => $d['label'], 'amount' => $amt];
+            $items[] = ['label' => $d['label'], 'amount' => -$amt, 'kind' => 'deduction'];
+        }
+        $other = $r2($other);
+        $net = $r2($netBefore - $other);
         $employerCost = $r2($gross + $nssfEr + $hlEr);
 
         return [
@@ -153,10 +171,10 @@ class Payroll
                 'hourly_equivalent' => $r2($hourly), 'working_days_in_period' => $workingDays, 'service_fraction' => $fraction,
                 'multipliers' => ['overtime' => (float) $group->overtime_multiplier, 'rest_day' => (float) $group->rest_day_multiplier, 'holiday' => (float) $group->holiday_multiplier]],
             'hours' => $hours,
-            'items' => $items,
+            'items' => $items, 'deductions' => $taken,
             'basic' => $basic, 'overtime_pay' => $overtime, 'rest_day_pay' => $rest, 'holiday_pay' => $holiday, 'allowances' => $r2($allowTotal), 'unpaid_deduction' => $unpaid,
             'gross' => $gross, 'taxable' => $taxable, 'paye' => $paye, 'nssf_employee' => $nssfEmp, 'nssf_employer' => $nssfEr, 'shif' => $shif,
-            'housing_employee' => $hlEmp, 'housing_employer' => $hlEr, 'other_deductions' => 0.0, 'net' => $net, 'employer_cost' => $employerCost,
+            'housing_employee' => $hlEmp, 'housing_employer' => $hlEr, 'other_deductions' => $other, 'net' => $net, 'employer_cost' => $employerCost,
         ];
     }
 
@@ -190,7 +208,7 @@ class Payroll
                 if (!$s)     { $unpayable[] = ['id' => $u->id, 'name' => trim("{$u->first_name} {$u->last_name}"), 'why' => 'No pay structure']; continue; }
                 $hours = ['regular_minutes' => (int) $sheet->regular_minutes, 'overtime_minutes' => (int) $sheet->overtime_minutes, 'rest_day_minutes' => (int) $sheet->rest_day_minutes,
                     'holiday_minutes' => (int) $sheet->holiday_minutes, 'paid_leave_days' => (float) $sheet->paid_leave_days, 'unpaid_leave_days' => (float) $sheet->unpaid_leave_days, 'days_worked' => (int) $sheet->days_worked];
-                $line = self::computeLine($u, $period, $group, $s, $hours, $rates);
+                $line = self::computeLine($u, $period, $group, $s, $hours, $rates, self::advanceDeductions($u));
                 PayrollLine::create($line + ['payroll_run_id' => $run->id, 'user_id' => $u->id, 'timesheet_id' => $sheet->id]);
                 foreach (PayrollRun::MONEY as $c) $totals[$c] += (float) $line[$c];
                 $n++;
@@ -228,6 +246,7 @@ class Payroll
                 'notes'          => 'Labour cost of a payroll run. Net pay and statutory remittances are liabilities until paid.',
             ]);
             $run->update(['status' => 'approved', 'approved_by' => $by->id, 'approved_at' => now(), 'expense_id' => $expense->id]);
+            self::recordRepayments($run, $by);
             ActivityLogService::log('payroll_run_approved', $run, ['people' => $run->people, 'gross' => (string) $run->gross, 'net' => (string) $run->net, 'employer_cost' => (string) $run->employer_cost, 'expense_id' => $expense->id],
                 "{$by->first_name} approved payroll {$run->reference}: {$run->people} people, employer cost {$run->employer_cost}");
             return $run->fresh();
@@ -282,6 +301,56 @@ class Payroll
             elseif ($run->expense->status === 'paid' && $run->status !== 'paid') $breaks[] = 'expense is paid but the run is not';
         }
         return $breaks;
+    }
+
+    /** Instalments due from this person's paid-out advances and loans, oldest first. */
+    public static function advanceDeductions(User $user): array
+    {
+        return StaffAdvance::where('user_id', $user->id)->where('status', 'paid')->where('balance', '>', 0)->orderBy('paid_at')->orderBy('id')->get()
+            ->map(fn (StaffAdvance $a) => ['advance_id' => $a->id, 'label' => ($a->kind === 'loan' ? 'Loan instalment' : 'Advance repayment') . " #{$a->id}", 'amount' => round(min((float) $a->instalment, (float) $a->balance), 2)])
+            ->values()->all();
+    }
+
+    /** On approval: one repayment row per (line, advance); the unique index makes a retry a no-op. */
+    public static function recordRepayments(PayrollRun $run, User $by): void
+    {
+        foreach ($run->lines()->get() as $line) {
+            foreach ($line->deductions ?? [] as $d) {
+                $exists = AdvanceRepayment::where('staff_advance_id', $d['advance_id'])->where('payroll_line_id', $line->id)->exists();
+                if ($exists) continue;
+                AdvanceRepayment::create(['staff_advance_id' => $d['advance_id'], 'payroll_line_id' => $line->id, 'kind' => 'payroll', 'amount' => $d['amount'], 'recorded_on' => $run->period->ends_on->toDateString(), 'reference' => $run->reference, 'recorded_by' => $by->id]);
+                self::refreshAdvance(StaffAdvance::find($d['advance_id']));
+            }
+        }
+    }
+
+    public static function refreshAdvance(?StaffAdvance $a): void
+    {
+        if (!$a) return;
+        $balance = $a->rebuiltBalance();
+        $a->balance = $balance;
+        if ($balance <= 0 && $a->status === 'paid') { $a->status = 'settled'; $a->settled_at = now(); }
+        $a->save();
+    }
+
+    /** The one place a run's payout rows are built: unpaid lines whose file carries the details for $method. */
+    public static function payoutRows(PayrollRun $run, string $method): array
+    {
+        $ready = []; $missing = [];
+        foreach ($run->lines()->with('user.employeeProfile')->whereNull('paid_at')->get() as $l) {
+            $p = $l->user?->employeeProfile;
+            $name = trim(($l->user?->first_name ?? '') . ' ' . ($l->user?->last_name ?? ''));
+            if (($p?->pay_method ?? null) !== $method) continue;
+            if ((float) $l->net <= 0) continue;
+            if ($method === 'mpesa') {
+                if (!$p->mpesa_phone) { $missing[] = $name; continue; }
+                $ready[] = ['line_id' => $l->id, 'name' => $name, 'phone' => preg_replace('/\D/', '', $p->mpesa_phone), 'amount' => number_format((float) $l->net, 2, '.', ''), 'reference' => $run->reference];
+            } else {
+                if (!$p->bank_account_no || !$p->bank_name) { $missing[] = $name; continue; }
+                $ready[] = ['line_id' => $l->id, 'name' => $name, 'account_name' => $p->bank_account_name ?: $name, 'bank' => $p->bank_name, 'branch' => $p->bank_branch, 'account_no' => $p->bank_account_no, 'amount' => number_format((float) $l->net, 2, '.', ''), 'reference' => $run->reference];
+            }
+        }
+        return ['rows' => $ready, 'missing' => $missing];
     }
 
     private static function nextReference(PayPeriod $period): string

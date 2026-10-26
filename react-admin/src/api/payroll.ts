@@ -126,3 +126,32 @@ export const KIND_LABEL: Record<StructureKind, string> = { monthly: "Monthly sal
 export function saveBlob(blob: Blob, name: string) {
     const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
 }
+
+// ── Advances, payouts and returns (People PR 7) ──
+export type AdvanceStatus = "requested" | "approved" | "paid" | "settled" | "declined" | "cancelled";
+export interface Advance {
+    id: number; kind: "advance" | "loan"; status: AdvanceStatus; amount: number; instalment: number; balance: number; reason: string | null;
+    requested_at: string | null; decided_at: string | null; decision_note: string | null; paid_at: string | null; payment_method: string | null; payment_reference: string | null; settled_at: string | null;
+    repayments: { id: number; kind: "payroll" | "cash"; amount: number; on: string; reference: string | null }[];
+    user?: { id: number; name?: string }; decided_by?: string | null;
+}
+export interface PayoutReadiness { mpesa: { ready: number; total: string; missing: string[] }; bank: { ready: number; total: string; missing: string[] }; cash: number; no_pay_method: string[] }
+export type ReturnKind = "paye" | "nssf" | "shif" | "housing_levy";
+
+export const advancesApi = {
+    mine: () => get<{ data: Advance[]; open_balance: number }>("/v1/admin/me/advances"),
+    request: (data: { kind: "advance" | "loan"; amount: number; instalment?: number; reason: string }) => post<{ message: string; advance: Advance }>("/v1/admin/me/advances", data),
+    cancelMine: (id: number) => del<{ message: string }>(`/v1/admin/me/advances/${id}`),
+    list: (status?: string) => get<{ data: Advance[]; open_balance: number; can_run: boolean }>("/v1/admin/payroll/advances", { params: status ? { status } : undefined }),
+    create: (data: { user_id: number; kind: "advance" | "loan"; amount: number; instalment?: number; reason: string }) => post<{ message: string; advance: Advance }>("/v1/admin/payroll/advances", data),
+    approve: (id: number, data?: { instalment?: number; note?: string }) => post<{ message: string; advance: Advance }>(`/v1/admin/payroll/advances/${id}/approve`, data ?? {}),
+    decline: (id: number, note: string) => post<{ message: string; advance: Advance }>(`/v1/admin/payroll/advances/${id}/decline`, { note }),
+    payout: (id: number, data: { payment_method: "mpesa" | "bank" | "cash"; payment_reference?: string }) => post<{ message: string; advance: Advance }>(`/v1/admin/payroll/advances/${id}/payout`, data),
+    repay: (id: number, data: { amount: number; reference?: string }) => post<{ message: string; advance: Advance }>(`/v1/admin/payroll/advances/${id}/repay`, data),
+    payoutReadiness: (runId: number) => get<PayoutReadiness>(`/v1/admin/payroll/runs/${runId}/payout-readiness`),
+    payoutFile: (runId: number, method: "mpesa" | "bank") => get<Blob>(`/v1/admin/payroll/runs/${runId}/payout`, { params: { method }, responseType: "blob" }),
+    returns: (month: string, kind: ReturnKind) => get<Blob>("/v1/admin/payroll/returns", { params: { month, kind }, responseType: "blob" }),
+};
+export const ADVANCE_TONE: Record<AdvanceStatus, string> = { requested: "bg-warning-light text-warning", approved: "bg-info-light text-info", paid: "bg-brand-100 text-brand-700", settled: "bg-success-light text-success", declined: "bg-danger-light text-danger", cancelled: "bg-surface-100 text-surface-500" };
+export const ADVANCE_LABEL: Record<AdvanceStatus, string> = { requested: "Waiting", approved: "Approved", paid: "Paid out", settled: "Settled", declined: "Declined", cancelled: "Cancelled" };
+export const RETURN_LABEL: Record<ReturnKind, string> = { paye: "PAYE (P10 working file)", nssf: "NSSF", shif: "SHIF", housing_levy: "Housing Levy" };

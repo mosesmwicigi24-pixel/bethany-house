@@ -91,6 +91,12 @@ export const NAV: NavGroup[] = [
                 icon: "expenses",
                 // Ungated: /me/payslips is every staff member's own pay (PR 6); the PDF asks for a step-up.
             },
+            {
+                label: "My advances",
+                href: "/me/advances",
+                icon: "imprest",
+                // Ungated: /me/advances is every staff member's own requests (PR 7).
+            },
         ],
     },
 

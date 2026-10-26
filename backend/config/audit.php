@@ -148,6 +148,8 @@ return [
         \App\Models\StatutoryRateTable::class,
         \App\Models\PayrollRun::class,
         \App\Models\PayrollLine::class,
+        \App\Models\StaffAdvance::class,
+        \App\Models\AdvanceRepayment::class,
         // Catalogue & pricing
         \App\Models\Product::class,
         \App\Models\ProductVariant::class,
@@ -231,6 +233,8 @@ return [
         \App\Models\EmployeeProfile::class => ['national_id_no', 'kra_pin', 'nssf_no', 'shif_no', 'mpesa_phone', 'bank_account_no'],
         // Pay is sensitive (People PR 6): the log records that a line or structure changed, not the figures.
         \App\Models\PayStructure::class => ['base_amount', 'allowances'],
+        \App\Models\StaffAdvance::class => ['amount', 'instalment', 'balance'],
+        \App\Models\AdvanceRepayment::class => ['amount'],
         \App\Models\PayrollLine::class => ['structure', 'items', 'basic', 'overtime_pay', 'rest_day_pay', 'holiday_pay', 'allowances', 'unpaid_deduction', 'gross', 'taxable', 'paye', 'nssf_employee', 'nssf_employer', 'shif', 'housing_employee', 'housing_employer', 'other_deductions', 'net', 'employer_cost'],
     ],
 
@@ -328,6 +332,8 @@ return [
             'OrderController@exportCsv',
             'TimesheetController@export',
             'PayrollController@payslip',
+            'PayrollController@payoutFile',
+            'PayrollController@returns',
             'PaymentController@exportTransactions',
             'PurchaseOrderController@grnPDF',
             'ReportController@exportPDF',
