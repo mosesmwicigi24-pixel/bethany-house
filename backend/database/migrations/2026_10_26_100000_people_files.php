@@ -103,7 +103,7 @@ return new class extends Migration
             ] as $date => $name) {
                 $rows[] = ['date' => $date, 'name' => $name];
             }
-            $easter = (new DateTimeImmutable("$y-03-21"))->modify('+' . easter_days($y) . ' days');
+            $easter = self::easterSunday($y);
             $rows[] = ['date' => $easter->modify('-2 days')->format('Y-m-d'), 'name' => 'Good Friday'];
             $rows[] = ['date' => $easter->modify('+1 day')->format('Y-m-d'), 'name' => 'Easter Monday'];
         }
@@ -111,6 +111,22 @@ return new class extends Migration
         DB::table('public_holidays')->insertOrIgnore(array_map(fn ($r) => $r + [
             'country' => 'KE', 'is_confirmed' => true, 'created_at' => $now, 'updated_at' => $now,
         ], $rows));
+    }
+
+    /**
+     * Easter Sunday (Gregorian) by the anonymous algorithm. Written out
+     * because the production PHP image has no `calendar` extension, so
+     * easter_days() is undefined there: the first version of this migration
+     * failed on the box every minute while the old containers kept running.
+     */
+    private static function easterSunday(int $y): DateTimeImmutable
+    {
+        $a = $y % 19; $b = intdiv($y, 100); $c = $y % 100;
+        $d = intdiv($b, 4); $e = $b % 4; $f = intdiv($b + 8, 25); $g = intdiv($b - $f + 1, 3);
+        $h = (19 * $a + $b - $d - $g + 15) % 30; $i = intdiv($c, 4); $k = $c % 4;
+        $l = (32 + 2 * $e + 2 * $i - $h - $k) % 7; $m = intdiv($a + 11 * $h + 22 * $l, 451);
+        $month = intdiv($h + $l - 7 * $m + 114, 31); $day = (($h + $l - 7 * $m + 114) % 31) + 1;
+        return new DateTimeImmutable(sprintf('%04d-%02d-%02d', $y, $month, $day));
     }
 
     public function down(): void
