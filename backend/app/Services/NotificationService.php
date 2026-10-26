@@ -399,6 +399,44 @@ class NotificationService
     }
 
     /**
+     * Money settled onto an order that was already cancelled/voided/refunded
+     * (App\Services\Payments\LatePayment). The order stays dead; finance has a
+     * refund to make. Everyone in finance hears it, the actor included — the
+     * refund is the team's job, not only whoever pressed approve.
+     */
+    public static function paymentAfterCancel(
+        int $paymentId,
+        string $paymentNumber,
+        int $orderId,
+        string $orderNumber,
+        string $orderStatus,
+        float $amount,
+        string $currency,
+        string $method
+    ): void {
+        $formatted = number_format($amount, 2);
+        self::send(
+            self::holding(self::resolve(self::FINANCE, null, [], false), 'payments.view'),
+            new InAppNotification(
+                title:     "Paid after cancel — refund needed: {$currency} {$formatted}",
+                body:      "{$currency} {$formatted} (" . strtoupper(str_replace('_', ' ', $method)) . ") arrived for order #{$orderNumber} after it was {$orderStatus}. "
+                         . "The money is recorded and the order stays {$orderStatus}. Refund the customer.",
+                actionUrl: "/sales/orders/{$orderId}",
+                icon:      'payment',
+                data:      [
+                    'kind'           => 'payment_after_cancel',
+                    'payment_id'     => $paymentId,
+                    'payment_number' => $paymentNumber,
+                    'order_id'       => $orderId,
+                    'order_number'   => $orderNumber,
+                    'amount'         => $amount,
+                    'currency'       => $currency,
+                ],
+            )
+        );
+    }
+
+    /**
      * Fired when an international payment requires admin approval.
      */
     public static function paymentApprovalRequired(

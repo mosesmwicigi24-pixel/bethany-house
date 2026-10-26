@@ -40,6 +40,11 @@ class PaymentController extends Controller
 
         $order = Order::findOrFail($id);
 
+        // No STK push, card or Flutterwave session for a dead order (Order::isPayable).
+        if ($refusal = \App\Support\PaymentGate::refuseStaff($order)) {
+            return $refusal;
+        }
+
         if ($order->payment_status === 'paid') {
             return response()->json(['message' => 'Order already paid'], 422);
         }
@@ -190,7 +195,9 @@ class PaymentController extends Controller
             ]);
 
             return response()->json([
-                'message'        => 'M-Pesa payment confirmed successfully.',
+                'message'        => $order->fresh()->isPayable()
+                    ? 'M-Pesa payment confirmed successfully.'
+                    : \App\Support\PaymentGate::lateMessage($order->fresh()),
                 'payment_status' => $order->fresh()->payment_status,
                 'payment'        => $payment->fresh(),
             ]);
@@ -289,7 +296,9 @@ class PaymentController extends Controller
             } catch (\Exception) {}
 
             return response()->json([
-                'message'        => 'Paystack payment confirmed successfully.',
+                'message'        => $order->fresh()->isPayable()
+                    ? 'Paystack payment confirmed successfully.'
+                    : \App\Support\PaymentGate::lateMessage($order->fresh()),
                 'payment_status' => $order->fresh()->payment_status,
                 'payment'        => $payment->fresh(),
             ]);

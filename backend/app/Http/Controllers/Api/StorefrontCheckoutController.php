@@ -112,7 +112,7 @@ class StorefrontCheckoutController extends Controller
                 return response()->json([
                     'message'      => 'Order already placed',
                     'order'        => $this->orderSummary($existing),
-                    'payment_link' => $this->paymentLink($existing->payment_token),
+                    'payment_link' => $existing->isPayable() ? $this->paymentLink($existing->payment_token) : null,
                 ], 200);
             }
         }
@@ -481,7 +481,8 @@ class StorefrontCheckoutController extends Controller
             'currency_code'  => $order->currency_code,
             'total_amount'   => $order->total_amount,
             'invoice_number' => $invoice?->number,
-            'payment_link'   => $order->payment_status !== 'paid' ? $this->paymentLink($order->payment_token) : null,
+            // A dead order offers no pay-link (Order::isPayable).
+            'payment_link'   => $order->payment_status !== 'paid' && $order->isPayable() ? $this->paymentLink($order->payment_token) : null,
             'shipment'       => $shipment ? [
                 'status'                  => $shipment->status,
                 'carrier'                 => $shipment->carrier,

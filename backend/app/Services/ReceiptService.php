@@ -50,6 +50,14 @@ class ReceiptService
 
     public static function onPaymentSettled(Order $order, Payment $payment, ?int $userId = null): ?SalesDocument
     {
+        // Money that lands on a dead order (a push approved before the cancel)
+        // is recorded and flagged for a refund (LatePayment). It is not a sale:
+        // no receipt against a voided invoice, no stock leaving the shelf, and
+        // the invoice must not flip from void to paid.
+        if (!$order->isPayable()) {
+            return null;
+        }
+
         $invoiceDoc = SalesDocument::where('type', SalesDocument::INVOICE)
             ->where('documentable_type', Order::class)
             ->where('documentable_id', $order->id)

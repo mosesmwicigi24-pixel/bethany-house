@@ -117,7 +117,8 @@ class StorefrontLookupController extends Controller
     {
         $shipment = $order->shipments()->orderByDesc('id')->first();
         $invoice  = $order->invoiceDocument()->first();
-        $unpaid   = $order->payment_status !== 'paid';
+        // "Unpaid" here means "offer the pay-link": never for a dead order (Order::isPayable).
+        $unpaid   = $order->payment_status !== 'paid' && $order->isPayable();
 
         return [
             'order_number'   => $order->order_number,

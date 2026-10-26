@@ -1247,6 +1247,27 @@ class MetricEngine
                 o.customer_id, p.created_at AS date, {$payKes} AS amount")
                 ->orderBy('p.created_at')->limit($limit)->get()->all());
 
+        // 8b. Money that arrived after its order was cancelled (LatePayment):
+        //     a push approved before the cancel. In Collected — it is money
+        //     received — and in no Sold figure or balance, because the order
+        //     is dead. Until it is refunded, Collected exceeds Sold by it.
+        $late = DB::table('payments as p')->join('orders as o', 'o.id', '=', 'p.order_id')
+            ->whereNotNull('p.received_after_cancel_at')
+            ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'p'))
+            ->whereRaw('p.amount - COALESCE(p.refund_amount, 0) > 0.005')
+            ->when($this->outletIds, fn ($q) => $q->whereIn('o.outlet_id', $this->outletIds));
+        $lateKes = \App\Support\ReportingCurrency::kes('(p.amount - COALESCE(p.refund_amount, 0))', 'p.currency_code');
+        $agg = (clone $late)->selectRaw("COUNT(*) AS n, COALESCE(SUM({$lateKes}),0) AS v")->first();
+        $add('paid_after_cancel', [
+            'group' => 'money', 'scope' => 'current', 'outlet' => true, 'severity' => 'high',
+            'title'   => 'Paid after cancel — refund needed',
+            'affects' => 'Collected includes this money; Sold and the order balances do not — the order is cancelled. Refund the customer.',
+            'fix'     => ['label' => 'Refund it from the order', 'to' => null, 'permission' => null],
+        ], (int) $agg->n, (float) $agg->v,
+            (clone $late)->selectRaw("'payment' AS kind, p.id, p.payment_number AS ref, p.payment_number, p.order_id,
+                o.customer_id, p.received_after_cancel_at AS date, {$lateKes} AS amount")
+                ->orderBy('p.received_after_cancel_at')->limit($limit)->get()->all());
+
         // 9. Expenses awaiting approval: not spend, so not in any expense
         //    figure or margin. Expense money stays behind reports.financial.
         if ($withFinancial) {

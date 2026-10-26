@@ -4067,6 +4067,11 @@ class PosController extends Controller
         $order = $this->findPosSaleForAction($id);
         $this->authoriseOutletAccess($request->user(), $order->outlet_id);
 
+        // A dead order takes no payment at the till either (Order::isPayable).
+        if ($refusal = \App\Support\PaymentGate::refuseStaff($order)) {
+            return $refusal;
+        }
+
         if (!in_array($order->payment_status, ['pending', 'partial', 'deposit'])) {
             return response()->json(['message' => 'Order is already paid or cannot accept further payments.'], 422);
         }

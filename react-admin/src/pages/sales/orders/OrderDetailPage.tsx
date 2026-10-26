@@ -3845,6 +3845,18 @@ export default function OrderDetailPage() {
     const outstanding = Math.max(0, order.total_amount - totalPaid);
     const canAddPayment = outstanding > 0 && !["cancelled", "voided", "refunded"].includes(order.status);
 
+    // Owner, 2026-10-26: a dead order takes no payment — no link, nothing
+    // recorded. The API refuses as well (Order::isPayable); this says why
+    // instead of leaving the buttons silently missing.
+    const isDeadOrder = ["cancelled", "voided", "refunded"].includes(order.status);
+    const paymentsClosedReason = isDeadOrder
+        ? `Payments are closed — this order is ${order.status}. A payment can't be taken or recorded against it.`
+        : null;
+    // Money that settled after the cancel (a push approved before it), not yet refunded back.
+    const isLateUnrefunded = (p: any) =>
+        !!p.received_after_cancel_at && Number(p.refund_amount ?? 0) + 0.005 < Number(p.amount);
+    const lateUnrefunded = ((order as any).payments ?? []).filter(isLateUnrefunded);
+
     // Payments awaiting admin approval - blocks order progression
     const pendingApprovalPayments = ((order as any).payments ?? []).filter(
         (p: any) => p.requires_approval && p.approval_status === "pending_review"
@@ -4715,7 +4727,19 @@ export default function OrderDetailPage() {
                                         + Record Payment
                                     </button>
                                 )}
+                                {paymentsClosedReason && (
+                                    <p className="text-2xs text-surface-500 text-right max-w-xs">{paymentsClosedReason}</p>
+                                )}
                             </div>
+                            {lateUnrefunded.length > 0 && (
+                                <div className="mb-4 rounded-xl border border-danger/30 bg-danger-light px-4 py-3 text-xs text-danger">
+                                    <p className="font-semibold">Paid after cancel — refund needed</p>
+                                    <p className="mt-0.5">
+                                        {fmt(lateUnrefunded.reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0), cc)}
+                                        {" "}arrived after this order was {order.status}. The money is recorded and the order stays {order.status} — refund the customer.
+                                    </p>
+                                </div>
+                            )}
                             {order.payments && order.payments.length > 0 ? (
                                 <div className="rounded-xl border border-line overflow-hidden">
                                     <div className="overflow-x-auto">
@@ -4777,6 +4801,12 @@ export default function OrderDetailPage() {
                                                             {p.requires_approval && p.approval_status !== "approved" ? "pending approval" : p.status}
                                                         </span>
                                                         {p.refund_amount > 0 && <p className="text-2xs text-danger mt-0.5">-{fmt(p.refund_amount, cc)} refunded</p>}
+                                                        {p.received_after_cancel_at && (
+                                                            <span className={clsx("mt-1 inline-flex items-center text-2xs font-semibold px-2 py-0.5 rounded-full",
+                                                                isLateUnrefunded(p) ? "bg-danger-light text-danger" : "bg-surface-100 text-surface-500")}>
+                                                                {isLateUnrefunded(p) ? "Paid after cancel — refund needed" : "Paid after cancel — refunded"}
+                                                            </span>
+                                                        )}
                                                         {p.status === "pending" && p.payment_method === "mpesa" && (
                                                             <button onClick={() => setVerifyingPaymentId(p.id)} className="mt-1 block text-2xs text-brand-600 hover:underline font-medium">Verify with Daraja →</button>
                                                         )}
@@ -5013,6 +5043,9 @@ export default function OrderDetailPage() {
                                         className="w-full text-xs py-2 rounded-lg border border-success/30 bg-success-light text-success-dark hover:bg-success/20 font-semibold transition-colors">
                                         + Record Payment
                                     </button>
+                                )}
+                                {paymentsClosedReason && (
+                                    <p className="text-2xs text-surface-500 text-center">{paymentsClosedReason}</p>
                                 )}
                                 {outstanding > 0 && !order.deposit_amount && order.payment_status === "pending" && (
                                     <button onClick={() => setShowDepositModal(true)}

@@ -162,7 +162,10 @@ class InvoiceController extends Controller
                 'order_number'   => $order->order_number,
                 'status'         => $order->status,
                 'payment_status' => $order->payment_status,   // pending | partial | paid …
-                'pay_token'      => $order->payment_token,
+                // No pay-link for a dead order (Order::isPayable) — the console
+                // hides the button; the null makes sure nothing can copy one.
+                'pay_token'      => $order->isPayable() ? $order->payment_token : null,
+                'payable'        => $order->isPayable(),
             ] : null,
             'customer_name'  => $customer ?: null,
             // Who issued it. Falls back to whoever raised the underlying order
