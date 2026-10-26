@@ -141,7 +141,7 @@ class MpesaVerifyOnResultTest extends TestCase
         $this->app['auth']->forgetGuards();
     }
 
-    private function result(array $overrides = [], array $params = []): array
+    private function darajaAnswer(array $overrides = [], array $params = []): array
     {
         $params += [
             'ReceiptNo'         => self::RECEIPT,
@@ -265,7 +265,7 @@ class MpesaVerifyOnResultTest extends TestCase
             'currency_code' => 'KES', 'created_by' => $this->staff->id]);
 
         $this->verify($order, $payment)->assertStatus(202);
-        $this->postResult($this->result());
+        $this->postResult($this->darajaAnswer());
 
         $payment->refresh();
         $this->assertSame('paid', $payment->status);
@@ -298,7 +298,7 @@ class MpesaVerifyOnResultTest extends TestCase
         $payment = $this->pendingMpesa($order, 1000);
         $this->verify($order, $payment)->assertStatus(202);
 
-        $this->postResult($this->result([], ['Amount' => 900]));
+        $this->postResult($this->darajaAnswer([], ['Amount' => 900]));
 
         $payment->refresh();
         $this->assertSame('pending', $payment->status);
@@ -325,7 +325,7 @@ class MpesaVerifyOnResultTest extends TestCase
         $payment = $this->pendingMpesa($order, 1000.50);
         $this->verify($order, $payment)->assertStatus(202);
 
-        $this->postResult($this->result([], ['Amount' => 1000]));
+        $this->postResult($this->darajaAnswer([], ['Amount' => 1000]));
 
         $this->assertSame('paid', $payment->fresh()->status);
     }
@@ -336,7 +336,7 @@ class MpesaVerifyOnResultTest extends TestCase
         $order   = $this->order();
         $failed  = $this->pendingMpesa($order);
         $this->verify($order, $failed)->assertStatus(202);
-        $this->postResult($this->result(['ResultCode' => 2001, 'ResultDesc' => 'The initiator information is invalid.'], ['TransactionStatus' => null]));
+        $this->postResult($this->darajaAnswer(['ResultCode' => 2001, 'ResultDesc' => 'The initiator information is invalid.'], ['TransactionStatus' => null]));
 
         $this->assertSame('pending', $failed->fresh()->status);
         $v = $this->verification($failed);
@@ -348,7 +348,7 @@ class MpesaVerifyOnResultTest extends TestCase
         // Same payment asked again; this time Safaricom says the money went back.
         $this->verify($order, $failed)->assertStatus(202);
         $this->assertSame('pending', $this->verification($failed)['state']);
-        $this->postResult($this->result([], ['TransactionStatus' => 'Reversed']));
+        $this->postResult($this->darajaAnswer([], ['TransactionStatus' => 'Reversed']));
 
         $this->assertSame('pending', $failed->fresh()->status);
         $v = $this->verification($failed);
@@ -364,7 +364,7 @@ class MpesaVerifyOnResultTest extends TestCase
         $payment = $this->pendingMpesa($order);
         $this->verify($order, $payment)->assertStatus(202);
 
-        $this->postResult($this->result([], ['CreditPartyName' => '123456 - Someone Else Ltd']));
+        $this->postResult($this->darajaAnswer([], ['CreditPartyName' => '123456 - Someone Else Ltd']));
 
         $this->assertSame('pending', $payment->fresh()->status);
         $this->assertSame('wrong_till', $this->verification($payment)['reason']);
@@ -383,7 +383,7 @@ class MpesaVerifyOnResultTest extends TestCase
             'provider_reference' => self::RECEIPT, 'payment_number' => 'PAY-TAKEN2',
         ]);
 
-        $this->postResult($this->result());
+        $this->postResult($this->darajaAnswer());
 
         $this->assertSame('pending', $payment->fresh()->status);
         $v = $this->verification($payment);
@@ -398,10 +398,10 @@ class MpesaVerifyOnResultTest extends TestCase
         $payment = $this->pendingMpesa($order);
         $this->verify($order, $payment)->assertStatus(202);
 
-        $this->postResult($this->result());
+        $this->postResult($this->darajaAnswer());
         $paidAt = $payment->fresh()->paid_at;
         $this->travel(5)->minutes();
-        $this->postResult($this->result());
+        $this->postResult($this->darajaAnswer());
 
         $this->assertEquals($paidAt, $payment->fresh()->paid_at);
         $this->assertSame(1, $this->events('mpesa_payment_verified'));
@@ -416,7 +416,7 @@ class MpesaVerifyOnResultTest extends TestCase
         $order   = $this->order();
         $payment = $this->pendingMpesa($order);
 
-        $this->postResult($this->result([
+        $this->postResult($this->darajaAnswer([
             'OriginatorConversationID' => 'OC-nobody', 'ConversationID' => 'AG_nobody', 'TransactionID' => 'ZZZ0000000',
         ], ['ReceiptNo' => 'ZZZ0000000']));
 
@@ -437,17 +437,17 @@ class MpesaVerifyOnResultTest extends TestCase
         $payment = $this->pendingMpesa($order);
         $this->verify($order, $payment)->assertStatus(202);
 
-        $this->postResult($this->result(['OriginatorConversationID' => 'OC-forged', 'ConversationID' => 'AG_forged']));
+        $this->postResult($this->darajaAnswer(['OriginatorConversationID' => 'OC-forged', 'ConversationID' => 'AG_forged']));
 
         $this->assertSame('pending', $payment->fresh()->status);
         $this->assertSame('unmatched', $this->verification($payment)['state']);
         $this->assertSame(1, $this->kindSentTo($this->staff, 'mpesa_verification_unmatched'));
 
         // Posted again: reported once, not twice.
-        $this->postResult($this->result(['OriginatorConversationID' => 'OC-forged', 'ConversationID' => 'AG_forged']));
+        $this->postResult($this->darajaAnswer(['OriginatorConversationID' => 'OC-forged', 'ConversationID' => 'AG_forged']));
         $this->assertSame(1, $this->kindSentTo($this->staff, 'mpesa_verification_unmatched'));
 
-        $this->postResult($this->result());
+        $this->postResult($this->darajaAnswer());
         $this->assertSame('paid', $payment->fresh()->status, "Safaricom's real answer still settles it");
     }
 
@@ -462,7 +462,7 @@ class MpesaVerifyOnResultTest extends TestCase
         $this->verify($order, $payment)->assertStatus(202);
         $this->assertSame('AG_second', $this->verification($payment)['conversation_id']);
 
-        $this->postResult($this->result());
+        $this->postResult($this->darajaAnswer());
 
         $this->assertSame('paid', $payment->fresh()->status);
     }
@@ -523,7 +523,7 @@ class MpesaVerifyOnResultTest extends TestCase
 
         // Cancelled while Safaricom was answering.
         $order->forceFill(['status' => 'cancelled', 'cancelled_at' => now()])->save();
-        $this->postResult($this->result());
+        $this->postResult($this->darajaAnswer());
 
         $payment->refresh();
         $this->assertSame('paid', $payment->status, 'real money is recorded, never refused');
