@@ -73,6 +73,12 @@ export const NAV: NavGroup[] = [
                 icon: "calendar",
                 // Ungated: /me/shifts is every staff member's own roster (PR 3).
             },
+            {
+                label: "My leave",
+                href: "/me/leave",
+                icon: "calendar",
+                // Ungated: /me/leave is every staff member's own time off (PR 4).
+            },
         ],
     },
 
@@ -516,6 +522,14 @@ export const NAV: NavGroup[] = [
                 icon: "calendar",
                 // Read with attendance.view_team; the page hides its buttons
                 // without roster.manage (People PR 3).
+                permission: "attendance.view_team",
+            },
+            {
+                label: "Leave",
+                href: "/leave",
+                icon: "calendar",
+                // Read with attendance.view_team; decisions are checked per
+                // person by the server (People PR 4).
                 permission: "attendance.view_team",
             },
             {

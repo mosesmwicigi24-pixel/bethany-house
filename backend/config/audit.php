@@ -138,6 +138,9 @@ return [
         \App\Models\PublicHoliday::class,
         \App\Models\Shift::class,
         \App\Models\ShiftSwapRequest::class,
+        \App\Models\LeaveType::class,
+        \App\Models\LeaveRequest::class,
+        \App\Models\LeaveAdjustment::class,
         // Catalogue & pricing
         \App\Models\Product::class,
         \App\Models\ProductVariant::class,

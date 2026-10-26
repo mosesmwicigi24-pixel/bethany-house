@@ -55,12 +55,23 @@ class RosterController extends Controller
         $holidays = PublicHoliday::whereBetween('date', [$start->toDateString(), $end->toDateString()])->get()
             ->mapWithKeys(fn ($h) => [$h->date->toDateString() => $h->name]);
 
+        // Approved (and pending) leave inside the week, per person and day (People PR 4).
+        $leave = [];
+        $leaveRows = \App\Models\LeaveRequest::with('type:id,name')->whereIn('user_id', $members->pluck('id'))->live()
+            ->where('starts_on', '<=', $end->toDateString())->where('ends_on', '>=', $start->toDateString())->get();
+        foreach ($leaveRows as $lr) {
+            foreach (\Carbon\CarbonPeriod::create($lr->starts_on, $lr->ends_on) as $d) {
+                if ($d->between($start, $end)) $leave[$lr->user_id][$d->toDateString()] = ['type' => $lr->type?->name, 'status' => $lr->status];
+            }
+        }
+
         return response()->json([
             'outlet'      => ['id' => $outlet->id, 'name' => $outlet->name, 'operating_hours' => $outlet->operating_hours],
             'week_start'  => $start->toDateString(),
             'week_end'    => $end->toDateString(),
             'days'        => collect(range(0, 6))->map(fn ($i) => $start->copy()->addDays($i)->toDateString())->values(),
             'holidays'    => $holidays,
+            'leave'       => (object) $leave,
             'members'     => $members->map(fn ($u) => ['id' => $u->id, 'name' => trim("{$u->first_name} {$u->last_name}"), 'job_title' => $u->employeeProfile?->job_title])->values(),
             'shifts'      => $shifts->map(fn ($s) => $this->shift($s))->values(),
             'open_count'  => $shifts->whereNull('user_id')->count(),

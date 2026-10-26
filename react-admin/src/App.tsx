@@ -175,6 +175,8 @@ const PersonPage = lazy(() => import("@/pages/people/PersonPage"));
 const HolidaysPage = lazy(() => import("@/pages/setup/holidays/HolidaysPage"));
 const RosterPage = lazy(() => import("@/pages/roster/RosterPage"));
 const ShiftsPage = lazy(() => import("@/pages/me/ShiftsPage"));
+const MyLeavePage = lazy(() => import("@/pages/me/LeavePage"));
+const LeaveAdminPage = lazy(() => import("@/pages/leave/LeaveAdminPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
 );
@@ -965,6 +967,24 @@ export default function App() {
                                 <ProtectedRoute permission="attendance.view_team">
                                 <Suspense fallback={<PageLoader />}>
                                     <RosterPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/me/leave"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <MyLeavePage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/leave"
+                            element={
+                                <ProtectedRoute permission="attendance.view_team">
+                                <Suspense fallback={<PageLoader />}>
+                                    <LeaveAdminPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

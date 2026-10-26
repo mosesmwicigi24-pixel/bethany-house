@@ -551,6 +551,31 @@ Route::prefix('v1')->group(function () {
             });
             Route::delete('/me/swaps/{id}', [\App\Http\Controllers\Api\RosterController::class, 'withdrawSwap'])->whereNumber('id');
 
+            // ── My leave (People PR 4) — every staff member ─────────────────
+            Route::prefix('me/leave')->group(function () {
+                $leave = \App\Http\Controllers\Api\LeaveController::class;
+                Route::get('/',           [$leave, 'mine']);
+                Route::get('/preview',    [$leave, 'preview']);
+                Route::post('/',          [$leave, 'store']);
+                Route::delete('/{id}',    [$leave, 'cancelMine'])->whereNumber('id');
+            });
+            Route::get('/leave/types',    [\App\Http\Controllers\Api\LeaveController::class, 'types']);
+            Route::middleware('permission:hr.edit,sanctum')->group(function () {
+                Route::put('/leave/types/{id}',  [\App\Http\Controllers\Api\LeaveController::class, 'updateType'])->whereNumber('id');
+                Route::post('/leave/adjustments', [\App\Http\Controllers\Api\LeaveController::class, 'adjust']);
+            });
+
+            // ── Leave, team side (People PR 4): read with attendance.view_team; decisions are checked per person ──
+            Route::middleware('permission:attendance.view_team,sanctum')->prefix('leave')->group(function () {
+                $leave = \App\Http\Controllers\Api\LeaveController::class;
+                Route::get('/requests',                 [$leave, 'requests']);
+                Route::get('/calendar',                 [$leave, 'calendar']);
+                Route::post('/requests',                [$leave, 'storeForPerson']);
+                Route::post('/requests/{id}/approve',   [$leave, 'approve'])->whereNumber('id');
+                Route::post('/requests/{id}/decline',   [$leave, 'decline'])->whereNumber('id');
+                Route::delete('/requests/{id}',         [$leave, 'cancel'])->whereNumber('id');
+            });
+
             // ── Roster (People PR 3): read with attendance.view_team, write with roster.manage ──
             Route::middleware('permission:attendance.view_team,sanctum')->prefix('roster')->group(function () {
                 $roster = \App\Http\Controllers\Api\RosterController::class;
@@ -573,6 +598,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',                                 [$people, 'index']);
                 Route::get('/documents/expiring',               [$people, 'expiring']);
                 Route::get('/{user}',                           [$people, 'show'])->whereNumber('user');
+                Route::get('/{user}/leave',                     [\App\Http\Controllers\Api\LeaveController::class, 'forPerson'])->whereNumber('user');
                 Route::put('/{user}',                           [$people, 'update'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
                 Route::get('/{user}/sensitive',                 [$people, 'sensitive'])->whereNumber('user')->middleware(['permission:hr.view_sensitive,sanctum', 'step.up']);
                 Route::put('/{user}/sensitive',                 [$people, 'updateSensitive'])->whereNumber('user')->middleware(['permission:hr.edit,sanctum', 'permission:hr.view_sensitive,sanctum', 'step.up']);

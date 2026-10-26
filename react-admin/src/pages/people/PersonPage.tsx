@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { peopleApi, type EmployeeProfileFields, type PersonFile } from "@/api/people";
 import { DocumentsCard } from "@/components/people/DocumentsCard";
+import { LeaveCard } from "@/components/people/LeaveCard";
 import { SensitiveCard } from "@/components/people/SensitiveCard";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
@@ -154,6 +155,8 @@ export default function PersonPage() {
                     />
                 </div>
             </div>
+
+            <LeaveCard userId={personId} />
 
             <DocumentsCard
                 documents={person.documents}

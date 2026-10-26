@@ -39,6 +39,8 @@ export interface RosterWeek {
     week_end: string;
     days: string[];
     holidays: Record<string, string>;
+    /** user id → date → leave on that day (People PR 4). */
+    leave: Record<string, Record<string, { type: string | null; status: "pending" | "approved" }>>;
     members: { id: number; name: string; job_title: string | null }[];
     shifts: Shift[];
     open_count: number;
