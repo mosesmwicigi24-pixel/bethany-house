@@ -32,11 +32,21 @@ const STATUS: Record<QuotationStatus, { label: string; badge: string }> = {
     converted: { label: "Converted", badge: "badge-success" },
     declined:  { label: "Declined",  badge: "badge-danger" },
     expired:   { label: "Expired",   badge: "badge-warning" },
+    void:      { label: "Void",      badge: "badge-danger" },
 };
 
-function StatusBadge({ status }: { status: QuotationStatus }) {
+/** Who voided it, when and why — on hover over the Void badge. */
+function voidNote(q: Quotation): string | undefined {
+    if (q.status !== "void") return undefined;
+    const who = `${q.voider?.first_name ?? ""} ${q.voider?.last_name ?? ""}`.trim();
+    const when = q.voided_at ? new Date(q.voided_at).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" }) : "";
+    return [`Voided with its invoice${who ? ` by ${who}` : ""}${when ? ` on ${when}` : ""}.`, q.void_reason ? `Reason: ${q.void_reason}` : ""]
+        .filter(Boolean).join(" ");
+}
+
+function StatusBadge({ status, title }: { status: QuotationStatus; title?: string }) {
     const s = STATUS[status] ?? { label: status, badge: "badge-neutral" };
-    return <span className={`badge ${s.badge}`}>{s.label}</span>;
+    return <span className={`badge ${s.badge}`} title={title}>{s.label}</span>;
 }
 
 function customerName(q: Quotation): string {
@@ -163,7 +173,12 @@ export default function QuotationsPage() {
                                     <tr key={q.id}>
                                         <td className="font-medium tabular-nums">{q.quote_number ?? "— (draft)"}</td>
                                         <td>{customerName(q)}</td>
-                                        <td><StatusBadge status={q.status} /></td>
+                                        <td>
+                                            <StatusBadge status={q.status} title={voidNote(q)} />
+                                            {q.status === "void" && q.void_reason && (
+                                                <div className="mt-0.5 max-w-[220px] truncate text-2xs text-surface-500" title={voidNote(q)}>{q.void_reason}</div>
+                                            )}
+                                        </td>
                                         <td className="text-right tabular-nums">{money(q.total_amount, q.currency_code)}</td>
                                         <td className="text-sm">{q.served_by ?? "—"}</td>
                                         <td>{q.valid_until ?? "—"}</td>
@@ -192,7 +207,7 @@ export default function QuotationsPage() {
                                                         Accept → Invoice
                                                     </button>
                                                 )}
-                                                {issued && q.quote_token && (
+                                                {issued && q.quote_token && q.status !== "void" && (
                                                     <button className="btn-ghost btn-sm" onClick={() => copyLink(q)} title="Copy the customer's quote link">
                                                         Copy link
                                                     </button>

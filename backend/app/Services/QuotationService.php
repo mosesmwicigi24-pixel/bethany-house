@@ -120,6 +120,15 @@ class QuotationService
     {
         $quotation->loadMissing('items');
 
+        // A void quotation is never converted again, nor does it hand back the
+        // (cancelled) order it once became. Callers refuse it first; this is
+        // the backstop.
+        if ($quotation->status === Quotation::VOID) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'status' => ['This quotation was voided and can no longer be accepted.'],
+            ]);
+        }
+
         if ($quotation->converted_order_id) {
             // "Which order did this quotation already become" is a fact about
             // the table, not about the caller — and the public accept path

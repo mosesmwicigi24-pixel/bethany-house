@@ -132,6 +132,9 @@ class SalesDocumentRevisions
             if ($quotation->status === Quotation::DRAFT) {
                 self::refuse('status', 'This quotation is still a draft: use Edit.');
             }
+            if ($quotation->status === Quotation::VOID) {
+                self::refuse('status', 'This quotation was voided with its invoice and can no longer be changed.');
+            }
             if ($quotation->status === Quotation::CONVERTED || $quotation->converted_order_id) {
                 self::refuse('status', 'This quotation became an order. Change the order instead — its invoice follows.');
             }
@@ -199,6 +202,46 @@ class SalesDocumentRevisions
             ActivityLogService::log('quotation_revised', $quotation, [
                 'quote_number' => $quotation->quote_number, 'revision' => $revision + 1, 'changes' => $changes, 'reason' => $reason,
             ], "Quotation {$quotation->quote_number} revised to Rev " . ($revision + 1) . " by the owner: {$reason}", $owner);
+
+            return $doc->fresh();
+        });
+    }
+
+    /**
+     * The issued QUO copy of a quotation being voided (with its invoice —
+     * App\Services\Documents\InvoiceVoid): the version it replaces is kept as
+     * a revision, like an invoice voided by its order, and the copy says void.
+     * Its content is untouched. Returns null when the quotation was never
+     * issued or its copy is already void.
+     */
+    public static function voidQuotationCopy(Quotation $quotation, string $reason, User $by): ?SalesDocument
+    {
+        return DB::transaction(function () use ($quotation, $reason, $by) {
+            $doc = SalesDocument::where('type', SalesDocument::QUOTATION)
+                ->where('documentable_type', Quotation::class)
+                ->where('documentable_id', $quotation->id)
+                ->lockForUpdate()->first();
+            if (!$doc || $doc->status === 'void') {
+                return null;
+            }
+
+            $revision = (int) $doc->revision;
+            $changes  = ['Quotation void (was ' . $doc->status . ')'];
+            DocumentRevision::create([
+                'document_type' => DocumentRevision::QUOTATION,
+                'document_id'   => $doc->id,
+                'revision'      => $revision,
+                'snapshot'      => ['snapshot' => $doc->snapshot ?? [], 'amount' => (float) $doc->amount, 'status' => $doc->status, 'valid_until' => optional($doc->valid_until)->toDateString()],
+                'changes'       => $changes,
+                'reason'        => $reason,
+                'created_by'    => $by->id,
+            ]);
+
+            $doc->update([
+                'snapshot' => array_merge($doc->snapshot ?? [], ['revision' => $revision + 1, 'voided_at' => now()->toIso8601String(), 'void_reason' => $reason]),
+                'status'   => 'void',
+                'revision' => $revision + 1,
+            ]);
 
             return $doc->fresh();
         });

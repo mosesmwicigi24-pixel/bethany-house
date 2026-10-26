@@ -69,7 +69,7 @@ class PdfService
             'pending', 'draft', 'pending_approval', 'pending_review'           => '#d97706',
             'processing', 'in_progress', 'partially_received', 'partial'       => '#2563eb',
             'shipped', 'ordered', 'dispatched'                                 => '#7c3aed',
-            'cancelled', 'rejected', 'voided', 'failed'                        => '#dc2626',
+            'cancelled', 'rejected', 'voided', 'void', 'failed'                => '#dc2626',
             'refunded', 'partially_refunded'                                   => '#0891b2',
             default                                                            => '#6b7280',
         };
@@ -744,8 +744,15 @@ HTML;
             $extra .= '<div class="notes-label" style="margin-top:8px">Terms</div><div class="notes-box">'
                 . htmlspecialchars($q['terms']) . '</div>';
         }
-        $extra .= '<div class="notes-box" style="margin-top:10px;color:#666">This is a quotation, not a demand for '
-            . 'payment. Prices are valid until the date shown above.</div>';
+        if (($q['status'] ?? null) === 'void') {
+            // Voided with its invoice (2026-10-26): the copy says so plainly.
+            $extra .= '<div class="notes-box" style="margin-top:10px;color:#dc2626;font-weight:700">This quotation was voided'
+                . (!empty($q['voided_at']) ? ' on ' . self::date($q['voided_at']) : '')
+                . ' and is no longer valid.</div>';
+        } else {
+            $extra .= '<div class="notes-box" style="margin-top:10px;color:#666">This is a quotation, not a demand for '
+                . 'payment. Prices are valid until the date shown above.</div>';
+        }
 
         return self::page('Quotation', $q['quote_number'] ?? 'DRAFT', $q['status'] ?? 'draft',
             $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra);

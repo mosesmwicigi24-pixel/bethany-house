@@ -810,6 +810,20 @@ class OrderController extends Controller
         // order back to pending, or a cancelled order shipped).
         OrderStatusMachine::assertCanTransition($order->status, $newStatus);
 
+        // ── Cancelling: one shared path (also the super admin's Void invoice) ──
+        // The stock it held goes back once, the history row and the activity
+        // entry are written, the invoice copy follows. See OrderCancellation.
+        if ($newStatus === 'cancelled') {
+            \App\Services\OrderCancellation::cancel(
+                $order, $request->user(), $validated['notes'] ?? null, $validated['tracking_number'] ?? null,
+            );
+
+            return response()->json([
+                'message' => 'Order status updated successfully',
+                'order'   => $order->fresh(),
+            ]);
+        }
+
         // ── Guard: cannot progress order while payments are awaiting approval ──
         // Any payment with requires_approval=true and approval_status=pending_review
         // blocks the order from moving to processing, shipped, delivered, or completed.
@@ -919,20 +933,10 @@ class OrderController extends Controller
             $order->update([
                 'status'          => $newStatus,
                 'tracking_number' => $validated['tracking_number'] ?? $order->tracking_number,
-                'cancelled_at'    => $newStatus === 'cancelled'
-                    ? ($order->cancelled_at ?? now())
-                    : $order->cancelled_at,
             ]);
 
-            // Cancelling from the admin status dropdown is the third door onto the
-            // same order as cancelOrder() and voidOrder() — and the only one that
-            // used to return no stock at all, silently stranding whatever the order
-            // had drawn. Idempotent and flag-guarded, so it neither double-restores
-            // an order a cancel/void/reap already unwound nor invents stock for one
-            // that never drew any.
-            if ($newStatus === 'cancelled') {
-                PosInventoryService::unwindForOrder($order, $request->user()->id);
-            }
+            // (Cancelling returned above, through OrderCancellation, which
+            // gives back the stock the order held.)
 
             // Completed is the customer taking the order (owner decision 1):
             // made-to-order garments held for them leave stock now.
@@ -1969,6 +1973,7 @@ class OrderController extends Controller
                 $labels = [
                     'created'                  => 'Order Created',
                     'status_changed'           => 'Status Changed',
+                    'invoice_voided'           => 'Invoice Voided',
                     'cancelled'                => 'Order Cancelled',
                     'refunded'                 => 'Refund Processed',
                     'payment_recorded'         => 'Payment Recorded',
@@ -2048,6 +2053,8 @@ class OrderController extends Controller
                     $currency = $props['currency'] ?? '';
                     $reason   = $props['reason'] ?? '';
                     $summary  = "Refund of {$props['amount']} {$currency}: {$reason}";
+                } elseif ($event === 'invoice_voided' && isset($props['reason'])) {
+                    $summary = $log->description ?: "Invoice {$props['invoice_number']} voided: {$props['reason']}";
                 } elseif ($event === 'voided' && isset($props['reason'])) {
                     $who     = $props['voided_name'] ?? 'Admin';
                     $summary = "Order voided by {$who}: {$props['reason']}";

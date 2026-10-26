@@ -1033,6 +1033,11 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('invoices')->group(function () {
                 Route::get('/',      [InvoiceController::class, 'index']);
                 Route::get('/{id}',  [InvoiceController::class, 'show']);
+                // The super admin voids an unpaid invoice — its order is
+                // cancelled and its quotation voided (owner, 2026-10-26). By
+                // ROLE (owner.only), then a fresh step-up.
+                Route::post('/{id}/void', [InvoiceController::class, 'void'])->whereNumber('id')
+                    ->middleware(['owner.only', 'step.up']);
             });
 
             // ── Interest carts (pipeline, not sales) ─────────────────────────

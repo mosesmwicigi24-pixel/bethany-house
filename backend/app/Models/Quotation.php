@@ -48,6 +48,12 @@ class Quotation extends Model
     public const DECLINED  = 'declined';
     public const EXPIRED   = 'expired';
     public const CONVERTED = 'converted';
+    /**
+     * Withdrawn by the super admin when the unpaid invoice it became was
+     * voided (owner, 2026-10-26). Terminal: never offered, accepted or
+     * counted again — App\Services\Documents\InvoiceVoid.
+     */
+    public const VOID      = 'void';
 
     protected static function booted(): void
     {
@@ -88,6 +94,9 @@ class Quotation extends Model
         'created_by',
         'quote_token',
         'quote_token_expires_at',
+        'voided_at',
+        'voided_by',
+        'void_reason',
     ];
 
     protected $casts = [
@@ -100,6 +109,7 @@ class Quotation extends Model
         'issued_at'       => 'datetime',
         'accepted_at'     => 'datetime',
         'quote_token_expires_at' => 'datetime',
+        'voided_at'       => 'datetime',
     ];
 
     public function items(): HasMany
@@ -110,6 +120,12 @@ class Quotation extends Model
     public function outlet(): BelongsTo
     {
         return $this->belongsTo(Outlet::class);
+    }
+
+    /** The super admin who voided it (with its invoice). */
+    public function voider(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'voided_by');
     }
 
     public function convertedOrder(): BelongsTo

@@ -3015,7 +3015,8 @@ class MetricEngine
     private function openQuotes()
     {
         return DB::table('quotations')
-            ->whereNotIn('status', ['converted', 'declined', 'expired'])
+            // 'void': withdrawn with its invoice (2026-10-26) — not on offer.
+            ->whereNotIn('status', ['converted', 'declined', 'expired', 'void'])
             ->whereNull('converted_order_id')
             ->whereRaw("fx_rate_to_kes(reporting_rate_to_kes, currency_code) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds));
@@ -3159,8 +3160,12 @@ class MetricEngine
         // Funnel speed: how quotes convert and how deposits complete (90d).
         $since90 = $now->subDays(90)->toMutable();
 
+        // A void quotation (its invoice voided by the super admin — usually a
+        // duplicate or a mistake) was never a real offer: it counts neither as
+        // quoted nor as converted, here or in the quote-to-order time.
         $convRow = DB::table('quotations')
             ->where('created_at', '>=', $since90)
+            ->where('status', '<>', 'void')
             ->whereRaw("fx_rate_to_kes(reporting_rate_to_kes, currency_code) IS NOT NULL")
             ->when($this->outletIds, fn ($q) => $q->whereIn('outlet_id', $this->outletIds))
             ->selectRaw("COUNT(*) AS total,
@@ -3170,6 +3175,7 @@ class MetricEngine
         $avgQuoteToOrder = DB::table('quotations as q')
             ->join('orders as o', 'o.id', '=', 'q.converted_order_id')
             ->where('q.created_at', '>=', $since90)
+            ->where('q.status', '<>', 'void')
             ->when($this->outletIds, fn ($q) => $q->whereIn('q.outlet_id', $this->outletIds))
             ->selectRaw('AVG(o.created_at::date - q.created_at::date) AS d')
             ->value('d');
