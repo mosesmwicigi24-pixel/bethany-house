@@ -350,8 +350,15 @@ class InvoiceVoidTest extends TestCase
         ]);
         $this->assertDatabaseHas('activity_log', ['event' => 'status_changed', 'subject_id' => $order->id, 'causer_id' => $this->owner->id]);
 
-        // A cancelled order stays cancelled (the machine still guards it).
-        $this->putJson("/api/v1/admin/orders/{$order->id}/status", ['status' => 'cancelled'])->assertStatus(422);
+        // Cancelling again is the machine's no-op (same status), as before:
+        // the stock is not given back twice and the cancel date stays.
+        $cancelledAt = $order->cancelled_at;
+        $this->putJson("/api/v1/admin/orders/{$order->id}/status", ['status' => 'cancelled'])->assertOk();
+        $this->assertSame(0, (int) $this->stock->fresh()->quantity_reserved);
+        $this->assertSame(50, (int) $this->stock->fresh()->quantity_on_hand);
+        $this->assertTrue($order->fresh()->cancelled_at->equalTo($cancelledAt));
+        // And a cancelled order cannot be revived.
+        $this->putJson("/api/v1/admin/orders/{$order->id}/status", ['status' => 'pending'])->assertStatus(422);
     }
 
     public function test_reports_no_longer_count_the_void_quote_or_its_order(): void
