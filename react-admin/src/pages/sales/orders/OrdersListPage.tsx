@@ -7,16 +7,16 @@ import { useToastStore } from "@/store/toast.store";
 import { useTableState } from "@/hooks/useTableState";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
-import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { groupRowsByDate } from "@/lib/dateGrouping";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
     STATUS_CONFIG,
-    OrderTableHead,
+    OrderTable,
+    OrderGroupHeader,
     OrderRow,
     OrderRowSkeleton,
     OrderCard,
     OrderCardSkeleton,
-    ORDER_TABLE_COLUMNS,
 } from "@/components/orders/OrderRow";
 
 // ── Stage menu ────────────────────────────────────────────────────────────────
@@ -432,32 +432,29 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                         <p className="text-sm">No orders found</p>
                     </div>
                 ) : (
-                    <div className="table-wrapper rounded-none border-0">
-                        <table className="table" aria-busy={isLoading || undefined}>
-                            <OrderTableHead />
-                            <tbody>
-                                {isLoading ? (
-                                    <OrderRowSkeleton />
-                                ) : orderGroups.map((group) => (
-                                    <Fragment key={group.key}>
-                                        <DateGroupHeaderRow label={group.label} colSpan={ORDER_TABLE_COLUMNS} />
-                                        {group.items.map((order) => (
-                                            <OrderRow
-                                                key={order.id}
-                                                order={order}
-                                                actions={
-                                                    <>
-                                                        <PaymentLinkButton order={order} />
-                                                        <StageMenu order={order} onDone={refetchAfterStageChange} />
-                                                    </>
-                                                }
-                                            />
-                                        ))}
-                                    </Fragment>
+                    // A grid with explicit tracks, not an auto-layout table —
+                    // see components/orders/OrderRow for why (and the widths).
+                    <OrderTable busy={isLoading}>
+                        {isLoading ? (
+                            <OrderRowSkeleton />
+                        ) : orderGroups.map((group) => (
+                            <Fragment key={group.key}>
+                                <OrderGroupHeader label={group.label} />
+                                {group.items.map((order) => (
+                                    <OrderRow
+                                        key={order.id}
+                                        order={order}
+                                        actions={
+                                            <>
+                                                <PaymentLinkButton order={order} />
+                                                <StageMenu order={order} onDone={refetchAfterStageChange} />
+                                            </>
+                                        }
+                                    />
                                 ))}
-                            </tbody>
-                        </table>
-                    </div>
+                            </Fragment>
+                        ))}
+                    </OrderTable>
                 )}
                 </div>
 
