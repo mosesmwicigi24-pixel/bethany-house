@@ -67,6 +67,12 @@ export const NAV: NavGroup[] = [
                 // Ungated for the same reason: /admin/time-clock is every
                 // staff member's own punch (Bethany People PR 1).
             },
+            {
+                label: "My shifts",
+                href: "/me/shifts",
+                icon: "calendar",
+                // Ungated: /me/shifts is every staff member's own roster (PR 3).
+            },
         ],
     },
 
@@ -502,6 +508,14 @@ export const NAV: NavGroup[] = [
                 label: "Attendance",
                 href: "/settings/attendance",
                 icon: "attendance",
+                permission: "attendance.view_team",
+            },
+            {
+                label: "Roster",
+                href: "/roster",
+                icon: "calendar",
+                // Read with attendance.view_team; the page hides its buttons
+                // without roster.manage (People PR 3).
                 permission: "attendance.view_team",
             },
             {

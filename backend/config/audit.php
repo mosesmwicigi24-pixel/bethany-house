@@ -136,6 +136,8 @@ return [
         \App\Models\EmployeeProfile::class,
         \App\Models\StaffDocument::class,
         \App\Models\PublicHoliday::class,
+        \App\Models\Shift::class,
+        \App\Models\ShiftSwapRequest::class,
         // Catalogue & pricing
         \App\Models\Product::class,
         \App\Models\ProductVariant::class,
