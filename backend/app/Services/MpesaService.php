@@ -112,6 +112,15 @@ class MpesaService
         Cache::forget('mpesa_access_token');
     }
 
+    /**
+     * The shortcode (paybill/till) payments are made to — what a Transaction
+     * Status answer's CreditPartyName must name for the money to be ours.
+     */
+    public function shortcode(): string
+    {
+        return $this->shortcode;
+    }
+
     // ── Access Token ──────────────────────────────────────────────────────────
 
     /**

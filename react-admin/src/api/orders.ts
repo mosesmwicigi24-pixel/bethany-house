@@ -107,6 +107,8 @@ export interface OrderPayment {
     approval_status?: "pending_review" | "approved" | "rejected" | null;
     // Refund
     refund_amount?: number | null;
+    // Gateway detail; mpesa_verification = a receipt check Safaricom is answering
+    provider_response?: Record<string, any> | null;
 }
 
 export interface OrderStatusHistory {
@@ -565,7 +567,9 @@ export const ordersApi = {
      * Pass the M-Pesa receipt code if querying an offline payment.
      */
     verifyMpesa: (orderId: number, paymentId: number, transactionCode?: string) =>
-        post<{ message: string; payment_status: string; payment: OrderPayment }>(
+        // 200 = confirmed and paid; 202 (pending: true) = Safaricom asked, the
+        // payment updates when they answer.
+        post<{ message: string; payment_status: string; payment: OrderPayment; pending?: boolean }>(
             `/v1/admin/orders/${orderId}/payments/${paymentId}/verify-mpesa`,
             transactionCode ? { transaction_code: transactionCode } : {},
         ),
