@@ -223,6 +223,41 @@ function paymentMethods(order: Order) {
 }
 
 /**
+ * The chip both the payment state and the stage use: a leading icon or dot,
+ * then its parts ("Partially paid", "M-Pesa"). On one line the parts read
+ * "Partially paid · M-Pesa"; when the column is too narrow the second part
+ * wraps under the first instead of being cut ("M-P…"), and its separator dot
+ * — which sits in the gap before it — is clipped away at the start of the line.
+ */
+function Chip({ tone, lead, parts, title }: { tone: StageTone; lead: ReactNode; parts: string[]; title?: string }) {
+    return (
+        <span
+            className={clsx("inline-flex max-w-full items-baseline gap-1.5 rounded-xl px-2 py-[3px] text-xs leading-[18px] font-medium ring-1 ring-inset", TONE_CHIP[tone])}
+            title={title}
+        >
+            {lead}
+            <span className="flex min-w-0 flex-wrap items-baseline gap-x-[0.7em] overflow-hidden">
+                {parts.map((part, i) => (
+                    <span
+                        key={i}
+                        className={clsx(
+                            "relative flex min-w-0 max-w-full",
+                            i > 0 && "before:content-['·'] before:absolute before:right-full before:mr-[0.22em]",
+                        )}
+                    >
+                        <span className="truncate">{part}</span>
+                    </span>
+                ))}
+            </span>
+        </span>
+    );
+}
+
+const chipDot = (tone: StageTone) => (
+    <span aria-hidden className={clsx("self-start mt-[6px] w-1.5 h-1.5 rounded-full shrink-0", TONE_DOT[tone])} />
+);
+
+/**
  * ONE chip for money: state and method together — "Paid · I&M Paybill",
  * "Paid · I&M + Cash", "Partially paid · M-Pesa", "Unpaid". The method's icon
  * leads the chip; with no method a dot does. The tooltip lists each method
@@ -239,36 +274,32 @@ export function PaymentChip({ order }: { order: Order }) {
         : methods.length === 1 ? methods[0].name
         : methods.length === 2 ? `${shortMethod(methods[0].name)} + ${shortMethod(methods[1].name)}`
         : `${methods.length} methods`;
-    const label = how ? `${meta.label} · ${how}` : meta.label;
     const lines = methods.map(m => Number.isFinite(m.amount) ? `${m.name} — ${formatMoney(m.currency_code, m.amount)}` : m.name);
-    const title = [meta.label, ...lines].join("\n");
 
     return (
-        <span
-            className={clsx("inline-flex max-w-full items-center gap-1.5 h-6 rounded-full px-2 text-xs font-medium ring-1 ring-inset", TONE_CHIP[meta.tone])}
-            title={title}
-        >
-            {methods.length > 0
-                ? <MethodIcon code={methods[0].code} />
-                : <span aria-hidden className={clsx("w-1.5 h-1.5 rounded-full shrink-0", TONE_DOT[meta.tone])} />}
-            <span className="truncate">{label}</span>
-        </span>
+        <Chip
+            tone={meta.tone}
+            lead={methods.length > 0
+                ? <span className="self-start mt-[2px] inline-flex"><MethodIcon code={methods[0].code} /></span>
+                : chipDot(meta.tone)}
+            parts={how ? [meta.label, how] : [meta.label]}
+            title={[meta.label, ...lines].join("\n")}
+        />
     );
 }
 
 // ── Stage ────────────────────────────────────────────────────────────────────
 
-/** Where the order stands — orderStage() in a pill. */
+/** Where the order stands — orderStage() in the same chip ("Paid · To dispatch" may wrap). */
 export function StagePill({ order }: { order: Order }) {
     const stage = orderStage(order);
     return (
-        <span
-            className={clsx("inline-flex max-w-full items-baseline gap-1.5 h-6 rounded-full px-2 text-xs leading-6 font-medium whitespace-nowrap ring-1 ring-inset", TONE_CHIP[stage.tone])}
+        <Chip
+            tone={stage.tone}
+            lead={chipDot(stage.tone)}
+            parts={stage.label.split(" · ")}
             title={`Order status: ${statusConfig(order.status).label}`}
-        >
-            <span aria-hidden className={clsx("self-center w-1.5 h-1.5 rounded-full shrink-0", TONE_DOT[stage.tone])} />
-            <span className="truncate">{stage.label}</span>
-        </span>
+        />
     );
 }
 
@@ -318,8 +349,9 @@ function Initials({ name, small }: { name: string; small?: boolean }) {
         <span
             aria-hidden
             className={clsx(
-                "self-center inline-flex items-center justify-center rounded-full font-bold shrink-0",
-                small ? "w-5 h-5 text-[9px]" : "w-6 h-6 text-[10px]",
+                // Top-aligned and centred on the name's FIRST line, which may wrap to two.
+                "self-start inline-flex items-center justify-center rounded-full font-bold shrink-0",
+                small ? "w-5 h-5 text-[9px] -mt-px" : "w-6 h-6 text-[10px] -mt-0.5",
                 tone,
             )}
         >
@@ -339,7 +371,7 @@ export function ServedBy({ name, compact }: { name?: string | null; compact?: bo
     return (
         <span className={clsx("flex items-baseline min-w-0", compact ? "gap-1.5" : "gap-2")} title={`Served by ${name}`}>
             <Initials name={name} small={compact} />
-            <span className={clsx("truncate text-surface-700", compact ? "text-xs leading-5" : "text-[13px] leading-6")}>{name}</span>
+            <span className={clsx("min-w-0 line-clamp-2 !overflow-clip break-words text-surface-700", compact ? "text-xs leading-[18px]" : "text-[13px] leading-5")}>{name}</span>
         </span>
     );
 }
@@ -348,18 +380,20 @@ export function ServedBy({ name, compact }: { name?: string | null; compact?: bo
 
 /**
  * One set of column tracks for the header, every row and the skeleton. Widths
- * were measured against content at 12/13/15px (longest month, a pill such as
- * "Paid · To dispatch", "KES 100,000.00") and sum to fit the window minus the
- * 256px sidebar, page gutters and a scrollbar at each breakpoint's low end:
- *   1280 → 945px, 1440 → 1105px, 1760 → 1409px.
+ * were measured against content at 12/13/15px (longest month, "KES 100,000.00")
+ * and sum to fit the window minus the 256px sidebar, page gutters and a
+ * scrollbar at each breakpoint's low end: 1280 → 945px, 1440 → 1105px,
+ * 1760 → 1409px. ITEMS gets the largest share (≥224px at 1280, ≥248px at 1440);
+ * chips, item names and served-by names wrap to a second line rather than
+ * being cut, so the narrower columns lose no words.
  * ITEMS (and, from 1760, ORDER) stretch to a ceiling; what is left is shared
  * evenly by the gaps, so no single gap opens up.
  */
 const GRID = clsx(
-    "grid justify-between gap-x-3.5 px-3",
-    "grid-cols-[172px_156px_minmax(150px,360px)_140px_128px_88px]",
-    "min-[1440px]:grid-cols-[184px_156px_minmax(160px,400px)_140px_124px_128px_88px]",
-    "min-[1760px]:grid-cols-[minmax(200px,264px)_184px_minmax(200px,400px)_136px_144px_148px_132px_88px] min-[1760px]:gap-x-5 min-[1760px]:px-4",
+    "grid justify-between gap-x-3 px-3",
+    "grid-cols-[160px_140px_minmax(224px,380px)_132px_120px_84px]",
+    "min-[1440px]:grid-cols-[172px_140px_minmax(248px,440px)_132px_112px_120px_84px]",
+    "min-[1760px]:grid-cols-[minmax(184px,260px)_150px_minmax(260px,460px)_132px_140px_132px_124px_84px] min-[1760px]:gap-x-5 min-[1760px]:px-4",
 );
 
 /** Own columns from these widths; below them the content stacks (see the header note). */
@@ -511,10 +545,11 @@ export function OrderRow({ order, actions }: OrderRowProps) {
                                 <li
                                     key={item.id}
                                     className="flex items-baseline gap-1.5 text-xs leading-[18px]"
+                                    // Name wraps to two lines at most; the amount stays on the first.
                                     title={itemLineText(item, currency)}
                                 >
                                     {line.qty && <span className="shrink-0 tabular-nums text-surface-400">{line.qty}</span>}
-                                    <span className="min-w-0 truncate text-surface-700">{line.name}</span>
+                                    <span className="min-w-0 line-clamp-2 !overflow-clip break-words text-surface-700">{line.name}</span>
                                     <span aria-hidden className="flex-1 min-w-3 border-b border-dotted border-surface-300 -translate-y-[3px]" />
                                     <span className="shrink-0 tabular-nums text-surface-800">{line.figure}</span>
                                 </li>
@@ -579,7 +614,7 @@ export function OrderRow({ order, actions }: OrderRowProps) {
             </div>
 
             {/* ACTIONS — top-aligned, centred on the first line */}
-            <div role="cell" className="self-start -mt-0.5 flex items-center justify-end gap-0.5">
+            <div role="cell" className="self-start -mt-0.5 flex items-center justify-end">
                 {actions}
                 <Link
                     to={href}
