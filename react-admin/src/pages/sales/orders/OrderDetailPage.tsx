@@ -123,6 +123,23 @@ const PAYMENT_METHODS: Record<string, { label: string; icon: string }> = {
 const fmt = (n: number | null | undefined, cc = "KES") =>
     `${cc} ${(n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
 
+// ── M-Pesa receipt verification in flight ─────────────────────────────────
+// Verify-with-receipt asks Safaricom and answers 202; Safaricom's answer comes
+// back to the hub, which settles the payment or records why not on
+// payment.provider_response.mpesa_verification. The page polls while waiting.
+type MpesaVerification = { state?: string; receipt?: string; message?: string; requested_at?: string };
+const MPESA_WAIT_MS = 10 * 60 * 1000; // Safaricom answers or times out well within this
+const mpesaVerification = (p: any): MpesaVerification | null => {
+    const v = p?.provider_response?.mpesa_verification;
+    return v && typeof v === "object" ? v : null;
+};
+const isAwaitingSafaricom = (p: any): boolean => {
+    const v = mpesaVerification(p);
+    if (!v || v.state !== "pending" || p?.status !== "pending") return false;
+    const at = v.requested_at ? Date.parse(v.requested_at) : NaN;
+    return !Number.isNaN(at) && Date.now() - at < MPESA_WAIT_MS;
+};
+
 const PaymentMethodIcon = ({ method, className = "w-4 h-4" }: { method?: string; className?: string }) => {
     const s = { className, fill: "none" as const, viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: 1.75, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
     const icon = PAYMENT_METHODS[method ?? ""]?.icon ?? "money";
@@ -3621,6 +3638,12 @@ export default function OrderDetailPage() {
         queryKey: ["order", id],
         queryFn:  () => ordersApi.get(Number(id)),
         enabled:  !!id,
+        // While Safaricom is answering an M-Pesa receipt check, refresh so the
+        // payment turns Paid (or shows why not) without a reload.
+        refetchInterval: (query) => {
+            const o: any = (query.state.data as any)?.order ?? query.state.data;
+            return (o?.payments ?? []).some(isAwaitingSafaricom) ? 5000 : false;
+        },
     });
     // ordersApi.get returns { order: Order } - unwrap
     const order: Order | undefined = (data as any)?.order ?? data as any;
@@ -3773,7 +3796,9 @@ export default function OrderDetailPage() {
         mutationFn: ({ paymentId, code }: { paymentId: number; code: string }) =>
             ordersApi.verifyMpesa(order!.id, paymentId, code || undefined),
         onSuccess: (res) => {
-            toast.success(res.message);
+            // 202 pending: Safaricom was asked — not paid yet.
+            if (res.pending) toast.info(res.message);
+            else toast.success(res.message);
             setVerifyingPaymentId(null);
             setMpesaCode("");
             refresh();
@@ -4807,7 +4832,18 @@ export default function OrderDetailPage() {
                                                                 {isLateUnrefunded(p) ? "Paid after cancel — refund needed" : "Paid after cancel — refunded"}
                                                             </span>
                                                         )}
-                                                        {p.status === "pending" && p.payment_method === "mpesa" && (
+                                                        {p.status === "pending" && p.payment_method === "mpesa" && isAwaitingSafaricom(p) && (
+                                                            <span className="mt-1 flex items-center gap-1 text-2xs font-semibold text-amber-700">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                                                Waiting for Safaricom… ({mpesaVerification(p)?.receipt})
+                                                            </span>
+                                                        )}
+                                                        {p.status === "pending" && p.payment_method === "mpesa" && !isAwaitingSafaricom(p)
+                                                            && ["refused", "unmatched", "timed_out"].includes(mpesaVerification(p)?.state ?? "")
+                                                            && mpesaVerification(p)?.message && (
+                                                            <p className="mt-1 text-2xs text-danger max-w-[240px]">{mpesaVerification(p)?.message}</p>
+                                                        )}
+                                                        {p.status === "pending" && p.payment_method === "mpesa" && !isAwaitingSafaricom(p) && (
                                                             <button onClick={() => setVerifyingPaymentId(p.id)} className="mt-1 block text-2xs text-brand-600 hover:underline font-medium">Verify with Daraja →</button>
                                                         )}
                                                         {p.status === "pending" && (p.payment_method === "card_paystack" || p.payment_method === "paystack") && (

@@ -66,16 +66,34 @@ class PaymentController extends Controller
     // =========================================================================
     // POST /admin/orders/{orderId}/payments/{paymentId}/verify-mpesa
     //
-    // Staff enters an offline M-Pesa transaction code (e.g. QJL3ABC7DE) and
-    // the system queries Daraja to confirm before marking the payment as paid.
+    // Staff confirm an M-Pesa payment with Safaricom before it counts as paid.
     //
-    // Flow:
-    //   1. If the Payment has a provider_reference (CheckoutRequestID), query
-    //      the STK status endpoint.
-    //   2. If staff provide a transaction_code (M-Pesa receipt), call the
-    //      Transaction Status API.
-    //   3. On confirmed success, mark payment paid + sync order payment_status.
+    //   1. STK Push Query on the payment's CheckoutRequestID. ResultCode 0 is
+    //      Safaricom saying that push was completed — a real confirmation, so
+    //      the payment is settled at once.
+    //   2. A receipt code the customer shows (e.g. QJL3ABC7DE): a Transaction
+    //      Status query. Daraja's synchronous ResponseCode '0' only means
+    //      "query accepted" — the answer comes later, to
+    //      /webhooks/mpesa/transaction-result. Until 2026-10-26 the button
+    //      settled the payment on that acceptance, so almost any receipt code
+    //      Daraja accepted recorded money that may never have arrived. Now the
+    //      request is recorded on the payment (provider_response
+    //      .mpesa_verification), staff get 202 "asked Safaricom", and only
+    //      Safaricom's answer can settle it (mpesaTransactionResult).
     // =========================================================================
+
+    /** provider_response key for a receipt-code verification in flight. */
+    private const MPESA_VERIFICATION = 'mpesa_verification';
+
+    /**
+     * Verification states that still wait for Safaricom's answer. 'unmatched'
+     * stays open: an answer tied only by its receipt is never applied, and
+     * must not stop the real answer from settling the payment.
+     */
+    private const MPESA_VERIFICATION_OPEN = ['pending', 'timed_out', 'unmatched'];
+
+    /** Payment states a Safaricom answer must never settle. */
+    private const MPESA_CLOSED_PAYMENT = ['voided', 'refunded', 'cancelled'];
 
     /**
      * Issue a receipt + commit reserved stock for a settled payment, when the
@@ -90,6 +108,58 @@ class PaymentController extends Controller
         } catch (\Throwable $e) {
             Log::warning('Receipt/commit after gateway settlement failed', ['order_id' => $order->id, 'error' => $e->getMessage()]);
         }
+    }
+
+    /**
+     * Mark an M-Pesa payment paid that Safaricom has CONFIRMED, and sync its
+     * order — the one settle path for both verify strategies. Call inside a DB
+     * transaction; announceMpesaSettlement() after it commits. A payment on a
+     * dead order is recorded and flagged by the Payment model's own hook
+     * (LatePayment), never revives the order.
+     */
+    private function applyMpesaSettlement(Payment $payment, Order $order, ?string $receipt, array $extra = []): void
+    {
+        $payment->update([
+            'status'             => 'paid',
+            'paid_at'            => now(),
+            'provider_reference' => $receipt ?? $payment->provider_reference,
+        ] + $extra);
+
+        $order->refresh();
+        $order->syncPaymentStatus();
+        $order->refresh();
+
+        // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
+        $this->settleReceipt($order, $payment);
+
+        if ($order->payment_status === 'paid' && $order->status === 'pending') {
+            $order->update(['status' => 'processing']);
+        }
+    }
+
+    /** Finance's bell + the audit entry for a confirmed M-Pesa payment. */
+    private function announceMpesaSettlement(Payment $payment, Order $order, ?string $receipt, string $via, array $extra = []): void
+    {
+        $payment->refresh();
+        $order->refresh();
+
+        NotificationService::paymentReceived(
+            $payment->id,
+            $payment->payment_number,
+            $order->id,
+            $order->order_number,
+            (float) $payment->amount,
+            $order->currency_code,
+            'mpesa'
+        );
+
+        ActivityLogService::log('mpesa_payment_verified', $order, [
+            'payment_id'       => $payment->id,
+            'payment_number'   => $payment->payment_number,
+            'transaction_code' => $receipt ?? $payment->provider_reference,
+            'amount'           => $payment->amount,
+            'via'              => $via,
+        ] + $extra);
     }
 
     public function verifyMpesa(Request $request, int $orderId, int $paymentId)
@@ -108,18 +178,25 @@ class PaymentController extends Controller
 
         try {
             $mpesa = new MpesaService();
-            $confirmed = false;
-            $receipt   = null;
             $darajaResponse = [];
 
-            // Strategy 1: query STK status using the stored CheckoutRequestID
+            // Strategy 1: query STK status using the stored CheckoutRequestID.
+            // ResultCode 0 is Safaricom confirming the push was paid.
             if ($payment->provider_reference && !str_starts_with($payment->provider_reference, 'QJ')) {
                 try {
                     $result         = $mpesa->querySTK($payment->provider_reference);
                     $darajaResponse = $result;
-                    // ResultCode '0' means the STK was completed successfully
                     if (($result['ResultCode'] ?? '') === '0' || ($result['ResultCode'] ?? '') === 0) {
-                        $confirmed = true;
+                        DB::transaction(fn () => $this->applyMpesaSettlement($payment, $order, null));
+                        $this->announceMpesaSettlement($payment, $order, null, 'stk_query');
+
+                        return response()->json([
+                            'message'        => $order->fresh()->isPayable()
+                                ? 'M-Pesa payment confirmed successfully.'
+                                : \App\Support\PaymentGate::lateMessage($order->fresh()),
+                            'payment_status' => $order->fresh()->payment_status,
+                            'payment'        => $payment->fresh(),
+                        ]);
                     }
                 } catch (\Exception $e) {
                     Log::warning('STK query failed, falling through to transaction code', [
@@ -128,79 +205,56 @@ class PaymentController extends Controller
                 }
             }
 
-            // Strategy 2: if staff provided a receipt number, use Transaction Status API
-            if (!$confirmed && !empty($validated['transaction_code'])) {
-                try {
-                    $receipt    = strtoupper(trim($validated['transaction_code']));
-                    $resultUrl  = url('/api/webhooks/mpesa/transaction-result');
-                    $queueUrl   = url('/api/webhooks/mpesa/transaction-timeout');
-                    $result     = $mpesa->transactionStatus($receipt, $resultUrl, $queueUrl);
-                    $darajaResponse = $result;
+            // Strategy 2: a receipt number — ask Safaricom, and wait for its answer.
+            if (!empty($validated['transaction_code'])) {
+                $receipt = strtoupper(trim($validated['transaction_code']));
 
-                    // Daraja returns '0' for accepted queries; the actual result
-                    // comes async via the resultUrl. For now accept if response is good.
-                    if (($result['ResponseCode'] ?? '') === '0') {
-                        $confirmed = true;
-                        // Update the provider_reference to the actual receipt number
-                        $payment->update(['provider_reference' => $receipt]);
+                if ($taken = $this->paymentHoldingReceipt($receipt, $payment->id)) {
+                    return response()->json([
+                        'message' => $this->receiptTakenMessage($receipt, $taken),
+                        'reason'  => 'receipt_already_recorded',
+                    ], 422);
+                }
+
+                try {
+                    $result = $mpesa->transactionStatus(
+                        $receipt,
+                        url('/api/webhooks/mpesa/transaction-result'),
+                        url('/api/webhooks/mpesa/transaction-timeout'),
+                    );
+                    $darajaResponse = $result;
+                    $conversation   = trim((string) ($result['ConversationID'] ?? ''));
+                    $originator     = trim((string) ($result['OriginatorConversationID'] ?? ''));
+
+                    // ResponseCode '0' = Safaricom accepted the QUESTION. Not
+                    // proof of money: the answer arrives at transaction-result,
+                    // matched by these conversation ids.
+                    if ((string) ($result['ResponseCode'] ?? '') === '0' && ($conversation !== '' || $originator !== '')) {
+                        $this->recordMpesaVerificationRequest($payment, $receipt, $conversation, $originator, $request->user()?->id);
+
+                        ActivityLogService::log('mpesa_verification_requested', $order, [
+                            'payment_id'     => $payment->id,
+                            'payment_number' => $payment->payment_number,
+                            'receipt'        => $receipt,
+                            'amount'         => $payment->amount,
+                        ]);
+
+                        return response()->json([
+                            'message'        => "Asked Safaricom to confirm receipt {$receipt} — the payment will update here automatically when they answer (usually within a minute).",
+                            'pending'        => true,
+                            'payment_status' => $order->fresh()->payment_status,
+                            'payment'        => $payment->fresh(),
+                        ], 202);
                     }
                 } catch (\Exception $e) {
                     Log::warning('Transaction status query failed', ['error' => $e->getMessage()]);
                 }
             }
 
-            if (!$confirmed) {
-                return response()->json([
-                    'message' => 'Could not confirm payment with Daraja. Please check the transaction code and try again.',
-                    'daraja_response' => $darajaResponse,
-                ], 422);
-            }
-
-            // ── Mark payment as paid and sync order ───────────────────────────
-            DB::transaction(function () use ($payment, $order, $receipt) {
-                $payment->update([
-                    'status'             => 'paid',
-                    'paid_at'            => now(),
-                    'provider_reference' => $receipt ?? $payment->provider_reference,
-                ]);
-
-                $order->refresh();
-                $order->syncPaymentStatus();
-                $order->refresh();
-
-                // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
-                $this->settleReceipt($order, $payment);
-
-                if ($order->payment_status === 'paid' && $order->status === 'pending') {
-                    $order->update(['status' => 'processing']);
-                }
-            });
-
-            // ── Notifications & audit ─────────────────────────────────────────
-            NotificationService::paymentReceived(
-                $payment->id,
-                $payment->payment_number,
-                $order->id,
-                $order->order_number,
-                (float) $payment->amount,
-                $order->currency_code,
-                'mpesa'
-            );
-
-            ActivityLogService::log('mpesa_payment_verified', $order, [
-                'payment_id'       => $payment->id,
-                'payment_number'   => $payment->payment_number,
-                'transaction_code' => $receipt ?? $payment->provider_reference,
-                'amount'           => $payment->amount,
-            ]);
-
             return response()->json([
-                'message'        => $order->fresh()->isPayable()
-                    ? 'M-Pesa payment confirmed successfully.'
-                    : \App\Support\PaymentGate::lateMessage($order->fresh()),
-                'payment_status' => $order->fresh()->payment_status,
-                'payment'        => $payment->fresh(),
-            ]);
+                'message' => 'Could not confirm payment with Daraja. Please check the transaction code and try again.',
+                'daraja_response' => $darajaResponse,
+            ], 422);
 
         } catch (\Exception $e) {
             Log::error('verifyMpesa error', [
@@ -210,6 +264,57 @@ class PaymentController extends Controller
             ]);
             return ServerError::respond($e, 'Verification failed.');
         }
+    }
+
+    /**
+     * Record the question asked of Safaricom on the payment, so its answer can
+     * be matched (by Daraja's conversation ids) and the console can show
+     * "Waiting for Safaricom…". A second press keeps the earlier ids, so an
+     * answer to the first press still finds its payment.
+     */
+    private function recordMpesaVerificationRequest(Payment $payment, string $receipt, string $conversation, string $originator, ?int $requestedBy): void
+    {
+        DB::transaction(function () use ($payment, $receipt, $conversation, $originator, $requestedBy) {
+            $locked   = Payment::whereKey($payment->id)->lockForUpdate()->first();
+            $resp     = (array) ($locked->provider_response ?? []);
+            $previous = (array) ($resp[self::MPESA_VERIFICATION] ?? []);
+
+            $earlier = array_merge(
+                (array) ($previous['earlier_conversations'] ?? []),
+                [$previous['conversation_id'] ?? null, $previous['originator_conversation_id'] ?? null],
+            );
+            $earlier = array_values(array_unique(array_filter($earlier, fn ($id) => is_string($id) && $id !== '')));
+
+            $resp[self::MPESA_VERIFICATION] = [
+                'state'                      => 'pending',
+                'receipt'                    => $receipt,
+                'requested_by'               => $requestedBy,
+                'requested_at'               => now()->toIso8601String(),
+                'conversation_id'            => $conversation !== '' ? $conversation : null,
+                'originator_conversation_id' => $originator !== '' ? $originator : null,
+                'earlier_conversations'      => array_slice($earlier, -10),
+            ];
+            $locked->forceFill(['provider_response' => $resp])->save();
+        });
+    }
+
+    /** Another payment already settled on this receipt, if any. */
+    private function paymentHoldingReceipt(string $receipt, int $exceptPaymentId): ?Payment
+    {
+        return Payment::query()
+            ->where('id', '!=', $exceptPaymentId)
+            ->where('status', 'paid')
+            ->whereRaw('UPPER(provider_reference) = ?', [$receipt])
+            ->orderBy('id')
+            ->first();
+    }
+
+    private function receiptTakenMessage(string $receipt, Payment $taken): string
+    {
+        $orderNumber = Order::withoutViewerScope()->whereKey($taken->order_id)->value('order_number') ?? ('#' . $taken->order_id);
+        $number      = $taken->payment_number ?: ('#' . $taken->id);
+
+        return "Receipt {$receipt} is already recorded on payment {$number} (order {$orderNumber}).";
     }
 
     // =========================================================================
@@ -601,48 +706,416 @@ class PaymentController extends Controller
 
     /**
      * POST /webhooks/mpesa/transaction-result — Daraja's asynchronous answer to
-     * a Transaction Status query (the staff "verify" button, strategy 2). The
-     * URL was sent to Safaricom but no route existed (it pointed at
-     * /api/v1/webhooks/…, which is not registered), so every answer 404'd and
-     * was lost (found 2026-10-26). Recorded here for finance to reconcile; it
-     * changes no payment by itself.
+     * a Transaction Status query (the staff "verify" button, strategy 2).
+     *
+     * The URL was sent to Safaricom but no route existed until 2026-10-26, so
+     * every answer was lost — while the button had already marked the payment
+     * paid on Daraja merely ACCEPTING the question. Now this answer is the only
+     * thing that can settle a receipt-code verification, and only when it
+     * proves the money (mpesaVerificationRefusal): matched to the request by
+     * Daraja's conversation ids, ResultCode 0, TransactionStatus Completed, the
+     * same receipt, enough money, our paybill/till, and a receipt not already
+     * recorded elsewhere. Anything else is recorded on the payment, the
+     * payment stays pending, and the staff member who asked (and finance)
+     * hear why.
+     *
+     * This endpoint is public (Safaricom calls it), so a body can be forged.
+     * That is why only a conversation-id match — ids only Safaricom and this
+     * server know — can settle money; an answer tied to the request by its
+     * receipt alone is recorded and reported, never applied.
+     *
+     * Always answers Safaricom 0: a failure to apply is logged loudly, and the
+     * payment simply stays pending.
      */
     public function mpesaTransactionResult(Request $request)
     {
-        $r = (array) $request->input('Result', []);
-        $params = collect(data_get($r, 'ResultParameters.ResultParameter', []))
-            ->mapWithKeys(fn ($p) => [(string) ($p['Key'] ?? '') => $p['Value'] ?? null]);
-        $receipt = (string) ($r['TransactionID'] ?? $params->get('ReceiptNo') ?? '');
+        $r      = (array) $request->input('Result', []);
+        $params = $this->darajaResultParameters($r);
+        // ReceiptNo is the receipt that was asked about; TransactionID is the
+        // fallback (Daraja's examples carry the same value in both).
+        $receipt = strtoupper(trim((string) ($params->get('ReceiptNo') ?? $r['TransactionID'] ?? '')));
         $info = [
-            'result_code'   => $r['ResultCode'] ?? null,
-            'result_desc'   => $r['ResultDesc'] ?? null,
-            'receipt'       => $receipt,
-            'amount'        => $params->get('Amount'),
-            'status'        => $params->get('TransactionStatus'),
-            'conversation'  => $r['OriginatorConversationID'] ?? null,
+            'result_code'     => $r['ResultCode'] ?? null,
+            'result_desc'     => $r['ResultDesc'] ?? null,
+            'receipt'         => $receipt,
+            'amount'          => $params->get('Amount'),
+            'status'          => $params->get('TransactionStatus'),
+            'credit_party'    => $params->get('CreditPartyName'),
+            'conversation'    => $r['OriginatorConversationID'] ?? null,
+            'conversation_id' => $r['ConversationID'] ?? null,
+            'received_at'     => now()->toIso8601String(),
         ];
         Log::info('M-Pesa transaction-status result', $info);
 
-        if ($receipt !== '') {
-            $payment = Payment::where('provider_reference', strtoupper($receipt))->latest('id')->first();
-            if ($payment) {
-                $resp = (array) ($payment->provider_response ?? []);
-                $resp['mpesa_transaction_status'] = $info + ['received_at' => now()->toIso8601String()];
-                $payment->forceFill(['provider_response' => $resp])->save();
-            }
+        try {
+            $this->applyMpesaTransactionResult($this->darajaConversationIds($r), $receipt, $info);
+        } catch (\Throwable $e) {
+            Log::error('M-Pesa transaction-status result could not be applied — payment left pending', [
+                'receipt' => $receipt,
+                'error'   => $e->getMessage(),
+            ]);
         }
 
         return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
     }
 
-    /** POST /webhooks/mpesa/transaction-timeout — the queue-timeout twin. */
+    /**
+     * POST /webhooks/mpesa/transaction-timeout — Safaricom gave up on the
+     * question. The pending verification is marked timed out and the staff
+     * member who asked is told to try again or check the statement.
+     */
     public function mpesaTransactionTimeout(Request $request)
     {
-        Log::warning('M-Pesa transaction-status query timed out', [
-            'conversation' => data_get($request->input('Result', []), 'OriginatorConversationID'),
-        ]);
+        $r   = (array) ($request->input('Result') ?: $request->all());
+        $ids = $this->darajaConversationIds($r);
+        Log::warning('M-Pesa transaction-status query timed out', ['conversation' => $ids]);
+
+        try {
+            [$paymentId, $how] = $this->matchMpesaVerification($ids, '');
+            if ($paymentId && $how === 'conversation') {
+                $timedOut = DB::transaction(function () use ($paymentId) {
+                    $payment = Payment::whereKey($paymentId)->lockForUpdate()->first();
+                    $resp    = (array) ($payment->provider_response ?? []);
+                    $v       = (array) ($resp[self::MPESA_VERIFICATION] ?? []);
+                    if (($v['state'] ?? null) !== 'pending') {
+                        return null; // answered already, or a repeated timeout
+                    }
+                    $v['state']        = 'timed_out';
+                    $v['timed_out_at'] = now()->toIso8601String();
+                    $v['message']      = "Safaricom didn't answer — try Verify again or check the M-Pesa statement.";
+                    $resp[self::MPESA_VERIFICATION] = $v;
+                    $payment->forceFill(['provider_response' => $resp])->save();
+
+                    return [$payment, $v];
+                });
+
+                if ($timedOut) {
+                    [$payment, $v] = $timedOut;
+                    $order = Order::withoutViewerScope()->find($payment->order_id);
+                    if ($order) {
+                        ActivityLogService::log('mpesa_verification_timed_out', $order, [
+                            'payment_id'   => $payment->id,
+                            'receipt'      => $v['receipt'] ?? null,
+                            'requested_by' => $v['requested_by'] ?? null,
+                        ]);
+                        NotificationService::mpesaVerificationAnswer(
+                            isset($v['requested_by']) ? (int) $v['requested_by'] : null,
+                            $payment->id, $order->id, (string) $order->order_number,
+                            'mpesa_verification_timed_out',
+                            'M-Pesa receipt ' . ($v['receipt'] ?? '') . " — Safaricom didn't answer",
+                            "Order #{$order->order_number}: Safaricom didn't answer — try Verify again or check the M-Pesa statement.",
+                            false,
+                        );
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::error('M-Pesa transaction-status timeout could not be recorded', ['error' => $e->getMessage()]);
+        }
 
         return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
+    }
+
+    /**
+     * Apply one Transaction Status answer. Locked per payment (and per receipt,
+     * so two payments can never both settle on one receipt); a repeated
+     * answer finds the verification closed and changes nothing.
+     */
+    private function applyMpesaTransactionResult(array $ids, string $receipt, array $info): void
+    {
+        [$paymentId, $how] = $this->matchMpesaVerification($ids, $receipt);
+
+        if (!$paymentId) {
+            // Not an answer to any verification we asked. Kept as before
+            // (#500): noted on the payment holding that receipt, changing nothing.
+            if ($receipt !== '') {
+                $payment = Payment::where('provider_reference', $receipt)->latest('id')->first();
+                if ($payment) {
+                    $resp = (array) ($payment->provider_response ?? []);
+                    $resp['mpesa_transaction_status'] = $info;
+                    $payment->forceFill(['provider_response' => $resp])->save();
+                }
+            }
+            Log::warning('M-Pesa transaction-status result matched no verification — ignored', [
+                'receipt' => $receipt, 'conversation' => $ids,
+            ]);
+            return;
+        }
+
+        $outcome = DB::transaction(function () use ($paymentId, $how, $receipt, $info) {
+            $this->lockMpesaReceipt($receipt);
+            $payment = Payment::whereKey($paymentId)->lockForUpdate()->first();
+            $resp    = (array) ($payment->provider_response ?? []);
+            $v       = (array) ($resp[self::MPESA_VERIFICATION] ?? []);
+
+            if (!in_array($v['state'] ?? null, self::MPESA_VERIFICATION_OPEN, true)) {
+                return null; // already answered — a repeated callback does nothing new
+            }
+            // An answer to an earlier press of Verify counts only when it is
+            // about the receipt being asked now.
+            if ($how === 'earlier' && $receipt !== ($v['receipt'] ?? null)) {
+                return null;
+            }
+
+            $resp['mpesa_transaction_status'] = $info;
+            $v['answer']      = $info;
+            $v['answered_at'] = now()->toIso8601String();
+            $order = Order::withoutViewerScope()->find($payment->order_id);
+
+            if ($how === 'receipt') {
+                if (($v['state'] ?? null) === 'unmatched') {
+                    return null; // reported once already
+                }
+                // Tied to the request by its receipt only — no conversation id
+                // of ours. Anyone can post this endpoint, so it is never applied.
+                // The verification stays open: Safaricom's real answer can
+                // still settle it.
+                $v['state']   = 'unmatched';
+                $v['message'] = "Safaricom's answer about receipt {$v['receipt']} could not be tied to this request, so it was not applied. Press Verify again, or check the M-Pesa statement.";
+                $resp[self::MPESA_VERIFICATION] = $v;
+                $payment->forceFill(['provider_response' => $resp])->save();
+
+                return ['kind' => 'unmatched', 'payment' => $payment, 'order' => $order, 'v' => $v];
+            }
+
+            if ($payment->status === 'paid') {
+                // Settled meanwhile by another route (the STK confirmation).
+                $v['state']   = 'superseded';
+                $v['message'] = 'Already confirmed as paid.';
+                $resp[self::MPESA_VERIFICATION] = $v;
+                $payment->forceFill(['provider_response' => $resp])->save();
+
+                return null;
+            }
+
+            $refusal = $order ? $this->mpesaVerificationRefusal($payment, $v, $info) : ['order_missing', 'The order for this payment no longer exists — nothing was recorded.'];
+            if ($refusal) {
+                [$reason, $message] = $refusal;
+                $v['state']   = 'refused';
+                $v['reason']  = $reason;
+                $v['message'] = $message;
+                $resp[self::MPESA_VERIFICATION] = $v;
+                $payment->forceFill(['provider_response' => $resp])->save();
+
+                return ['kind' => 'refused', 'payment' => $payment, 'order' => $order, 'v' => $v];
+            }
+
+            $v['state']   = 'paid';
+            $v['message'] = "Safaricom confirmed receipt {$v['receipt']}.";
+            $resp[self::MPESA_VERIFICATION] = $v;
+            $this->applyMpesaSettlement($payment, $order, $v['receipt'], ['provider_response' => $resp]);
+
+            return ['kind' => 'paid', 'payment' => $payment, 'order' => $order, 'v' => $v];
+        });
+
+        if (!$outcome || !$outcome['order']) {
+            return;
+        }
+
+        /** @var Payment $payment */
+        $payment     = $outcome['payment'];
+        $order       = $outcome['order'];
+        $v           = $outcome['v'];
+        $requestedBy = isset($v['requested_by']) ? (int) $v['requested_by'] : null;
+
+        if ($outcome['kind'] === 'paid') {
+            $this->announceMpesaSettlement($payment, $order, $v['receipt'], 'transaction_status_result', [
+                'requested_by' => $requestedBy,
+                'amount_received' => $info['amount'],
+            ]);
+            // Finance heard it through paymentReceived; the person who asked
+            // hears it too, wherever they are now.
+            if ($requestedBy) {
+                $order->refresh();
+                $amount = number_format((float) $payment->amount, 2);
+                NotificationService::mpesaVerificationAnswer(
+                    $requestedBy, $payment->id, $order->id, (string) $order->order_number,
+                    'mpesa_verification_confirmed',
+                    "Safaricom confirmed M-Pesa receipt {$v['receipt']}",
+                    $order->isPayable()
+                        ? "KES {$amount} is recorded as paid on order #{$order->order_number}."
+                        : \App\Support\PaymentGate::lateMessage($order),
+                    false,
+                );
+            }
+            return;
+        }
+
+        ActivityLogService::log('mpesa_verification_' . $outcome['kind'], $order, [
+            'payment_id'   => $payment->id,
+            'receipt'      => $v['receipt'] ?? null,
+            'reason'       => $v['reason'] ?? $outcome['kind'],
+            'requested_by' => $requestedBy,
+            'answer'       => $info,
+        ], "M-Pesa receipt " . ($v['receipt'] ?? '') . " not applied to payment {$payment->payment_number}: {$v['message']}");
+
+        NotificationService::mpesaVerificationAnswer(
+            $requestedBy, $payment->id, $order->id, (string) $order->order_number,
+            'mpesa_verification_' . $outcome['kind'],
+            'M-Pesa receipt ' . ($v['receipt'] ?? '') . " not confirmed — order #{$order->order_number}",
+            $v['message'],
+            true,
+        );
+    }
+
+    /**
+     * Why Safaricom's answer does NOT prove this payment, in plain words — or
+     * null when it does. [reason code, message for staff].
+     */
+    private function mpesaVerificationRefusal(Payment $payment, array $v, array $info): ?array
+    {
+        $asked  = (string) ($v['receipt'] ?? '');
+        $number = $payment->payment_number ?: ('#' . $payment->id);
+
+        if ((string) ($info['result_code'] ?? '') !== '0') {
+            $desc = trim((string) ($info['result_desc'] ?? '')) ?: 'no reason given';
+            return ['failed', "Safaricom could not confirm receipt {$asked} ({$desc}). The payment was not recorded."];
+        }
+
+        $status = trim((string) ($info['status'] ?? ''));
+        if (strcasecmp($status, 'Completed') !== 0) {
+            $said = $status !== '' ? "\"{$status}\"" : 'not finished';
+            return ['not_completed', "Safaricom says receipt {$asked} is {$said}, not completed. The payment was not recorded."];
+        }
+
+        if (($info['receipt'] ?? '') !== $asked) {
+            return ['receipt_mismatch', "Safaricom answered about receipt {$info['receipt']}, not {$asked}. The payment was not recorded."];
+        }
+
+        if (in_array($payment->status, self::MPESA_CLOSED_PAYMENT, true)) {
+            return ['payment_closed', "Payment {$number} is {$payment->status}, so Safaricom's confirmation of receipt {$asked} was not applied."];
+        }
+
+        if (strtoupper((string) $payment->currency_code) !== 'KES') {
+            return ['currency', "Payment {$number} is in {$payment->currency_code}, but M-Pesa pays in KES, so receipt {$asked} was not applied. Record it by hand at the amount received."];
+        }
+
+        $amount = is_numeric($info['amount'] ?? null) ? round((float) $info['amount'], 2) : null;
+        if ($amount === null) {
+            return ['amount_unknown', "Safaricom did not say how much receipt {$asked} was for. The payment was not recorded — check the M-Pesa statement."];
+        }
+        $expected = round((float) $payment->amount, 2);
+        // Exact means within KES 1; more than expected is still the money.
+        if ($amount < round($expected - 1.0, 2)) {
+            return ['amount_short', 'Receipt ' . $asked . ' is for KES ' . number_format($amount, 2)
+                . ', but this payment expects KES ' . number_format($expected, 2)
+                . '. It was not recorded — record the amount actually received instead.'];
+        }
+
+        $paidTo = $this->creditPartyShortcode($info['credit_party'] ?? null);
+        $ours   = $this->ourMpesaShortcodes();
+        if ($paidTo !== null && $ours !== [] && !in_array($paidTo, $ours, true)) {
+            return ['wrong_till', "Receipt {$asked} was paid to M-Pesa number {$paidTo}, not ours (" . implode(', ', $ours) . '). It was not recorded.'];
+        }
+
+        if ($taken = $this->paymentHoldingReceipt($asked, $payment->id)) {
+            return ['receipt_already_recorded', $this->receiptTakenMessage($asked, $taken)];
+        }
+
+        return null;
+    }
+
+    /**
+     * Which payment's verification this answer belongs to, and how it was tied:
+     * 'conversation' (Daraja's ids for the current request), 'earlier' (ids of
+     * an earlier press of Verify on that payment), or 'receipt' (an open
+     * request for that receipt within 24 hours — reported, never applied).
+     *
+     * @return array{0: ?int, 1: ?string}
+     */
+    private function matchMpesaVerification(array $ids, string $receipt): array
+    {
+        $key = 'provider_response->' . self::MPESA_VERIFICATION;
+
+        if ($ids !== []) {
+            $current = Payment::query()->where(function ($q) use ($ids, $key) {
+                foreach ($ids as $id) {
+                    $q->orWhere("{$key}->conversation_id", $id)
+                      ->orWhere("{$key}->originator_conversation_id", $id);
+                }
+            })->orderByDesc('id')->value('id');
+            if ($current) {
+                return [(int) $current, 'conversation'];
+            }
+
+            $earlier = Payment::query()->where(function ($q) use ($ids, $key) {
+                foreach ($ids as $id) {
+                    $q->orWhereJsonContains("{$key}->earlier_conversations", $id);
+                }
+            })->orderByDesc('id')->value('id');
+            if ($earlier) {
+                return [(int) $earlier, 'earlier'];
+            }
+        }
+
+        if ($receipt !== '') {
+            $candidates = Payment::query()
+                ->where("{$key}->receipt", $receipt)
+                ->whereIn("{$key}->state", self::MPESA_VERIFICATION_OPEN)
+                ->orderByDesc('id')
+                ->get(['id', 'provider_response']);
+            foreach ($candidates as $candidate) {
+                $at = $candidate->provider_response[self::MPESA_VERIFICATION]['requested_at'] ?? null;
+                try {
+                    if ($at && \Carbon\Carbon::parse($at)->gte(now()->subDay())) {
+                        return [(int) $candidate->id, 'receipt'];
+                    }
+                } catch (\Throwable) {
+                    // an unreadable timestamp is simply not a match
+                }
+            }
+        }
+
+        return [null, null];
+    }
+
+    /** Daraja's ids for the question (either may be echoed), de-duplicated. */
+    private function darajaConversationIds(array $r): array
+    {
+        return array_values(array_unique(array_filter([
+            trim((string) ($r['OriginatorConversationID'] ?? '')),
+            trim((string) ($r['ConversationID'] ?? '')),
+        ], fn ($id) => $id !== '')));
+    }
+
+    /** ResultParameters as Key => Value (Daraja sends one object when there is one). */
+    private function darajaResultParameters(array $r): \Illuminate\Support\Collection
+    {
+        $list = data_get($r, 'ResultParameters.ResultParameter', []);
+        if (is_array($list) && array_key_exists('Key', $list)) {
+            $list = [$list];
+        }
+
+        return collect(is_array($list) ? $list : [])
+            ->filter(fn ($p) => is_array($p))
+            ->mapWithKeys(fn ($p) => [(string) ($p['Key'] ?? '') => $p['Value'] ?? null]);
+    }
+
+    /** "600000 - Bethany House" → "600000"; null when Daraja names no number. */
+    private function creditPartyShortcode($creditParty): ?string
+    {
+        return preg_match('/^\s*(\d{5,7})\b/', (string) $creditParty, $m) ? $m[1] : null;
+    }
+
+    /** The M-Pesa number(s) this business is paid on (the Daraja shortcode). */
+    private function ourMpesaShortcodes(): array
+    {
+        try {
+            $code = trim((new MpesaService())->shortcode());
+        } catch (\Throwable $e) {
+            Log::warning('M-Pesa shortcode unavailable for the paybill check', ['error' => $e->getMessage()]);
+            return [];
+        }
+
+        return $code !== '' ? [$code] : [];
+    }
+
+    /** Serialise everything that may settle this receipt (Postgres advisory lock). */
+    private function lockMpesaReceipt(string $receipt): void
+    {
+        if ($receipt !== '' && DB::getDriverName() === 'pgsql') {
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ['mpesa-receipt:' . $receipt]);
+        }
     }
 
     /**

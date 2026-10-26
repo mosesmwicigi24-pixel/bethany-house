@@ -437,6 +437,50 @@ class NotificationService
     }
 
     /**
+     * Safaricom answered (or failed to answer) an M-Pesa receipt verification
+     * (PaymentController::verifyMpesa, strategy 2). The staff member who asked
+     * always hears it; finance too when the money was NOT recorded, so a
+     * refused or unmatched receipt is never only one person's problem.
+     */
+    public static function mpesaVerificationAnswer(
+        ?int $requesterId,
+        int $paymentId,
+        int $orderId,
+        string $orderNumber,
+        string $kind,
+        string $title,
+        string $body,
+        bool $toFinance
+    ): void {
+        $recipients = collect();
+        $requester  = self::user($requesterId);
+        if ($requester && $requester->status === 'active') {
+            $recipients->push($requester);
+        }
+        if ($toFinance || $recipients->isEmpty()) {
+            $recipients = $recipients->merge(
+                self::holding(self::resolve(self::FINANCE, null, [], false), 'payments.view')
+            );
+        }
+
+        self::send(
+            $recipients->unique('id')->values(),
+            new InAppNotification(
+                title:     $title,
+                body:      $body,
+                actionUrl: "/sales/orders/{$orderId}",
+                icon:      'payment',
+                data:      [
+                    'kind'         => $kind,
+                    'payment_id'   => $paymentId,
+                    'order_id'     => $orderId,
+                    'order_number' => $orderNumber,
+                ],
+            )
+        );
+    }
+
+    /**
      * Fired when an international payment requires admin approval.
      */
     public static function paymentApprovalRequired(
