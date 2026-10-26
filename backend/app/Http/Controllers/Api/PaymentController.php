@@ -132,8 +132,8 @@ class PaymentController extends Controller
             if (!$confirmed && !empty($validated['transaction_code'])) {
                 try {
                     $receipt    = strtoupper(trim($validated['transaction_code']));
-                    $resultUrl  = url('/api/v1/webhooks/mpesa/transaction-result');
-                    $queueUrl   = url('/api/v1/webhooks/mpesa/transaction-timeout');
+                    $resultUrl  = url('/api/webhooks/mpesa/transaction-result');
+                    $queueUrl   = url('/api/webhooks/mpesa/transaction-timeout');
                     $result     = $mpesa->transactionStatus($receipt, $resultUrl, $queueUrl);
                     $darajaResponse = $result;
 
@@ -328,7 +328,7 @@ class PaymentController extends Controller
             // even without a DB lookup on the CheckoutRequestID
             $callbackUrl = $order->payment_token
                 ? url("/api/v1/pay/{$order->payment_token}/mpesa-callback")
-                : url('/api/v1/webhooks/mpesa/callback');
+                : url('/api/webhooks/mpesa/callback');
 
             // The balance still due, not the whole total: a part-paid order
             // is not asked to pay twice.
@@ -597,6 +597,52 @@ class PaymentController extends Controller
             Log::error('M-Pesa callback error', ['error' => $e->getMessage(), 'data' => $data]);
             return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
         }
+    }
+
+    /**
+     * POST /webhooks/mpesa/transaction-result — Daraja's asynchronous answer to
+     * a Transaction Status query (the staff "verify" button, strategy 2). The
+     * URL was sent to Safaricom but no route existed (it pointed at
+     * /api/v1/webhooks/…, which is not registered), so every answer 404'd and
+     * was lost (found 2026-10-26). Recorded here for finance to reconcile; it
+     * changes no payment by itself.
+     */
+    public function mpesaTransactionResult(Request $request)
+    {
+        $r = (array) $request->input('Result', []);
+        $params = collect(data_get($r, 'ResultParameters.ResultParameter', []))
+            ->mapWithKeys(fn ($p) => [(string) ($p['Key'] ?? '') => $p['Value'] ?? null]);
+        $receipt = (string) ($r['TransactionID'] ?? $params->get('ReceiptNo') ?? '');
+        $info = [
+            'result_code'   => $r['ResultCode'] ?? null,
+            'result_desc'   => $r['ResultDesc'] ?? null,
+            'receipt'       => $receipt,
+            'amount'        => $params->get('Amount'),
+            'status'        => $params->get('TransactionStatus'),
+            'conversation'  => $r['OriginatorConversationID'] ?? null,
+        ];
+        Log::info('M-Pesa transaction-status result', $info);
+
+        if ($receipt !== '') {
+            $payment = Payment::where('provider_reference', strtoupper($receipt))->latest('id')->first();
+            if ($payment) {
+                $resp = (array) ($payment->provider_response ?? []);
+                $resp['mpesa_transaction_status'] = $info + ['received_at' => now()->toIso8601String()];
+                $payment->forceFill(['provider_response' => $resp])->save();
+            }
+        }
+
+        return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
+    }
+
+    /** POST /webhooks/mpesa/transaction-timeout — the queue-timeout twin. */
+    public function mpesaTransactionTimeout(Request $request)
+    {
+        Log::warning('M-Pesa transaction-status query timed out', [
+            'conversation' => data_get($request->input('Result', []), 'OriginatorConversationID'),
+        ]);
+
+        return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
     }
 
     /**

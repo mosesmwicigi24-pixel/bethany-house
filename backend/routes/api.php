@@ -2281,6 +2281,8 @@ Route::get('/pay/{token}', function () {
 Route::prefix('webhooks')->middleware('throttle:webhooks')->group(function () {
     Route::post('/mpesa/callback',      [PaymentController::class, 'mpesaCallback']);
     Route::post('/mpesa/validation',    [PaymentController::class, 'mpesaValidation']);
+    Route::post('/mpesa/transaction-result',  [PaymentController::class, 'mpesaTransactionResult']);
+    Route::post('/mpesa/transaction-timeout', [PaymentController::class, 'mpesaTransactionTimeout']);
     Route::post('/paystack/webhook',    [PaymentController::class, 'paystackWebhook']);
     Route::post('/flutterwave/webhook', [PaymentController::class, 'flutterwaveWebhook']);
 });
