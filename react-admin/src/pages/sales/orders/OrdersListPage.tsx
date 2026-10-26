@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useRef, Fragment } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { ordersApi } from "@/api/orders";
 import type { Order, OrderStatus, OrderFilters } from "@/api/orders";
@@ -10,56 +9,15 @@ import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
 import { usePermissions } from "@/hooks/usePermissions";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-// Order-stage semantics. An order's life is three stages and the colours say
-// which one it is at a glance down a list:
-//
-//   Confirmed  amber  — a human accepted it; it is income and it is waiting
-//   Processed  pink   — it is being worked (in production, shipped, delivered)
-//   Completed  green  — done
-//
-// `pending` is deliberately NOT one of them. It is an unconfirmed cart a
-// customer built and abandoned, it is NOT income, and it is excluded from the
-// sales report — so it reads as neutral-grey "Unconfirmed", not as a warning.
-// Calling it "Pending Payment" implied the only missing thing was money, which
-// is how 98 abandoned carts came to be counted as KES 1.1m of revenue.
-const STATUS_CONFIG: Record<string, { label: string; dot: string; badge: string }> = {
-    pending:         { label: "Unconfirmed",     dot: "bg-surface-400",   badge: "badge-neutral" },
-    paid:            { label: "Paid",            dot: "bg-success-vivid", badge: "badge-success" },
-    confirmed:       { label: "Confirmed",       dot: "bg-amber",         badge: "badge-amber"   },
-    processing:      { label: "Processed",       dot: "bg-pink-vivid",    badge: "badge-pink"    },
-    shipped:         { label: "Shipped",         dot: "bg-pink-vivid",    badge: "badge-pink"    },
-    delivered:       { label: "Delivered",       dot: "bg-pink-vivid",    badge: "badge-pink"    },
-    completed:       { label: "Completed",       dot: "bg-success-vivid", badge: "badge-success" },
-    cancelled:       { label: "Cancelled",       dot: "bg-danger",        badge: "badge-danger"  },
-    refunded:        { label: "Refunded",        dot: "bg-surface-400",   badge: "badge-neutral" },
-    voided:          { label: "Voided",          dot: "bg-surface-400",   badge: "badge-neutral" },
-};
-
-const CHANNEL_LABELS: Record<string, { label: string }> = {
-    online:   { label: "Online"   },
-    pos:      { label: "POS"      },
-    whatsapp: { label: "WhatsApp" },
-};
-
-/** Which app a chat sale came from — the badge on Chat Orders rows. */
-const SOURCE_BADGES: Record<string, { label: string; badge: string }> = {
-    whatsapp:  { label: "WhatsApp",  badge: "badge-success" },
-    messenger: { label: "Messenger", badge: "badge-info"    },
-    instagram: { label: "Instagram", badge: "badge-pink"    },
-    website:   { label: "Website",   badge: "badge-neutral" },
-    walk_in:   { label: "Walk-in",   badge: "badge-neutral" },
-};
-
-const PAYMENT_METHOD_LABELS: Record<string, string> = {
-    cash:          "Cash",
-    mpesa:         "M-Pesa",
-    card:          "Card",
-    bank_transfer: "Bank Transfer",
-    cash_on_delivery: "COD",
-};
+import {
+    STATUS_CONFIG,
+    OrderTableHead,
+    OrderRow,
+    OrderRowSkeleton,
+    OrderCard,
+    OrderCardSkeleton,
+    ORDER_TABLE_COLUMNS,
+} from "@/components/orders/OrderRow";
 
 // ── Stage menu ────────────────────────────────────────────────────────────────
 // Moving an order along its life used to mean opening it, finding Update
@@ -138,7 +96,7 @@ function StageMenu({ order, onDone }: { order: Order; onDone: () => void }) {
                 aria-label="Order stage"
                 title="Move this order along"
                 className={clsx(
-                    "w-6 h-6 rounded-md flex items-center justify-center transition-colors",
+                    "w-7 h-7 rounded-md flex items-center justify-center transition-colors",
                     "text-surface-400 hover:text-surface-700 hover:bg-surface-100",
                     open && "bg-surface-100 text-surface-700",
                     busy && "opacity-50",
@@ -178,18 +136,6 @@ function StageMenu({ order, onDone }: { order: Order; onDone: () => void }) {
                 </div>
             )}
         </div>
-    );
-}
-
-// ── Status badge ──────────────────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: string }) {
-    const config = STATUS_CONFIG[status] ?? { label: status, badge: "badge-neutral", dot: "bg-surface-400" };
-    return (
-        <span className={clsx("badge", config.badge)}>
-            <span className={clsx("w-1.5 h-1.5 rounded-full", config.dot)} />
-            {config.label}
-        </span>
     );
 }
 
@@ -345,8 +291,6 @@ const CHANNEL_TITLES: Record<SalesChannel, { title: string; subtitle: string }> 
 };
 
 export default function OrdersPage({ channel }: { channel?: SalesChannel } = {}) {
-    const navigate   = useNavigate();
-    const toast      = useToastStore();
     const qc         = useQueryClient();
     const _ts = useTableState();
     const page = _ts.state.page;
@@ -444,15 +388,15 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                 <FiltersBar filters={filters} onChange={updateFilter} onClear={clearFilters} hideChannel={!!channel} />
             </div>
 
-            {/* ── Phone: a card list ──────────────────────────────────────────
-                A 9-column table on a 430px screen scrolls sideways and wraps the
-                order number onto three lines — the reference app never puts a
-                table on a handset. Desktop keeps the table below, where the
-                columns genuinely fit. Same rows, same grouping, same
-                destination on tap. */}
-            <div className="md:hidden">
+            {/* ── Phone, tablet, small laptop: a card list ───────────────────
+                Below xl the content area is 450–700px once the sidebar is open,
+                and a table there scrolls sideways — the reference app never
+                puts a table there. From xl the table below takes over. Same rows, same
+                grouping, same destination on tap; both are the shared
+                components/orders/OrderRow so the four Sales pages agree. */}
+            <div className="xl:hidden">
                 {isLoading ? (
-                    <div className="flex justify-center py-16"><Spinner size="lg" /></div>
+                    <OrderCardSkeleton />
                 ) : orders.length === 0 ? (
                     <div className="card card-body text-center text-surface-500 text-sm py-12">
                         No orders found
@@ -464,61 +408,10 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                                 <p className="px-1 pb-1.5 text-2xs font-bold uppercase tracking-wider text-surface-500">
                                     {group.label}
                                 </p>
-                                <div className="card divide-y divide-line">
-                                    {group.items.map((order) => {
-                                        const cfg = STATUS_CONFIG[order.status] ?? { label: order.status, badge: "badge-neutral", dot: "bg-surface-400" };
-                                        // Same "real email or fall back to phone" rule the table row uses.
-                                        // `||` not `??`: the table treats an empty-string contact as
-                                        // absent (`sub ? … : null`), so an order with customer_phone: ""
-                                        // must fall through here too, not print a dangling separator.
-                                        const email = order.customer_email && !order.customer_email.startsWith('noemail+') ? order.customer_email : null;
-                                        const contact = email || order.customer_phone || null;
-                                        const src = order.source_channel ? SOURCE_BADGES[order.source_channel] : null;
-                                        const channelLabel = channel === "chat" && src
-                                            ? src.label
-                                            : CHANNEL_LABELS[order.order_type]?.label ?? order.order_type;
-                                        const paymentLabel = PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method;
-                                        // Contact if we have one, otherwise the payment method — never an empty tail.
-                                        const detail = contact || paymentLabel || null;
-                                        return (
-                                            <button
-                                                key={order.id}
-                                                onClick={() => navigate(`/sales/orders/${order.id}`)}
-                                                className="w-full text-left px-3.5 py-3 active:bg-surface-50 transition-colors"
-                                            >
-                                                {/* Line 1 — who it's for, and where it stands */}
-                                                <div className="flex items-start gap-2">
-                                                    <span className={clsx('mt-1.5 w-1.5 h-1.5 rounded-full shrink-0', cfg.dot)} />
-                                                    <p className="flex-1 min-w-0 font-bold text-surface-900 text-[13.5px] leading-snug truncate">
-                                                        {order.customer_name || "Guest"}
-                                                    </p>
-                                                    <span className={clsx("badge shrink-0", cfg.badge)}>
-                                                        {cfg.label}
-                                                    </span>
-                                                </div>
-
-                                                {/* Line 2 — how it came in, and how to reach them */}
-                                                <p className="mt-1 pl-3.5 text-[12.5px] text-surface-600 truncate">
-                                                    {channelLabel}
-                                                    {detail && <span className="text-surface-400"> · {detail}</span>}
-                                                </p>
-
-                                                {/* Line 3 — the reference, the size, the money */}
-                                                <div className="mt-1 pl-3.5 flex items-center gap-2 text-2xs">
-                                                    <span className="min-w-0 font-mono font-bold text-brand-700 truncate">{order.order_number}</span>
-                                                    <span className="text-surface-500 shrink-0">
-                                                        {order.items.length} item{order.items.length !== 1 ? "s" : ""}
-                                                    </span>
-                                                    <span className="ml-auto shrink-0 tabular-nums font-bold text-surface-900">
-                                                        {order.currency_code} {fmt(order.total_amount)}
-                                                        {order.is_international && (
-                                                            <span className="ml-1 text-info-600" title="International order">🌐</span>
-                                                        )}
-                                                    </span>
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
+                                <div className="card divide-y divide-line overflow-hidden">
+                                    {group.items.map((order) => (
+                                        <OrderCard key={order.id} order={order} />
+                                    ))}
                                 </div>
                             </div>
                         ))}
@@ -526,14 +419,10 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                 )}
             </div>
 
-            {/* ── Table (desktop) ─────────────────────────────────────────── */}
+            {/* ── Table (xl and up) ───────────────────────────────────────── */}
             <div className="card overflow-hidden">
-                <div className="hidden md:block">
-                {isLoading ? (
-                    <div className="flex items-center justify-center h-48">
-                        <Spinner size="lg" />
-                    </div>
-                ) : orders.length === 0 ? (
+                <div className="hidden xl:block">
+                {!isLoading && orders.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 gap-3 text-surface-400">
                         <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={0.8}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
@@ -542,109 +431,25 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                     </div>
                 ) : (
                     <div className="table-wrapper rounded-none border-0">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>Order</th>
-                                    <th>Customer</th>
-                                    <th>Channel</th>
-                                    <th>Status</th>
-                                    <th>Payment</th>
-                                    <th>Items</th>
-                                    <th className="text-right">Total</th>
-                                    <th>Served by</th>
-                                    <th>Date</th>
-                                    <th />
-                                </tr>
-                            </thead>
+                        <table className="table" aria-busy={isLoading || undefined}>
+                            <OrderTableHead />
                             <tbody>
-                                {orderGroups.map((group) => (
+                                {isLoading ? (
+                                    <OrderRowSkeleton />
+                                ) : orderGroups.map((group) => (
                                     <Fragment key={group.key}>
-                                        <DateGroupHeaderRow label={group.label} colSpan={10} />
+                                        <DateGroupHeaderRow label={group.label} colSpan={ORDER_TABLE_COLUMNS} />
                                         {group.items.map((order) => (
-                                    <tr
-                                        key={order.id}
-                                        onClick={() => navigate(`/sales/orders/${order.id}`)}
-                                        className="cursor-pointer"
-                                    >
-                                        <td>
-                                            <span className="font-mono text-xs font-semibold text-brand-600">
-                                                {order.order_number}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <div>
-                                                <p className="font-medium text-surface-900 text-xs">
-                                                    {order.customer_name ?? "-"}
-                                                </p>
-                                                {(() => {
-                                                    const email = order.customer_email && !order.customer_email.startsWith('noemail+') ? order.customer_email : null;
-                                                    const sub = email ?? order.customer_phone ?? null;
-                                                    return sub ? (
-                                                        <p className="text-2xs text-surface-400 truncate max-w-[160px]">{sub}</p>
-                                                    ) : null;
-                                                })()}
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span className="text-xs text-surface-500 flex items-center gap-1">
-                                                {order.order_type === "pos"
-                                                    ? <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 2.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z"/></svg>
-                                                    : <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+                                            <OrderRow
+                                                key={order.id}
+                                                order={order}
+                                                actions={
+                                                    <>
+                                                        <PaymentLinkButton order={order} />
+                                                        <StageMenu order={order} onDone={refetchAfterStageChange} />
+                                                    </>
                                                 }
-                                                {channel === "chat" && order.source_channel && SOURCE_BADGES[order.source_channel]
-                                                    ? SOURCE_BADGES[order.source_channel].label
-                                                    : CHANNEL_LABELS[order.order_type]?.label ?? order.order_type}
-                                                {channel === "quoted" && order.quotation_number && (
-                                                    <span className="block text-2xs text-surface-400 font-mono">
-                                                        {order.quotation_number}
-                                                    </span>
-                                                )}
-                                            </span>
-                                        </td>
-                                        <td><StatusBadge status={order.status} /></td>
-                                        <td>
-                                            <span className="text-xs text-surface-600">
-                                                {PAYMENT_METHOD_LABELS[order.payment_method] ?? order.payment_method}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <span className="text-xs text-surface-600">
-                                                {order.items.length} item{order.items.length !== 1 ? "s" : ""}
-                                            </span>
-                                        </td>
-                                        <td className="text-right">
-                                            <span className="font-semibold text-surface-900 text-xs">
-                                                {order.currency_code} {fmt(order.total_amount)}
-                                            </span>
-                                            {(order as any).is_international && (
-                                                <span className="ml-1.5 text-2xs font-semibold text-info-600" title="International order">🌐</span>
-                                            )}
-                                        </td>
-                                        <td>
-                                            {order.cashier_name ? (
-                                                <span className="text-xs text-surface-600 whitespace-nowrap">
-                                                    {order.cashier_name}
-                                                </span>
-                                            ) : (
-                                                <span className="text-xs text-surface-500">—</span>
-                                            )}
-                                        </td>
-                                        <td>
-                                            <span className="text-xs text-surface-500 whitespace-nowrap">
-                                                {new Date(order.created_at).toLocaleDateString("en-KE", { dateStyle: "medium" })}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <div className="flex items-center gap-1.5 justify-end">
-                                                <PaymentLinkButton order={order} />
-                                                <StageMenu order={order} onDone={refetchAfterStageChange} />
-                                                <svg className="w-4 h-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                                                </svg>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                            />
                                         ))}
                                     </Fragment>
                                 ))}
@@ -654,11 +459,11 @@ export default function OrdersPage({ channel }: { channel?: SalesChannel } = {})
                 )}
                 </div>
 
-                {/* Pagination — shared by both layouts. Below md the table above
+                {/* Pagination — shared by both layouts. Below xl the table above
                     it is display:none, so the divider would be a hairline with
                     nothing above it; drop it there. */}
                 {meta && meta.last_page > 1 && (
-                    <div className="px-4 py-3 border-t max-md:border-t-0 border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-4 py-3 border-t max-xl:border-t-0 border-line flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <p className="text-xs text-surface-500">
                             Page {meta.current_page} of {meta.last_page} · {meta.total.toLocaleString()} orders
                         </p>

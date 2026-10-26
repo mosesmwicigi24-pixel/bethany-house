@@ -64,7 +64,30 @@ export interface OrderItem {
     /** Human-readable tax category label(s) for receipt/invoice display. */
     tax_name?: string | null;
     subtotal: number;
+    /** The stored line amount (order_items.total_price) — what the list row prints. */
+    total_price?: number | string | null;
     image_url?: string | null;
+}
+
+/**
+ * How the order list row describes money (GET /admin/orders only): ONE state,
+ * the method(s) that paid, and when. Display only — never summed. `state` is
+ * null for a voided/cancelled order that holds no settled money.
+ */
+export type OrderListPaymentState =
+    | "paid"
+    | "partial"
+    | "unpaid"
+    | "awaiting_approval"
+    | "refunded"
+    | "partially_refunded"
+    | "failed";
+
+export interface OrderListPaymentSummary {
+    state: OrderListPaymentState | null;
+    methods: { code: string; name: string; amount: number; currency_code: string }[];
+    /** Latest settled payment's paid_at (ISO, UTC); null when nothing is settled. */
+    paid_at: string | null;
 }
 
 export interface OrderPayment {
@@ -163,6 +186,10 @@ export interface Order {
     /** Expiry for the payment token */
     payment_token_expires_at?: string | null;
     customer_id?: number | null;
+    /** The customer record's number (CUST-…), list rows only; null for walk-ins. */
+    customer_number?: string | null;
+    /** List rows only — see OrderListPaymentSummary. */
+    payment_summary?: OrderListPaymentSummary;
     customer_name?: string | null;
     customer_email?: string | null;
     customer_phone?: string | null;
@@ -258,12 +285,29 @@ export const ordersApi = {
         get<{ summary: PendingQueueSummary; rows: PendingQueueRow[] }>(
             "/v1/admin/orders/pending-queue"),
 
-    list: (params?: OrderFilters) =>
-        get<{
+    // The endpoint returns Laravel's paginator as-is: total / current_page /
+    // last_page / per_page sit at the TOP level, beside `data`, not under a
+    // `meta` key. Reading `res.meta` alone gave undefined, so these four pages
+    // never showed their count or a pager — only the first page of rows was
+    // ever reachable. Normalised here, accepting either shape.
+    list: async (params?: OrderFilters) => {
+        type Meta = { total: number; current_page: number; last_page: number; per_page: number };
+        const res = await get<{
             data: Order[];
-            meta: { total: number; current_page: number; last_page: number; per_page: number };
-            stats: OrderSummaryStats;
-        }>("/v1/admin/orders", { params: params as Record<string, string> }),
+            meta?: Meta;
+            stats?: OrderSummaryStats;
+        } & Partial<Meta>>("/v1/admin/orders", { params: params as Record<string, string> });
+        const meta: Meta | undefined = res.meta
+            ?? (typeof res.total === "number" && typeof res.last_page === "number"
+                ? {
+                    total: res.total,
+                    current_page: Number(res.current_page ?? 1),
+                    last_page: res.last_page,
+                    per_page: Number(res.per_page ?? res.data.length),
+                }
+                : undefined);
+        return { data: res.data, meta, stats: res.stats };
+    },
 
     get: (id: number) =>
         get<{ order: Order }>(`/v1/admin/orders/${id}`),

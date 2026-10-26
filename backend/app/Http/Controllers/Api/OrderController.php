@@ -220,7 +220,16 @@ class OrderController extends Controller
     public function index(Request $request)
     {
         $query = $this->screenQuery($request)
-            ->with(['user', 'items', 'outlet', 'creator:id,first_name,last_name'])
+            ->with([
+                'user', 'items', 'outlet', 'creator:id,first_name,last_name',
+                // The list row (2026-10-26) shows the customer's number, how
+                // the order was paid and when. Eager-loaded so a page of 25
+                // rows costs the same three queries as a page of one. A
+                // soft-deleted customer still owns their number.
+                'customer' => fn ($q) => $q->withTrashed()->select('id', 'customer_number'),
+                // No phone_number, no provider payloads: only what the row needs.
+                'payments:id,order_id,payment_method,amount,currency_code,status,requires_approval,approval_status,refund_amount,paid_at,approved_at,created_at',
+            ])
             // The Quoted Sales page shows which quotation an order was born
             // from; one scalar sub-select beats N lookups from the client.
             ->select('orders.*')
@@ -233,12 +242,84 @@ class OrderController extends Controller
 
         // Flatten who served each order onto the row, under the same key the
         // detail route uses, so the list and the order agree on one name.
-        $orders->getCollection()->each(function (Order $order) {
+        // Method codes → the names staff configured (I&M Paybill, Mukuru App…).
+        // Inactive methods included: an old payment keeps its name. One query.
+        $methodNames = PaymentMethod::query()->pluck('name', 'code')->all();
+
+        $orders->getCollection()->each(function (Order $order) use ($methodNames) {
             $order->setAttribute('cashier_name', $order->creator?->name ?: null);
             $order->unsetRelation('creator');
+
+            $order->setAttribute('customer_number', $order->customer?->customer_number ?: null);
+            $order->unsetRelation('customer');
+
+            $order->setAttribute('payment_summary', $this->listPaymentSummary($order, $methodNames));
+            $order->unsetRelation('payments');
         });
 
         return response()->json($orders);
+    }
+
+    /**
+     * What the order list row says about money: ONE payment state, the
+     * method(s) that paid, and when it was paid.
+     *
+     * Display only — no figure here feeds a total. The state reads the order's
+     * own payment_status (what syncPaymentStatus keeps and the detail page
+     * shows), with two corrections the row needs:
+     *   - a voided/cancelled order with no settled money says nothing, even
+     *     where its payment_status was left at 'paid' by an old void path
+     *     (measured on production 2026-10-26: 2 such rows, 0 settled payments);
+     *   - an unpaid order with a payment held for approval says so.
+     * "Settled" is SettledPayment's rule: status 'paid', approved where
+     * approval applies. paid_at is the latest settled payment's.
+     *
+     * @param  array<string, string>  $methodNames
+     * @return array{state: ?string, methods: list<array{code: string, name: string, amount: float, currency_code: string}>, paid_at: ?string}
+     */
+    private function listPaymentSummary(Order $order, array $methodNames): array
+    {
+        $settled  = $order->payments->filter(fn (Payment $p) => $p->status === 'paid'
+            && (! $p->requires_approval || $p->approval_status === 'approved'));
+        $awaiting = $order->payments->filter(fn (Payment $p) => $p->requires_approval
+            && $p->approval_status === 'pending_review'
+            && in_array($p->status, ['pending', 'paid'], true));
+
+        $state = match (true) {
+            $order->status === 'refunded' || $order->payment_status === 'refunded' => 'refunded',
+            $order->payment_status === 'partially_refunded'                          => 'partially_refunded',
+            in_array($order->status, ['voided', 'cancelled'], true) && $settled->isEmpty() => null,
+            $order->payment_status === 'paid'                                        => 'paid',
+            in_array($order->payment_status, ['partial', 'deposit'], true)           => 'partial',
+            $order->payment_status === 'pending_approval' || $awaiting->isNotEmpty() => 'awaiting_approval',
+            $order->payment_status === 'failed'                                      => 'failed',
+            default                                                                  => 'unpaid',
+        };
+
+        // The methods that paid; with none settled, the ones awaiting approval.
+        $source  = $settled->isNotEmpty() ? $settled : $awaiting;
+        $methods = $source
+            ->groupBy(fn (Payment $p) => $p->payment_method . '|' . $p->currency_code)
+            ->map(fn ($group) => [
+                'code'          => (string) $group->first()->payment_method,
+                'name'          => $methodNames[$group->first()->payment_method]
+                                   ?? Str::headline((string) $group->first()->payment_method),
+                'amount'        => round((float) $group->sum('amount'), 2),
+                'currency_code' => (string) $group->first()->currency_code,
+            ])
+            ->values()
+            ->all();
+
+        $paidAt = $settled
+            ->map(fn (Payment $p) => $p->paid_at ?? $p->approved_at ?? $p->created_at)
+            ->filter()
+            ->max();
+
+        return [
+            'state'   => $state,
+            'methods' => $methods,
+            'paid_at' => $paidAt?->toJSON(),
+        ];
     }
 
     /**
