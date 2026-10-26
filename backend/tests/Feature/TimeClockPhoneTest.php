@@ -40,6 +40,8 @@ class TimeClockPhoneTest extends TestCase
         $this->outlet = Outlet::factory()->create([
             'latitude' => self::LAT, 'longitude' => self::LNG, 'geofence_radius_meters' => 50, 'is_active' => true,
         ]);
+        // These cases punch without a roster; the C1 "without a shift" rule (default: flag) is covered in AttendanceRulesTest.
+        \App\Support\AttendanceRules::save(['clock_in_without_shift' => 'allow']);
     }
 
     private function staff(array $permissions = []): User
@@ -179,7 +181,7 @@ class TimeClockPhoneTest extends TestCase
 
     public function test_auto_clock_out_closes_at_the_cutoff_and_flags(): void
     {
-        config(['attendance.auto_clock_out_time' => '22:00']);
+        \App\Support\AttendanceRules::save(['auto_clock_out_time' => '22:00', 'auto_clock_out_after_hours' => 0, 'daily_limit_hours' => 0]);
         $user = $this->staff();
         $yesterday = now()->subDay()->setTime(8, 0);
         $e = TimeEntry::factory()->create(['user_id' => $user->id, 'outlet_id' => $this->outlet->id, 'clock_in_at' => $yesterday,

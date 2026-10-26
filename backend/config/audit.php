@@ -150,6 +150,7 @@ return [
         \App\Models\PayrollLine::class,
         \App\Models\StaffAdvance::class,
         \App\Models\AdvanceRepayment::class,
+        \App\Models\TimesheetFixRequest::class,
         // Catalogue & pricing
         \App\Models\Product::class,
         \App\Models\ProductVariant::class,

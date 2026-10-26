@@ -157,7 +157,7 @@ function PayGroupsModal({ onClose }: { onClose: () => void }) {
                     {(data?.data ?? []).map(g => (
                         <li key={g.id} className="flex items-center gap-3 px-3 py-2">
                             <span className="flex-1"><b>{g.name}</b>{g.is_default ? <span className="ml-2 text-2xs text-brand-600 font-semibold">default</span> : null}{!g.is_active ? <span className="ml-2 text-2xs text-surface-400">off</span> : null}
-                                <span className="block text-2xs text-surface-500">{g.frequency} · OT ×{g.overtime_multiplier} {g.overtime_after_daily_hours ? `after ${g.overtime_after_daily_hours} h/day` : ""}{g.overtime_after_weekly_hours ? ` after ${g.overtime_after_weekly_hours} h/week` : ""} · rest ×{g.rest_day_multiplier} · holiday ×{g.holiday_multiplier}{g.round_to_minutes > 1 ? ` · rounds to ${g.round_to_minutes} min` : ""}</span></span>
+                                <span className="block text-2xs text-surface-500">{g.frequency}{g.period_end_day ? ` (${g.period_end_day + 1 > 28 ? 1 : g.period_end_day + 1}th → ${g.period_end_day}th)` : ""} · OT ×{g.overtime_multiplier} {g.overtime_after_daily_hours ? `after ${g.overtime_after_daily_hours} h/day` : ""}{g.overtime_after_weekly_hours ? ` after ${g.overtime_after_weekly_hours} h/week` : ""} · rest ×{g.rest_day_multiplier} · holiday ×{g.holiday_multiplier}{g.round_to_minutes > 1 ? ` · rounds to ${g.round_to_minutes} min` : ""}</span></span>
                             <button onClick={() => setEdit({ ...g })} className="btn-ghost btn-sm text-xs">Edit</button>
                         </li>
                     ))}
@@ -167,6 +167,18 @@ function PayGroupsModal({ onClose }: { onClose: () => void }) {
                     <div className="rounded-xl border border-line bg-surface-50 p-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
                         <label className="text-xs text-surface-500 col-span-2">Name<input className="input mt-1" value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} maxLength={60} /></label>
                         <label className="text-xs text-surface-500">Paid<select className="input mt-1" value={edit.frequency} onChange={e => setEdit({ ...edit, frequency: e.target.value as "monthly" | "weekly" })}><option value="monthly">Monthly</option><option value="weekly">Weekly</option></select></label>
+                        {edit.frequency === "monthly" && <label className="text-xs text-surface-500">Period ends on day<input type="number" min={1} max={28} className="input mt-1" value={edit.period_end_day ?? ""} onChange={num("period_end_day", true)} placeholder="blank = month end" /></label>}
+                        <label className="text-xs text-surface-500">Pay date (day of month)<input type="number" min={1} max={28} className="input mt-1" value={edit.pay_date_day ?? ""} onChange={num("pay_date_day", true)} /></label>
+                        <label className="text-xs text-surface-500">Unpaid lunch (min)<input type="number" min={0} max={180} className="input mt-1" value={edit.unpaid_break_minutes ?? 0} onChange={num("unpaid_break_minutes")} /></label>
+                        <label className="text-xs text-surface-500">…after hours worked<input type="number" step="0.5" min={1} className="input mt-1" value={edit.unpaid_break_after_hours ?? ""} onChange={num("unpaid_break_after_hours", true)} /></label>
+                        <div className="col-span-2">
+                            <p className="text-xs text-surface-500">Hours per weekday (blank = standard {edit.standard_hours_per_day ?? 8} h)</p>
+                            <div className="grid grid-cols-7 gap-1 mt-1">
+                                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, i) => (
+                                    <label key={d} className="text-2xs text-surface-400 text-center">{d}<input type="number" step="0.5" min={0} max={24} className="input mt-0.5 px-1 text-center" value={edit.hours_by_weekday?.[String(i + 1)] ?? ""} onChange={e => setEdit(g => g ? { ...g, hours_by_weekday: { ...(g.hours_by_weekday ?? {}), [String(i + 1)]: e.target.value === "" ? (undefined as unknown as number) : Number(e.target.value) } } : g)} /></label>
+                                ))}
+                            </div>
+                        </div>
                         <label className="text-xs text-surface-500">OT after h/day<input type="number" step="0.5" className="input mt-1" value={edit.overtime_after_daily_hours ?? ""} onChange={num("overtime_after_daily_hours", true)} /></label>
                         <label className="text-xs text-surface-500">OT after h/week<input type="number" step="0.5" className="input mt-1" value={edit.overtime_after_weekly_hours ?? ""} onChange={num("overtime_after_weekly_hours", true)} /></label>
                         <label className="text-xs text-surface-500">Round punches to (min)<select className="input mt-1" value={edit.round_to_minutes ?? 1} onChange={e => setEdit({ ...edit, round_to_minutes: Number(e.target.value) })}>{[1, 5, 10, 15, 30].map(n => <option key={n} value={n}>{n === 1 ? "No rounding" : n}</option>)}</select></label>

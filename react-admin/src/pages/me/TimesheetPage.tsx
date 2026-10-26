@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { timesheetsApi, SHEET_TONE, SHEET_LABEL } from "@/api/timesheets";
+import { peopleC1Api } from "@/api/people-c1";
 import { TimesheetDays, TimesheetTotals } from "@/components/people/TimesheetDays";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
@@ -15,6 +16,11 @@ export default function TimesheetPage() {
     const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
     const { data, isLoading } = useQuery({ queryKey: ["my-timesheet", date], queryFn: () => timesheetsApi.mine(date) });
     const [note, setNote] = useState("");
+    const { data: fixes } = useQuery({ queryKey: ["my-fixes"], queryFn: () => peopleC1Api.myFixes() });
+    const [fixDate, setFixDate] = useState<string | null>(null);
+    const [fixMsg, setFixMsg] = useState("");
+    const requestFix = useMutation({ mutationFn: () => peopleC1Api.requestFix(fixDate!, fixMsg), onSuccess: r => { toast.success(r.message); setFixDate(null); setFixMsg(""); qc.invalidateQueries({ queryKey: ["my-fixes"] }); }, onError: (e: ApiError) => toast.error(e.message) });
+    const fixByDate = Object.fromEntries((fixes?.data ?? []).map(f => [f.date, f.status])) as Record<string, "requested" | "approved" | "declined">;
     const submit = useMutation({ mutationFn: () => timesheetsApi.submit(note || undefined, date), onSuccess: r => { toast.success(r.message); qc.invalidateQueries({ queryKey: ["my-timesheet"] }); }, onError: (e: ApiError) => toast.error(e.message) });
     const fmtD = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     // A weekly period is 7 days long; anything longer steps by a month.
@@ -46,7 +52,18 @@ export default function TimesheetPage() {
             {data.sent_back_note && data.status === "sent_back" && <p className="rounded-xl bg-warning-light text-warning text-sm px-3 py-2">Your manager sent this back: {data.sent_back_note}</p>}
 
             <TimesheetTotals t={data.totals} compact />
-            <TimesheetDays d={data} />
+            <TimesheetDays d={data} onRequestFix={d => { setFixDate(d); setFixMsg(""); }} fixes={fixByDate} />
+            {fixDate && (
+                <div className="rounded-2xl bg-white border border-line shadow-sm p-4 space-y-2">
+                    <p className="text-sm font-semibold text-surface-900">Something wrong on {fmtD(fixDate)}?</p>
+                    <p className="text-xs text-surface-500">Say what happened (forgot to clock out, phone was off, wrong outlet). Your manager corrects the punch and you are told.</p>
+                    <input className="input" value={fixMsg} onChange={e => setFixMsg(e.target.value)} maxLength={300} placeholder="I forgot to clock out; I left at 17:10" />
+                    <div className="flex gap-2">
+                        <button onClick={() => setFixDate(null)} className="btn-secondary flex-1">Cancel</button>
+                        <button onClick={() => requestFix.mutate()} disabled={requestFix.isPending || fixMsg.length < 3} className="btn-primary flex-1">Send to my manager</button>
+                    </div>
+                </div>
+            )}
 
             {data.can_submit && (
                 <div className="rounded-2xl bg-white border border-line shadow-sm p-4 space-y-2">

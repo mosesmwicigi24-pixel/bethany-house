@@ -46,6 +46,8 @@ export interface TimeEntry {
     clock_out_recorded_at?: string | null;
     device_info?: string | null;
     app_version?: string | null;
+    left_site_at?: string | null;
+    trail_points?: number;
     overridden_by?: string | null;
     corrected_by?: string | null;
 }
@@ -57,7 +59,9 @@ export interface TimeClockStatus {
     week_worked_minutes: number;
     last_entry: TimeEntry | null;
     outlets: TimeClockOutlet[];
-    rules: { auto_clock_out_time: string; late_sync_minutes: number };
+    rules: { auto_clock_out_time: string; late_sync_minutes: number; location_mode?: "off" | "punch" | "trail"; trail_interval_minutes?: number; trail_distance_meters?: number; leave_site_action?: string; leave_site_grace_minutes?: number };
+    /** C1: today's rostered shift, if any. */
+    today_shift?: { id: number; starts_at: string; ends_at: string; outlet: string | null; label: string | null } | null;
     server_time: string;
 }
 

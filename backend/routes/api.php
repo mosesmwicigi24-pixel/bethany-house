@@ -525,7 +525,12 @@ Route::prefix('v1')->group(function () {
                 Route::post('/break/start', [TimeClockController::class, 'startBreak']);
                 Route::post('/break/end',   [TimeClockController::class, 'endBreak']);
                 Route::get('/my-entries',   [TimeClockController::class, 'myEntries']);
+                Route::post('/trail',       [TimeClockController::class, 'trail']);   // location on shift (C1)
             });
+            // Timesheet fix requests (C1) — every staff member
+            Route::get('/me/timesheet/fixes',         [\App\Http\Controllers\Api\PeopleRequestsController::class, 'myFixes']);
+            Route::post('/me/timesheet/fixes',        [\App\Http\Controllers\Api\PeopleRequestsController::class, 'storeFix']);
+            Route::delete('/me/timesheet/fixes/{id}', [\App\Http\Controllers\Api\PeopleRequestsController::class, 'cancelFix'])->whereNumber('id');
 
             // ── My employee file (People PR 2) — every staff member ─────────
             Route::prefix('me/file')->group(function () {
@@ -1359,9 +1364,19 @@ Route::prefix('v1')->group(function () {
                 Route::get('/entries/{id}', [TimeClockController::class, 'showEntry']);
                 Route::get('/flagged',      [TimeClockController::class, 'flagged']);
                 Route::get('/live',         [TimeClockController::class, 'live']);
+                Route::get('/entries/{id}/trail', [TimeClockController::class, 'entryTrail'])->whereNumber('id'); // C1
+                Route::get('/rules',        [\App\Http\Controllers\Api\AttendanceRulesController::class, 'show']);           // C1
+                Route::put('/rules',        [\App\Http\Controllers\Api\AttendanceRulesController::class, 'update'])->middleware('permission:settings.edit,sanctum');
 
                 Route::put('/entries/{id}', [TimeClockController::class, 'updateEntry'])
                     ->middleware('permission:attendance.manage,sanctum');
+            });
+            // ── People overview + requests queue (C1) ──
+            Route::middleware('permission:attendance.view_team,sanctum')->prefix('people')->group(function () {
+                Route::get('/overview',                         [\App\Http\Controllers\Api\PeopleOverviewController::class, 'show']);
+                Route::get('/requests',                         [\App\Http\Controllers\Api\PeopleRequestsController::class, 'index']);
+                Route::get('/requests/count',                   [\App\Http\Controllers\Api\PeopleRequestsController::class, 'count']);
+                Route::post('/requests/fixes/{id}/{decision}',  [\App\Http\Controllers\Api\PeopleRequestsController::class, 'decideFix'])->whereNumber('id')->whereIn('decision', ['approve', 'decline'])->middleware('permission:attendance.manage,sanctum');
             });
 
             // ── Procurement ───────────────────────────────────────────────────

@@ -40,7 +40,7 @@ class Payroll
     /** Working days in the period (config attendance.working_days, holidays out) — the daily equivalent's divisor. */
     public static function workingDays(PayPeriod $period): int
     {
-        $working  = config('attendance.working_days', [1, 2, 3, 4, 5, 6]);
+        $working  = \App\Support\AttendanceRules::get('working_days');
         $holidays = PublicHoliday::whereBetween('date', [$period->starts_on->toDateString(), $period->ends_on->toDateString()])->pluck('date')->map(fn ($d) => Carbon::parse($d)->toDateString())->all();
         $n = 0;
         foreach (CarbonPeriod::create($period->starts_on, $period->ends_on) as $d) {
