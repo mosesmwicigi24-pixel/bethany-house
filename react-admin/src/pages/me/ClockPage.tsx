@@ -6,6 +6,7 @@ import { timeClockApi, type TimeClockOutlet, type TimeEntry, type Punch } from "
 import { rosterApi } from "@/api/roster";
 import { leaveApi } from "@/api/leave";
 import { useGeolocation, distanceMeters } from "@/lib/useGeolocation";
+import { nativeInfo } from "@/lib/native";
 import { readPendingPunch, savePendingPunch, clearPendingPunch, type PendingPunch } from "@/lib/pendingPunch";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
@@ -24,7 +25,8 @@ import type { ApiError } from "@/types";
  * Location is read only while this screen is open. Nothing follows anyone.
  */
 
-const APP_VERSION = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? "pwa";
+// The store app names itself with its own version; the PWA its build.
+const APP_VERSION = nativeInfo() ? `app-${nativeInfo()!.platform}-${nativeInfo()!.appVersion}` : ((import.meta.env.VITE_APP_VERSION as string | undefined) ?? "pwa");
 
 function fmtClock(d: Date) {
     return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
@@ -111,7 +113,7 @@ export default function ClockPage() {
     const [reason, setReason] = useState("");
     const [askReason, setAskReason] = useState(false);
 
-    const punchOf = (f: typeof fix): Punch => ({ latitude: f!.latitude, longitude: f!.longitude, accuracy: f!.accuracy });
+    const punchOf = (f: typeof fix): Punch => ({ latitude: f!.latitude, longitude: f!.longitude, accuracy: f!.accuracy, ...(f!.mocked ? { mock_location: true } : {}) });
 
     const keepForLater = (kind: "in" | "out", punch: Punch, outlet_id?: number) => {
         const p: PendingPunch = { kind, outlet_id, punch, recorded_at: new Date().toISOString() };

@@ -28,6 +28,16 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
 
 export async function registerPush(): Promise<void> {
     try {
+        // Store app (People PR 8): the app holds the Expo push token; ask it
+        // and hand the token to the server. No service worker involved.
+        const { isNative, askNative } = await import('@/lib/native')
+        if (isNative()) {
+            const reply = await askNative<{ type: string; token?: string }>({ type: 'push:register' }, 'push:token')
+            if (!reply?.token) return
+            const { pushApi } = await import('@/api/push')
+            await pushApi.subscribeExpo(reply.token)
+            return
+        }
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
 
         // Same timeout guard — serviceWorker.ready hangs if SW not active
@@ -65,6 +75,14 @@ export async function registerPush(): Promise<void> {
 
 export async function unregisterPush(): Promise<void> {
     try {
+        const { isNative, askNative } = await import('@/lib/native')
+        if (isNative()) {
+            const reply = await askNative<{ type: string; token?: string }>({ type: 'push:token?' }, 'push:token', 3000)
+            if (!reply?.token) return
+            const { pushApi } = await import('@/api/push')
+            await pushApi.unsubscribeExpo(reply.token)
+            return
+        }
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
 
         // navigator.serviceWorker.ready never rejects — it hangs forever if

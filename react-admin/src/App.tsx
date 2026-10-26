@@ -181,6 +181,7 @@ const MyTimesheetPage = lazy(() => import("@/pages/me/TimesheetPage"));
 const TimesheetsPage = lazy(() => import("@/pages/timesheets/TimesheetsPage"));
 const MyPayslipsPage = lazy(() => import("@/pages/me/PayslipsPage"));
 const MyAdvancesPage = lazy(() => import("@/pages/me/AdvancesPage"));
+const PrivacyPage = lazy(() => import("@/pages/public/PrivacyPage")); // public: the store listings need a policy URL (People PR 8)
 const PayrollPage = lazy(() => import("@/pages/payroll/PayrollPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
@@ -431,6 +432,7 @@ export default function App() {
                     <Routes>
                         {/* Public */}
                         <Route path="/login" element={<LoginPage />} />
+                        <Route path="/privacy" element={<Suspense fallback={<PageLoader />}><PrivacyPage /></Suspense>} />
                         <Route path="/" element={<HomeRedirect />} />
 
                         {/* Protected - all wrapped in AdminLayout */}
