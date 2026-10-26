@@ -3,7 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\LocationPing;
 use App\Models\Outlet;
+use App\Models\Shift;
+use App\Notifications\InAppNotification;
+use App\Services\NotificationService;
+use App\Support\AttendanceRules;
 use App\Models\TimeEntry;
 use App\Services\ActivityLogService;
 use App\Services\Auth\Devices;
@@ -59,9 +64,17 @@ class TimeClockController extends Controller
             'last_entry'     => $last ? $this->transformEntry($last) : null,
             'outlets'        => $this->availableOutletsFor($user),
             'rules'          => [
-                'auto_clock_out_time' => config('attendance.auto_clock_out_time'),
+                'auto_clock_out_time' => AttendanceRules::get('auto_clock_out_time'),
                 'late_sync_minutes'   => (int) config('attendance.late_sync_minutes'),
+                // Location on shift (C1): the app runs its trail only while an entry is active and mode = trail.
+                'location_mode'           => AttendanceRules::get('location_mode'),
+                'trail_interval_minutes'  => (int) AttendanceRules::get('trail_interval_minutes'),
+                'trail_distance_meters'   => (int) AttendanceRules::get('trail_distance_meters'),
+                'leave_site_action'       => AttendanceRules::get('leave_site_action'),
+                'leave_site_grace_minutes'=> (int) AttendanceRules::get('leave_site_grace_minutes'),
             ],
+            'today_shift'    => ($sh = Shift::with('outlet:id,name')->where('user_id', $user->id)->where('status', 'published')->where('date', today()->toDateString())->orderBy('starts_at')->first())
+                ? ['id' => $sh->id, 'starts_at' => Shift::hhmm($sh->starts_at), 'ends_at' => Shift::hhmm($sh->ends_at), 'outlet' => $sh->outlet?->name, 'label' => $sh->label] : null,
             'server_time'    => now()->toIso8601String(),
         ]);
     }
@@ -112,8 +125,8 @@ class TimeClockController extends Controller
     {
         $validated = $request->validate([
             'outlet_id'     => 'required|exists:outlets,id',
-            'latitude'      => 'required|numeric|between:-90,90',
-            'longitude'     => 'required|numeric|between:-180,180',
+            'latitude'      => 'nullable|numeric|between:-90,90',
+            'longitude'     => 'nullable|numeric|between:-180,180',
             'accuracy'      => 'nullable|numeric|min:0|max:100000',
             'recorded_at'   => 'nullable|date',
             'mock_location' => 'sometimes|boolean',
@@ -125,6 +138,7 @@ class TimeClockController extends Controller
         $user  = $request->user();
         $flags = [];
         $accuracy = isset($validated['accuracy']) ? (float) $validated['accuracy'] : null;
+        $rules = AttendanceRules::all();
 
         if (TimeEntry::where('user_id', $user->id)->active()->exists()) {
             return response()->json([
@@ -133,12 +147,33 @@ class TimeClockController extends Controller
         }
 
         $outlet = Outlet::findOrFail($validated['outlet_id']);
+        $device = app(Devices::class)->knownTo($user, $request);
+
+        // A fixed, location-free device (the shop computer, a kiosk tablet) may punch without a position (C1).
+        $noPosition = !isset($validated['latitude']) || !isset($validated['longitude']);
+        if ($noPosition && !($device && $device->location_free)) {
+            return response()->json(['message' => 'Your position is needed to clock in. Allow location and try again.'], 422);
+        }
+
+        // Rostered shift rules (C1): without a shift → allow / flag / refuse; not too early before one.
+        $shift = Shift::where('user_id', $user->id)->where('status', 'published')->where('date', today()->toDateString())->orderBy('starts_at')->first();
+        if (!$shift) {
+            if ($rules['clock_in_without_shift'] === 'refuse') {
+                return response()->json(['message' => 'You have no shift on the roster today. Ask your manager to add one before clocking in.'], 422);
+            }
+            if ($rules['clock_in_without_shift'] === 'flag') $flags[] = 'no_shift';
+        } elseif ((int) $rules['earliest_clock_in_minutes'] > 0) {
+            $earliest = $shift->startsAtCarbon()->subMinutes((int) $rules['earliest_clock_in_minutes']);
+            if (now()->lt($earliest)) {
+                return response()->json(['message' => 'Your shift starts at ' . $shift->startsAtCarbon()->format('H:i') . '. You can clock in from ' . $earliest->format('H:i') . '.', 'earliest_at' => $earliest->toIso8601String()], 422);
+            }
+        }
 
         $distance = null;
-        $method   = 'gps';
+        $method   = $noPosition ? 'device' : 'gps';
         $overriddenBy = null;
 
-        if ($outlet->latitude !== null && $outlet->longitude !== null) {
+        if (!$noPosition && $outlet->latitude !== null && $outlet->longitude !== null) {
             $distance = TimeEntry::haversineMeters(
                 (float) $validated['latitude'],
                 (float) $validated['longitude'],
@@ -188,8 +223,8 @@ class TimeClockController extends Controller
             'outlet_id'               => $outlet->id,
             'clock_in_at'              => $punchAt,
             'clock_in_recorded_at'     => $recordedAt,
-            'clock_in_latitude'        => $validated['latitude'],
-            'clock_in_longitude'       => $validated['longitude'],
+            'clock_in_latitude'        => $validated['latitude'] ?? null,
+            'clock_in_longitude'       => $validated['longitude'] ?? null,
             'clock_in_distance_meters' => $distance !== null ? round($distance, 2) : null,
             'clock_in_accuracy_meters' => $accuracy !== null ? round($accuracy, 2) : null,
             'clock_in_method'          => $method,
@@ -198,7 +233,7 @@ class TimeClockController extends Controller
             'overridden_by'            => $overriddenBy,
             'notes'                    => $validated['reason'] ?? null,
             'device_info'              => substr((string) $request->userAgent(), 0, 250),
-            'device_id'                => app(Devices::class)->knownTo($user, $request)?->id,
+            'device_id'                => $device?->id,
             'app_version'              => $validated['app_version'] ?? null,
         ]);
 
@@ -218,6 +253,131 @@ class TimeClockController extends Controller
     }
 
     /**
+     * POST /api/v1/admin/time-clock/trail  { points: [{latitude, longitude, accuracy?, recorded_at, mocked?}] }
+     *
+     * Location on shift (People C1). The app sends points only while an entry
+     * is active; the server keeps them for the retention period and decides
+     * about leaving the site: further than fence + leave_site_distance for
+     * longer than the grace period → flag the entry, or clock out at the
+     * moment they left (rule leave_site_action). Coming back inside before
+     * the grace is up clears the timer. A phone that goes quiet is not
+     * "leaving": only points prove it.
+     */
+    public function trail(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'points'               => 'required|array|min:1|max:200',
+            'points.*.latitude'    => 'required|numeric|between:-90,90',
+            'points.*.longitude'   => 'required|numeric|between:-180,180',
+            'points.*.accuracy'    => 'nullable|numeric|min:0|max:100000',
+            'points.*.recorded_at' => 'required|date',
+            'points.*.mocked'      => 'sometimes|boolean',
+        ]);
+        $user  = $request->user();
+        $rules = AttendanceRules::all();
+        if ($rules['location_mode'] !== 'trail') {
+            return response()->json(['message' => 'Trail is off.', 'tracking' => false]);
+        }
+        $entry = TimeEntry::with('outlet')->where('user_id', $user->id)->active()->first();
+        if (!$entry) {
+            return response()->json(['message' => 'Not clocked in; nothing kept.', 'tracking' => false]);
+        }
+        $outlet = $entry->outlet;
+        $radius = $outlet?->geofence_radius_meters;
+        $hasFence = $outlet && $outlet->latitude !== null && $outlet->longitude !== null && $radius !== null;
+        $leaveBeyond = $hasFence ? $radius + (int) $rules['leave_site_distance_meters'] : null;
+        $points = collect($validated['points'])->sortBy('recorded_at')->values();
+        $kept = 0; $mocked = false; $leftAt = $entry->left_site_at; $closed = false;
+
+        foreach ($points as $p) {
+            $at = Carbon::parse($p['recorded_at']);
+            if ($at->lt($entry->clock_in_at) || $at->gt(now()->addMinutes(5))) continue;
+            $distance = $hasFence ? TimeEntry::haversineMeters((float) $p['latitude'], (float) $p['longitude'], (float) $outlet->latitude, (float) $outlet->longitude) : null;
+            LocationPing::create([
+                'time_entry_id' => $entry->id, 'user_id' => $user->id,
+                'latitude' => $p['latitude'], 'longitude' => $p['longitude'],
+                'accuracy_meters' => isset($p['accuracy']) ? (int) round($p['accuracy']) : null,
+                'distance_meters' => $distance !== null ? (int) round($distance) : null,
+                'mocked' => (bool) ($p['mocked'] ?? false), 'recorded_at' => $at,
+            ]);
+            $kept++;
+            if (!empty($p['mocked'])) $mocked = true;
+            if ($leaveBeyond === null || $rules['leave_site_action'] === 'none' || $closed) continue;
+
+            // Wide uncertainty is not evidence of leaving.
+            $sure = !isset($p['accuracy']) || (float) $p['accuracy'] <= $leaveBeyond;
+            if ($distance > $leaveBeyond && $sure) {
+                if ($leftAt === null) {
+                    $leftAt = $at;
+                    NotificationService::deliver($user, new InAppNotification(
+                        title: 'Still clocked in?',
+                        body:  "You look to have left {$outlet->name}. Clock out if you have finished; otherwise you will be " . ($rules['leave_site_action'] === 'clock_out' ? 'clocked out' : 'flagged') . " in {$rules['leave_site_grace_minutes']} minutes.",
+                        actionUrl: '/me/clock', icon: 'clock',
+                    ));
+                } elseif ($leftAt->diffInMinutes($at) >= (int) $rules['leave_site_grace_minutes']) {
+                    $flags = array_values(array_unique(array_merge($entry->flags ?? [], ['left_site'])));
+                    if ($rules['leave_site_action'] === 'clock_out') {
+                        $this->closeEntryAt($entry, $leftAt, array_merge($flags, ['auto_clock_out']));
+                        $closed = true;
+                        NotificationService::deliver($user, new InAppNotification(title: 'Clocked out', body: "You were clocked out at {$leftAt->format('H:i')}, when you left {$outlet->name}. Tell your manager if that is wrong.", actionUrl: '/me/timesheet', icon: 'clock'));
+                    } else {
+                        $entry->flags = $flags; $entry->flagged_reason = TimeEntry::describeFlags($flags);
+                    }
+                }
+            } elseif ($distance !== null && $distance <= ($radius ?? 0) && $leftAt !== null) {
+                $leftAt = null; // back inside before the grace ran out
+            }
+        }
+        if ($mocked) {
+            $entry->flags = array_values(array_unique(array_merge($entry->flags ?? [], ['mock_location'])));
+            $entry->flagged_reason = TimeEntry::describeFlags($entry->flags);
+        }
+        if (!$closed) {
+            $entry->left_site_at = $leftAt;
+            $entry->trail_points = (int) $entry->trail_points + $kept;
+            $entry->save();
+        }
+
+        return response()->json(['message' => "Kept {$kept}.", 'tracking' => !$closed, 'left_site_at' => $leftAt?->toIso8601String(), 'closed' => $closed]);
+    }
+
+    /** Close an active entry at a given moment with flags (leave-site clock-out, limits). */
+    public function closeEntryAt(TimeEntry $entry, Carbon $at, array $flags): void
+    {
+        $breaks = $entry->breaks ?? [];
+        foreach ($breaks as &$b) { if (!empty($b['started_at']) && empty($b['ended_at'])) $b['ended_at'] = $at->toIso8601String(); }
+        unset($b);
+        $entry->breaks = $breaks;
+        $breakMinutes = $entry->calculateBreakMinutes();
+        $flags = array_values(array_unique($flags));
+        $entry->forceFill([
+            'clock_out_at' => $at, 'total_break_minutes' => $breakMinutes,
+            'worked_minutes' => max(0, (int) $entry->clock_in_at->diffInMinutes($at) - $breakMinutes),
+            'flags' => $flags, 'flagged_reason' => TimeEntry::describeFlags($flags), 'status' => 'flagged', 'auto_closed_at' => now(),
+            'left_site_at' => $entry->left_site_at,
+        ])->save();
+    }
+
+    /** GET /api/v1/admin/attendance/entries/{id}/trail — the points of one entry, for the map (attendance.view_team). */
+    public function entryTrail(Request $request, int $id): JsonResponse
+    {
+        $entry = TimeEntry::with('outlet:id,name,latitude,longitude,geofence_radius_meters')->findOrFail($id);
+        $user = $request->user();
+        if (!$user->can('outlets.all_access') && !DB::table('outlet_user')->where('user_id', $user->id)->where('outlet_id', $entry->outlet_id)->exists()) {
+            abort(403);
+        }
+        $points = LocationPing::where('time_entry_id', $entry->id)->orderBy('recorded_at')->get(['latitude', 'longitude', 'accuracy_meters', 'distance_meters', 'mocked', 'recorded_at']);
+        return response()->json([
+            'outlet' => $entry->outlet ? ['name' => $entry->outlet->name, 'latitude' => $entry->outlet->latitude !== null ? (float) $entry->outlet->latitude : null, 'longitude' => $entry->outlet->longitude !== null ? (float) $entry->outlet->longitude : null, 'radius' => $entry->outlet->geofence_radius_meters] : null,
+            'clock_in' => $entry->clock_in_latitude !== null ? ['latitude' => (float) $entry->clock_in_latitude, 'longitude' => (float) $entry->clock_in_longitude, 'at' => $entry->clock_in_at?->toIso8601String()] : null,
+            'clock_out' => $entry->clock_out_latitude !== null ? ['latitude' => (float) $entry->clock_out_latitude, 'longitude' => (float) $entry->clock_out_longitude, 'at' => $entry->clock_out_at?->toIso8601String()] : null,
+            'left_site_at' => $entry->left_site_at?->toIso8601String(),
+            'points' => $points->map(fn ($p) => ['latitude' => (float) $p->latitude, 'longitude' => (float) $p->longitude, 'accuracy' => $p->accuracy_meters, 'distance' => $p->distance_meters, 'mocked' => $p->mocked, 'at' => $p->recorded_at->toIso8601String()])->values(),
+            'retention_days' => (int) AttendanceRules::get('trail_retention_days'),
+        ]);
+    }
+
+    /**
      * POST /api/v1/admin/time-clock/clock-out
      * { latitude, longitude, accuracy?, recorded_at?, mock_location? }
      * Clocking out is never refused by distance: leaving is not a privilege.
@@ -226,8 +386,8 @@ class TimeClockController extends Controller
     public function clockOut(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'latitude'      => 'required|numeric|between:-90,90',
-            'longitude'     => 'required|numeric|between:-180,180',
+            'latitude'      => 'nullable|numeric|between:-90,90',
+            'longitude'     => 'nullable|numeric|between:-180,180',
             'accuracy'      => 'nullable|numeric|min:0|max:100000',
             'recorded_at'   => 'nullable|date',
             'mock_location' => 'sometimes|boolean',
@@ -238,6 +398,10 @@ class TimeClockController extends Controller
 
         if (!$entry) {
             return response()->json(['message' => 'You are not currently clocked in.'], 404);
+        }
+        $noPosition = !isset($validated['latitude']) || !isset($validated['longitude']);
+        if ($noPosition && !(app(Devices::class)->knownTo($user, $request)?->location_free)) {
+            return response()->json(['message' => 'Your position is needed to clock out. Allow location and try again.'], 422);
         }
 
         // Auto-close a dangling open break rather than blocking clock-out.
@@ -253,7 +417,7 @@ class TimeClockController extends Controller
 
         $outlet   = $entry->outlet;
         $distance = null;
-        if ($outlet && $outlet->latitude !== null && $outlet->longitude !== null) {
+        if (!$noPosition && $outlet && $outlet->latitude !== null && $outlet->longitude !== null) {
             $distance = TimeEntry::haversineMeters(
                 (float) $validated['latitude'],
                 (float) $validated['longitude'],
@@ -281,8 +445,8 @@ class TimeClockController extends Controller
         $entry->update([
             'clock_out_at'              => $clockOutAt,
             'clock_out_recorded_at'     => $recordedAt,
-            'clock_out_latitude'        => $validated['latitude'],
-            'clock_out_longitude'       => $validated['longitude'],
+            'clock_out_latitude'        => $validated['latitude'] ?? null,
+            'clock_out_longitude'       => $validated['longitude'] ?? null,
             'clock_out_distance_meters' => $distance !== null ? round($distance, 2) : null,
             'clock_out_accuracy_meters' => isset($validated['accuracy']) ? round((float) $validated['accuracy'], 2) : null,
             'breaks'                    => $breaks,
@@ -593,6 +757,8 @@ class TimeClockController extends Controller
             'flag_labels'             => array_values(array_filter(array_map(fn ($f) => TimeEntry::FLAG_LABELS[$f] ?? null, $entry->flags ?? []))),
             'clock_in_accuracy_meters'=> $entry->clock_in_accuracy_meters,
             'auto_closed_at'          => $entry->auto_closed_at?->toIso8601String(),
+            'left_site_at'            => $entry->left_site_at?->toIso8601String(),
+            'trail_points'            => (int) $entry->trail_points,
             'notes'                   => $entry->notes,
         ];
 

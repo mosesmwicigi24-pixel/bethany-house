@@ -19,7 +19,7 @@ export function TimesheetTotals({ t, compact = false }: { t: TimesheetDetail["to
     );
 }
 
-export function TimesheetDays({ d }: { d: TimesheetDetail }) {
+export function TimesheetDays({ d, onRequestFix, fixes }: { d: TimesheetDetail; onRequestFix?: (date: string) => void; fixes?: Record<string, "requested" | "approved" | "declined"> }) {
     const fmt = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
     return (
         <div className="space-y-3">
@@ -44,10 +44,15 @@ export function TimesheetDays({ d }: { d: TimesheetDetail }) {
                                     : day.punches.length ? day.punches.map(p => `${p.in}–${p.out ?? "…"}${p.status === "flagged" ? " ⚠" : p.status === "active" ? " (open)" : ""}`).join(", ")
                                     : day.rostered.length ? <span className="text-warning">rostered {day.rostered.join(", ")}, no punch</span> : day.class === "rest" ? "rest day" : ""}
                             </span>
+                            {day.highlight && <span className={clsx("text-2xs font-semibold px-1.5 py-0.5 rounded-full shrink-0", "bg-warning-light text-warning")} title={`${day.vs_scheduled_minutes! > 0 ? "+" : ""}${hm(Math.abs(day.vs_scheduled_minutes ?? 0))} against the roster`}>{day.highlight === "over" ? "over" : "under"}</span>}
                             <span className="w-16 text-right tabular-nums">{day.worked_minutes ? hm(day.worked_minutes) : ""}</span>
                             <span className="w-20 text-right text-2xs tabular-nums text-surface-500">
-                                {day.overtime_minutes ? `OT ${hm(day.overtime_minutes)}` : day.rest_day_minutes ? "rest ×" : day.holiday_minutes ? "holiday ×" : ""}
+                                {day.overtime_minutes ? `OT ${hm(day.overtime_minutes)}` : day.rest_day_minutes ? "rest ×" : day.holiday_minutes ? "holiday ×" : day.unpaid_break_minutes ? `−${day.unpaid_break_minutes}m lunch` : ""}
                             </span>
+                            {onRequestFix && new Date(day.date + "T00:00:00") <= new Date() && (
+                                fixes?.[day.date] ? <span className="text-2xs text-surface-400 shrink-0">{fixes[day.date] === "requested" ? "fix asked" : fixes[day.date]}</span>
+                                : <button onClick={() => onRequestFix(day.date)} className="text-2xs text-brand-600 hover:underline shrink-0" aria-label={`Request a fix for ${day.date}`}>fix?</button>
+                            )}
                         </li>
                     );
                 })}

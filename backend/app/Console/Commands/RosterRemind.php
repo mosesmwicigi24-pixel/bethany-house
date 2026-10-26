@@ -45,7 +45,32 @@ class RosterRemind extends Command
             }
         }
 
-        $this->info($this->option('dry-run') ? 'Dry run.' : "Reminded {$sent}.");
+        // C1 nudges: not clocked in 5 min after the shift starts; still clocked in after it ends.
+        $rules = \App\Support\AttendanceRules::all();
+        $nudged = 0;
+        $todays = Shift::with(['user', 'outlet:id,name'])->published()->whereNotNull('user_id')->where('date', $now->toDateString())->get();
+        foreach ($todays as $shift) {
+            if (!$shift->user || $shift->user->status !== 'active') continue;
+            $starts = $shift->startsAtCarbon(); $ends = $shift->endsAtCarbon();
+            $active = \App\Models\TimeEntry::where('user_id', $shift->user_id)->active()->exists();
+            if ($rules['remind_clock_in'] && !$shift->clock_in_nudged_at && $now->gte($starts->copy()->addMinutes(5)) && $now->lt($starts->copy()->addMinutes(90)) && !$active
+                && !\App\Models\TimeEntry::where('user_id', $shift->user_id)->whereDate('clock_in_at', $now->toDateString())->exists()) {
+                $this->line("nudge in: #{$shift->id} {$shift->user->first_name}");
+                if ($this->option('dry-run')) continue;
+                $shift->forceFill(['clock_in_nudged_at' => $now])->save();
+                NotificationService::deliver($shift->user, new InAppNotification(title: 'Not clocked in yet', body: "Your shift at {$shift->outlet?->name} started at {$starts->format('H:i')}. Clock in when you arrive.", actionUrl: '/me/clock', icon: 'clock', data: ['shift_id' => $shift->id]));
+                $nudged++;
+            }
+            if ($rules['remind_clock_out'] && !$shift->clock_out_nudged_at && $now->gte($ends) && $now->lt($ends->copy()->addMinutes(90)) && $active) {
+                $this->line("nudge out: #{$shift->id} {$shift->user->first_name}");
+                if ($this->option('dry-run')) continue;
+                $shift->forceFill(['clock_out_nudged_at' => $now])->save();
+                NotificationService::deliver($shift->user, new InAppNotification(title: 'Still clocked in', body: "Your shift ended at {$ends->format('H:i')}. Clock out if you have finished.", actionUrl: '/me/clock', icon: 'clock', data: ['shift_id' => $shift->id]));
+                $nudged++;
+            }
+        }
+
+        $this->info($this->option('dry-run') ? 'Dry run.' : "Reminded {$sent}, nudged {$nudged}.");
         return self::SUCCESS;
     }
 }

@@ -64,9 +64,9 @@ const TABS: Tab[] = [
         ),
     },
     {
-        label: 'Clock',
-        href: '/me/clock',
-        match: ['/me/clock'],
+        label: 'Me',
+        href: '/me',
+        match: ['/me'],
         icon: (
             <>
                 <circle cx="12" cy="12" r="9" />

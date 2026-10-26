@@ -3,7 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Models\TimeEntry;
+use App\Notifications\InAppNotification;
 use App\Services\ActivityLogService;
+use App\Services\NotificationService;
+use App\Support\AttendanceAlerts;
+use App\Support\AttendanceRules;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 
@@ -23,15 +27,33 @@ class AttendanceAutoClockOut extends Command
 
     public function handle(): int
     {
-        [$h, $m] = array_map('intval', explode(':', (string) config('attendance.auto_clock_out_time', '22:00')));
+        $rules = AttendanceRules::all();
+        [$h, $m] = array_map('intval', explode(':', (string) $rules['auto_clock_out_time']));
+        $afterHours = (int) $rules['auto_clock_out_after_hours'];
+        $limitHours = (int) $rules['daily_limit_hours'];
         $now = now();
         $closed = 0;
 
-        foreach (TimeEntry::active()->orderBy('clock_in_at')->cursor() as $entry) {
+        foreach (TimeEntry::with('user')->active()->orderBy('clock_in_at')->cursor() as $entry) {
             $cutoff = $entry->clock_in_at->copy()->setTime($h, $m, 0);
             if ($cutoff->lte($entry->clock_in_at)) {
                 // Clocked in after the cut-off (a night shift): close at the next day's cut-off.
                 $cutoff->addDay();
+            }
+            // C1: a maximum shift length too; whichever comes first.
+            if ($afterHours > 0 && $entry->clock_in_at->copy()->addHours($afterHours)->lt($cutoff)) {
+                $cutoff = $entry->clock_in_at->copy()->addHours($afterHours);
+            }
+            // C1: daily limit — tell the manager once, before the shift is closed.
+            if ($limitHours > 0 && $now->gte($entry->clock_in_at->copy()->addHours($limitHours)) && !in_array('daily_limit', $entry->flags ?? [], true) && !$this->option('dry-run')) {
+                $flags = array_values(array_unique(array_merge($entry->flags ?? [], ['daily_limit'])));
+                $entry->forceFill(['flags' => $flags, 'flagged_reason' => TimeEntry::describeFlags($flags)])->save();
+                if ($entry->user) {
+                    $name = trim("{$entry->user->first_name} {$entry->user->last_name}");
+                    NotificationService::deliver(AttendanceAlerts::managersFor($entry->user), new InAppNotification(
+                        title: "{$name} has worked {$limitHours} h today", body: "Still clocked in since {$entry->clock_in_at->format('H:i')}. The shift closes on its own at {$cutoff->format('H:i')}.",
+                        actionUrl: '/settings/attendance', icon: 'clock', data: ['entry_id' => $entry->id]));
+                }
             }
             if ($now->lt($cutoff)) {
                 continue;

@@ -26,7 +26,7 @@ class TimeEntry extends Model
         'clock_out_longitude',
         'clock_out_distance_meters',
         'clock_out_accuracy_meters',
-        'breaks',
+        'breaks', 'left_site_at', 'trail_points',
         'total_break_minutes',
         'worked_minutes',
         'status',
@@ -51,6 +51,9 @@ class TimeEntry extends Model
         'sent_late'     => 'Punch was made offline and sent later',
         'mock_location' => 'Phone reported a mock location',
         'auto_clock_out'=> 'Shift was closed automatically at the cut-off time',
+        'no_shift'      => 'Clocked in without a rostered shift',
+        'left_site'     => 'Left the site while clocked in',
+        'daily_limit'   => 'Worked past the daily limit',
     ];
 
     public static function describeFlags(array $flags): ?string
@@ -75,6 +78,7 @@ class TimeEntry extends Model
         'clock_in_accuracy_meters' => 'decimal:2',
         'clock_out_accuracy_meters'=> 'decimal:2',
         'breaks'                   => 'array',
+        'left_site_at'             => 'datetime',
     ];
 
     // =========================================================================

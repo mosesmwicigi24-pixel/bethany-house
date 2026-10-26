@@ -55,6 +55,8 @@ class PayrollTest extends TestCase
         Notification::fake();
         Artisan::call('permission:sync');
         config(['attendance.working_days' => [1, 2, 3, 4, 5, 6]]);
+        // These cases are written against calendar months; C1 seeds the default group with period_end_day = 10 (C1 suite covers that).
+        \App\Models\PayGroup::query()->update(['period_end_day' => null]);
         Carbon::setTestNow('2026-04-02 12:00:00');
         $this->shop = Outlet::factory()->create();
         PublicHoliday::create(['date' => '2026-03-04', 'name' => 'Test Day', 'country' => 'KE']);

@@ -12,36 +12,99 @@
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Bethany House Hub checks that you are at the shop when you clock in or out. Location is read only while the clock screen is open.",
+        "NSLocationWhenInUseUsageDescription": "Bethany House Hub checks that you are at the shop when you clock in or out, and records your position while you are on shift.",
         "NSFaceIDUsageDescription": "Unlock the Hub with Face ID instead of typing your password.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "While you are clocked in, Bethany House Hub records your position every few minutes so your manager can see you are on site. It stops when you clock out and never runs off shift.",
+        "UIBackgroundModes": [
+          "location"
+        ]
       },
       "privacyManifests": {
         "NSPrivacyAccessedAPITypes": [
-          { "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults", "NSPrivacyAccessedAPITypeReasons": ["CA92.1"] }
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
+          }
         ]
       }
     },
     "android": {
       "package": "ke.co.bethanyhouse.hub",
       "versionCode": 1,
-      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#f8f7f4" },
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "USE_BIOMETRIC", "USE_FINGERPRINT", "POST_NOTIFICATIONS"],
-      "blockedPermissions": ["ACCESS_BACKGROUND_LOCATION"],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f8f7f4"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "POST_NOTIFICATIONS"
+      ],
       "intentFilters": [
-        { "action": "VIEW", "autoVerify": true, "data": [{ "scheme": "https", "host": "hub.bethanyhouse.co.ke", "pathPrefix": "/admin" }], "category": ["BROWSABLE", "DEFAULT"] }
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "hub.bethanyhouse.co.ke",
+              "pathPrefix": "/admin"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "plugins": [
-      ["expo-location", { "locationWhenInUsePermission": "Bethany House Hub checks that you are at the shop when you clock in or out. Location is read only while the clock screen is open.", "isAndroidBackgroundLocationEnabled": false }],
-      ["expo-notifications", { "icon": "./assets/notification-icon.png", "color": "#c2410c" }],
-      ["expo-local-authentication", { "faceIDPermission": "Unlock the Hub with Face ID instead of typing your password." }],
-      ["expo-splash-screen", { "image": "./assets/splash-icon.png", "imageWidth": 160, "backgroundColor": "#f8f7f4" }],
-      "expo-secure-store"
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Bethany House Hub checks that you are at the shop when you clock in or out, and records your position while you are on shift.",
+          "locationAlwaysAndWhenInUsePermission": "While you are clocked in, Bethany House Hub records your position every few minutes so your manager can see you are on site. It stops when you clock out and never runs off shift.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#c2410c"
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Unlock the Hub with Face ID instead of typing your password."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "backgroundColor": "#f8f7f4"
+        }
+      ],
+      "expo-secure-store",
+      "expo-task-manager"
     ],
     "extra": {
       "hubUrl": "https://hub.bethanyhouse.co.ke/admin/",
-      "eas": { "projectId": "REPLACE_WITH_EAS_PROJECT_ID" }
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
     }
   }
 }

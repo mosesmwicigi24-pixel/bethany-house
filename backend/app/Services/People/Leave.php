@@ -38,7 +38,7 @@ class Leave
         if ($type->counts_calendar_days) {
             return ['days' => (float) ($start->diffInDays($end) + 1), 'holidays' => []];
         }
-        $working  = config('attendance.working_days', [1, 2, 3, 4, 5, 6]);
+        $working  = \App\Support\AttendanceRules::get('working_days');
         $holidays = PublicHoliday::whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->get()->keyBy(fn ($h) => $h->date->toDateString());
         $days = 0; $skipped = [];

@@ -60,43 +60,40 @@ export const NAV: NavGroup[] = [
                 // (every staff account messages; threads are as private as
                 // their record). A slug here would be one the API never checks.
             },
-            {
-                label: "Clock in",
-                href: "/me/clock",
-                icon: "clock",
-                // Ungated for the same reason: /admin/time-clock is every
-                // staff member's own punch (Bethany People PR 1).
-            },
-            {
-                label: "My shifts",
-                href: "/me/shifts",
-                icon: "calendar",
-                // Ungated: /me/shifts is every staff member's own roster (PR 3).
-            },
-            {
-                label: "My leave",
-                href: "/me/leave",
-                icon: "calendar",
-                // Ungated: /me/leave is every staff member's own time off (PR 4).
-            },
-            {
-                label: "My hours",
-                href: "/me/timesheet",
-                icon: "clock",
-                // Ungated: /me/timesheet is every staff member's own period (PR 5).
-            },
-            {
-                label: "My payslips",
-                href: "/me/payslips",
-                icon: "expenses",
-                // Ungated: /me/payslips is every staff member's own pay (PR 6); the PDF asks for a step-up.
-            },
-            {
-                label: "My advances",
-                href: "/me/advances",
-                icon: "imprest",
-                // Ungated: /me/advances is every staff member's own requests (PR 7).
-            },
+        ],
+    },
+
+    // ── Me (People C1) ────────────────────────────────────────────────────────
+    // Every staff member's own things. All ungated: each API is the person's
+    // own record (time clock, roster, leave, timesheet, payslips, advances).
+    {
+        label: "Me",
+        items: [
+            { label: "Today", href: "/me", icon: "clock" },
+            { label: "Clock in", href: "/me/clock", icon: "clock" },
+            { label: "My shifts", href: "/me/shifts", icon: "calendar" },
+            { label: "My leave", href: "/me/leave", icon: "calendar" },
+            { label: "My hours", href: "/me/timesheet", icon: "clock" },
+            { label: "My payslips", href: "/me/payslips", icon: "expenses" },
+            { label: "My advances", href: "/me/advances", icon: "imprest" },
+        ],
+    },
+
+    // ── People (People C1) ────────────────────────────────────────────────────
+    // The manager's, HR's and finance's screens, out of Setup. Permissions as
+    // before: attendance.view_team reads the team, hr.view the files,
+    // payroll.view the pay; each page hides its buttons without the write key.
+    {
+        label: "People",
+        items: [
+            { label: "Overview", href: "/people/overview", icon: "dashboard", permission: "attendance.view_team" },
+            { label: "Requests", href: "/people/requests", icon: "approvals", permission: "attendance.view_team" },
+            { label: "Attendance", href: "/settings/attendance", icon: "attendance", permission: "attendance.view_team" },
+            { label: "Roster", href: "/roster", icon: "calendar", permission: "attendance.view_team" },
+            { label: "Timesheets", href: "/timesheets", icon: "clock", permission: "attendance.view_team" },
+            { label: "Leave", href: "/leave", icon: "calendar", permission: "attendance.view_team" },
+            { label: "Employee files", href: "/people", icon: "people", permission: "hr.view" },
+            { label: "Payroll", href: "/payroll", icon: "expenses", permission: "payroll.view" },
         ],
     },
 
@@ -529,49 +526,11 @@ export const NAV: NavGroup[] = [
                 permission: "outlets.view",
             },
             {
-                label: "Attendance",
-                href: "/settings/attendance",
+                label: "Attendance rules",
+                href: "/settings/attendance-rules",
                 icon: "attendance",
+                // Read with attendance.view_team; saving needs settings.edit (People C1).
                 permission: "attendance.view_team",
-            },
-            {
-                label: "Roster",
-                href: "/roster",
-                icon: "calendar",
-                // Read with attendance.view_team; the page hides its buttons
-                // without roster.manage (People PR 3).
-                permission: "attendance.view_team",
-            },
-            {
-                label: "Timesheets",
-                href: "/timesheets",
-                icon: "clock",
-                // Read with attendance.view_team; approve needs attendance.manage,
-                // lock needs timesheets.lock (People PR 5).
-                permission: "attendance.view_team",
-            },
-            {
-                label: "Payroll",
-                href: "/payroll",
-                icon: "expenses",
-                // Read with payroll.view; drafting, approving (step-up) and
-                // paying need payroll.run (People PR 6).
-                permission: "payroll.view",
-            },
-            {
-                label: "Leave",
-                href: "/leave",
-                icon: "calendar",
-                // Read with attendance.view_team; decisions are checked per
-                // person by the server (People PR 4).
-                permission: "attendance.view_team",
-            },
-            {
-                label: "People",
-                href: "/people",
-                icon: "people",
-                // Employee files for the staff in own outlets (People PR 2).
-                permission: "hr.view",
             },
             {
                 label: "Holidays",
@@ -1234,6 +1193,15 @@ export function Sidebar({ collapsed }: SidebarProps) {
     const messagesCount = (channelsData?.channels ?? []).reduce(
         (sum, c) => sum + (c.unread_count ?? 0), 0
     );
+    // People C1: what waits on this manager (leave, swaps, advances, timesheet fixes).
+    const { data: requestsCountData } = useQuery({
+        queryKey: ["people-requests-count"],
+        queryFn: () => get<{ count: number }>("/v1/admin/people/requests/count"),
+        enabled: can("attendance.view_team"),
+        refetchInterval: 60_000,
+        staleTime: 60_000,
+    });
+    const requestsCount = requestsCountData?.count ?? 0;
 
     // All groups collapsed by default; the active group auto-expands on mount
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
@@ -1370,6 +1338,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                                                     )}
                                                     {!collapsed && (() => {
                                                         const liveCount =
+                                                            item.href === "/people/requests" ? requestsCount :
                                                             item.icon === "notifications" ? notifCount :
                                                             item.icon === "messages" ? messagesCount : 0;
                                                         const staticBadge = item.badge;

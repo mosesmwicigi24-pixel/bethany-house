@@ -299,7 +299,10 @@ class TimesheetController extends Controller
             'overtime_after_daily_hours' => $g->overtime_after_daily_hours !== null ? (float) $g->overtime_after_daily_hours : null,
             'overtime_after_weekly_hours' => $g->overtime_after_weekly_hours !== null ? (float) $g->overtime_after_weekly_hours : null,
             'overtime_multiplier' => (float) $g->overtime_multiplier, 'rest_day_multiplier' => (float) $g->rest_day_multiplier,
-            'holiday_multiplier' => (float) $g->holiday_multiplier, 'round_to_minutes' => $g->round_to_minutes, 'is_default' => $g->is_default, 'is_active' => $g->is_active];
+            'holiday_multiplier' => (float) $g->holiday_multiplier, 'round_to_minutes' => $g->round_to_minutes, 'is_default' => $g->is_default, 'is_active' => $g->is_active,
+            // C1
+            'period_end_day' => $g->period_end_day, 'pay_date_day' => $g->pay_date_day, 'hours_by_weekday' => $g->hours_by_weekday,
+            'unpaid_break_minutes' => (int) $g->unpaid_break_minutes, 'unpaid_break_after_hours' => $g->unpaid_break_after_hours !== null ? (float) $g->unpaid_break_after_hours : null];
     }
 
     private function groupRules(Request $request, bool $partial = false): array
@@ -317,6 +320,13 @@ class TimesheetController extends Controller
             'round_to_minutes'            => 'sometimes|integer|in:1,5,10,15,30',
             'is_default'                  => 'sometimes|boolean',
             'is_active'                   => 'sometimes|boolean',
+            // C1: period end day (Bethany: 10 → 11th to 10th), pay date, hours per weekday, unpaid lunch
+            'period_end_day'              => 'sometimes|nullable|integer|between:1,28',
+            'pay_date_day'                => 'sometimes|nullable|integer|between:1,28',
+            'hours_by_weekday'            => 'sometimes|nullable|array',
+            'hours_by_weekday.*'          => 'nullable|numeric|min:0|max:24',
+            'unpaid_break_minutes'        => 'sometimes|integer|between:0,180',
+            'unpaid_break_after_hours'    => 'sometimes|nullable|numeric|min:1|max:24',
         ]);
     }
 

@@ -107,3 +107,8 @@ Schedule::command(\App\Console\Commands\HrDocumentExpiry::class)
 Schedule::command(\App\Console\Commands\RosterRemind::class)
     ->everyFifteenMinutes()
     ->withoutOverlapping();
+
+// People C1: shift trails are kept attendance.trail_retention_days, then deleted.
+Schedule::command(\App\Console\Commands\AttendancePruneTrails::class)
+    ->dailyAt('03:40')
+    ->withoutOverlapping();

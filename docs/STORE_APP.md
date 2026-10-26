@@ -14,8 +14,13 @@ Nothing in the app stores or computes business data.
 | Unlock | Password / passkey step-up | Face ID / fingerprint after 5 min in the background, then the Hub's own step-up as before |
 | Updates | Instant, from the Hub | Instant, from the Hub (the shell rarely changes) |
 
-Location is read only while the clock screen is open. Background location is
-blocked in the Android manifest and not requested on iOS.
+Location on shift (People C1, owner 26 Oct 2026): when Setup › Attendance
+rules says *trail while clocked in*, the app records a position every few
+minutes between clock-in and clock-out through a background task with a
+visible notification, and posts it to `/time-clock/trail`. The server keeps
+the trail for the retention period and decides "left the site". Off shift
+nothing runs; the web app never records a trail. The app asks for
+"always" location at the first clock-in with the reason on screen.
 
 ## Accounts you need (owner)
 
@@ -43,11 +48,16 @@ Then in the stores:
 - **Privacy policy URL**: `https://hub.bethanyhouse.co.ke/admin/privacy`
   (shipped with this PR, public, no login).
 - **Data safety (Play) / App privacy (Apple)**: location (precise, used for
-  app functionality, not shared, collected only in use); name, email,
+  app functionality, not shared, collected in use and, while clocked in, in
+  the background; deleted after 90 days); name, email,
   phone, work records (app functionality, account-linked). No ads, no
   tracking, no third-party analytics.
-- **Permission justification**: foreground location only, "to confirm the
-  staff member is at the shop when clocking in". No background location.
+- **Permission justification**: location while in use to confirm the staff
+  member is at the shop when clocking in; background location only between
+  clock-in and clock-out, disclosed on screen and in the privacy policy,
+  with a persistent notification while it runs. Apple's review asks for a
+  short video of the permission prompt and the notice: record the first
+  clock-in on a test phone.
 - **Review notes**: a staff-only app; give the reviewer a test login on a
   user whose outlet geofence covers the reviewer's address, or set that
   outlet's radius wide for the review window.
@@ -69,6 +79,9 @@ production profile, so build numbers increase on their own. Bump
 3. Open Clock in; the fix arrives from the phone's location service. With a
    fake-GPS app on (Android), the punch is flagged `mock location` in
    Attendance.
+3b. Clock in, lock the phone, walk for ten minutes: Attendance shows the
+   entry with a point count and a Map button; walk 300 m away for a quarter
+   of an hour and the entry is noted (or clocked out, per the rule).
 4. Approve a leave request from the Hub for that user; the phone gets a
    push.
 5. Background the app for five minutes and return: biometric prompt.

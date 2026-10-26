@@ -14,7 +14,7 @@ class Shift extends Model
 
     protected $fillable = [
         'outlet_id', 'user_id', 'date', 'starts_at', 'ends_at', 'label', 'notes', 'status',
-        'published_at', 'cancelled_at', 'reminded_at', 'created_by', 'updated_by',
+        'published_at', 'cancelled_at', 'reminded_at', 'clock_in_nudged_at', 'clock_out_nudged_at', 'created_by', 'updated_by',
     ];
 
     protected $casts = [

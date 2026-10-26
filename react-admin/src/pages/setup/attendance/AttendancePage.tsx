@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { TrailMap } from "@/components/people/TrailMap";
+import { peopleC1Api } from "@/api/people-c1";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { attendanceApi } from "@/api/attendance";
@@ -173,16 +176,22 @@ function CorrectionModal({ entry, onClose }: { entry: TimeEntry; onClose: () => 
 export default function AttendancePage() {
     const table = useTableState({ defaultSortBy: "clock_in_at", defaultPerPage: 25 });
 
+    // C1: a request or a notification can open this page on one person and day (?user=&date=) or on the flagged ones (?status=flagged).
+    const [search] = useSearchParams();
+    const userFilter = search.get("user") ?? "";
     const [outletFilter, setOutletFilter] = useState("");
-    const [statusFilter, setStatusFilter] = useState("");
-    const [fromDate, setFromDate] = useState("");
-    const [toDate, setToDate] = useState("");
+    const [statusFilter, setStatusFilter] = useState(search.get("status") ?? "");
+    const [fromDate, setFromDate] = useState(search.get("date") ?? "");
+    const [toDate, setToDate] = useState(search.get("date") ?? "");
     const [editing, setEditing] = useState<TimeEntry | null>(null);
+    const [mapFor, setMapFor] = useState<TimeEntry | null>(null);
+    const { data: trail } = useQuery({ queryKey: ["entry-trail", mapFor?.id], queryFn: () => peopleC1Api.trail(mapFor!.id), enabled: !!mapFor });
 
     const params: Record<string, string> = {
         page: String(table.state.page),
         per_page: String(table.state.perPage),
         ...(outletFilter && { outlet_id: outletFilter }),
+        ...(userFilter && { user_id: userFilter }),
         ...(statusFilter && { status: statusFilter }),
         ...(fromDate && { from: fromDate }),
         ...(toDate && { to: toDate }),
@@ -225,8 +234,12 @@ export default function AttendancePage() {
                 <div>
                     <h1 className="page-title">Attendance</h1>
                     <p className="page-subtitle">
-                        Clock-in records for outlet and workshop staff. Geofence-flagged entries need review.
+                        Clock-in records for outlet and workshop staff. Geofence-flagged entries need review.{userFilter ? " Showing one person." : ""}
                     </p>
+                </div>
+                <div className="flex gap-2">
+                    <Link to="/people/requests" className="btn-secondary btn-sm">Requests</Link>
+                    <Link to="/settings/attendance-rules" className="btn-secondary btn-sm">Rules</Link>
                 </div>
             </div>
 
@@ -371,7 +384,12 @@ export default function AttendancePage() {
                                                 </span>
                                                 <div><FlagChips entry={entry} /></div>
                                             </td>
-                                            <td className="px-4 py-3 text-right">
+                                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                                                {(entry.trail_points || entry.clock_in_latitude != null) && (
+                                                    <button onClick={() => setMapFor(entry)} className="btn-ghost btn-sm text-xs" title={entry.trail_points ? `${entry.trail_points} points on shift` : "Punch positions"}>
+                                                        Map{entry.trail_points ? ` · ${entry.trail_points}` : ""}
+                                                    </button>
+                                                )}
                                                 <button
                                                     onClick={() => setEditing(entry)}
                                                     className="btn-ghost btn-sm text-xs text-brand-600 hover:bg-brand-50"
@@ -403,6 +421,11 @@ export default function AttendancePage() {
             <ClerkPinsPanel />
 
             {editing && <CorrectionModal entry={editing} onClose={() => setEditing(null)} />}
+            {mapFor && (
+                <Modal open onClose={() => setMapFor(null)} size="lg" title={`${mapFor.user?.name ?? "Shift"} · ${formatDate(mapFor.clock_in_at)}`}>
+                    {trail ? <TrailMap trail={trail} /> : <div className="flex items-center justify-center h-40"><Spinner size="lg" /></div>}
+                </Modal>
+            )}
         </div>
     );
 }

@@ -6,7 +6,7 @@ import { timeClockApi, type TimeClockOutlet, type TimeEntry, type Punch } from "
 import { rosterApi } from "@/api/roster";
 import { leaveApi } from "@/api/leave";
 import { useGeolocation, distanceMeters } from "@/lib/useGeolocation";
-import { nativeInfo } from "@/lib/native";
+import { nativeInfo, postNative } from "@/lib/native";
 import { readPendingPunch, savePendingPunch, clearPendingPunch, type PendingPunch } from "@/lib/pendingPunch";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
@@ -81,6 +81,14 @@ export default function ClockPage() {
 
     const { state: geo, retry } = useGeolocation(true);
     const fix = geo.status === "ok" ? geo.fix : null;
+
+    // Location on shift (C1): in the store app the trail runs between clock-in and clock-out when the rule says so.
+    const trailOn = !!active && data?.rules?.location_mode === "trail";
+    useEffect(() => {
+        if (!nativeInfo()) return;
+        if (trailOn) postNative({ type: "trail:start", interval_minutes: data?.rules?.trail_interval_minutes ?? 5, distance_meters: data?.rules?.trail_distance_meters ?? 100 });
+        else postNative({ type: "trail:stop" });
+    }, [trailOn, data?.rules?.trail_interval_minutes, data?.rules?.trail_distance_meters]);
 
     // Which outlet: the active entry's, else the nearest, else the only one.
     const outlets = data?.outlets ?? [];
@@ -318,6 +326,12 @@ export default function ClockPage() {
                         ) : "—"}
                     </span>
                 </div>
+                {data?.today_shift && (
+                    <div className="flex justify-between px-4 py-3"><span className="text-surface-500">Today's shift</span><span className="font-semibold tabular-nums text-surface-900">{data.today_shift.starts_at}–{data.today_shift.ends_at}{data.today_shift.outlet ? ` · ${data.today_shift.outlet}` : ""}</span></div>
+                )}
+                {data?.rules?.location_mode === "trail" && (
+                    <div className="px-4 py-3 text-2xs text-surface-400">{nativeInfo() ? "While you are clocked in the app records your position every few minutes; it stops when you clock out." : "The store app records your position while you are clocked in; this web app records only your clock-in and clock-out."}{data.rules.leave_site_action !== "none" ? ` Leaving the site for more than ${data.rules.leave_site_grace_minutes} minutes is ${data.rules.leave_site_action === "clock_out" ? "clocked out" : "noted for your manager"}.` : ""}</div>
+                )}
                 {data?.rules?.auto_clock_out_time && (
                     <div className="px-4 py-3 text-2xs text-surface-400">A shift still open at {data.rules.auto_clock_out_time} is closed automatically and shown to your manager.</div>
                 )}

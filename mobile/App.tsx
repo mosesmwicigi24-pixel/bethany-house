@@ -11,6 +11,7 @@ import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { deliver, injectedBefore, type AppMessage, type PageMessage } from "./bridge";
+import { startTrail, stopTrail } from "./trail";
 
 /**
  * Bethany House Hub — the store app (People PR 8).
@@ -23,9 +24,10 @@ import { deliver, injectedBefore, type AppMessage, type PageMessage } from "./br
  *   - push through Expo's service (the server already speaks it);
  *   - a stable device id per install, so the named device survives a cache
  *     clear;
- *   - biometric unlock when the app comes back to the foreground.
- * Location is read only while the page asks for it (the clock screen) and
- * never in the background.
+ *   - biometric unlock when the app comes back to the foreground;
+ *   - location on shift (C1): between clock-in and clock-out, when the Hub's
+ *     rule says so, a background task reports the position every few
+ *     minutes with a visible notification. Off shift nothing runs.
  */
 
 const HUB_URL: string = Constants.expoConfig?.extra?.hubUrl ?? "https://hub.bethanyhouse.co.ke/admin/";
@@ -59,6 +61,7 @@ export default function App() {
     const watcher = useRef<Location.LocationSubscription | null>(null);
     const pushToken = useRef<string | null>(null);
     const backgroundedAt = useRef<number | null>(null);
+    const tokenResolver = useRef<((t: string | null) => void) | null>(null);
 
     useEffect(() => {
         void (async () => {
@@ -101,14 +104,28 @@ export default function App() {
     }, []);
 
     const onMessage = useCallback(async (e: WebViewMessageEvent) => {
-        let m: PageMessage;
-        try { m = JSON.parse(e.nativeEvent.data) as PageMessage; } catch { return; }
+        let m: PageMessage | { type: "token"; token: string | null };
+        try { m = JSON.parse(e.nativeEvent.data) as PageMessage | { type: "token"; token: string | null }; } catch { return; }
+        if (m.type === "token") { tokenResolver.current?.(m.token); tokenResolver.current = null; return; }
         switch (m.type) {
             case "geo:start": await startGeo(); break;
             case "geo:stop": stopGeo(); break;
             case "push:register": send({ type: "push:token", token: await getPushToken().catch(() => null) }); break;
             case "push:token?": send({ type: "push:token", token: pushToken.current }); break;
             case "open-external": if (typeof m.url === "string") void Linking.openURL(m.url); break;
+            case "trail:start": {
+                // The page's bearer token is read from its storage so the task can post without the page.
+                const token = m.token ?? (await new Promise<string | null>(resolve => {
+                    tokenResolver.current = resolve;
+                    web.current?.injectJavaScript(`try { window.ReactNativeWebView.postMessage(JSON.stringify({type: "token", token: localStorage.getItem("bh_admin_token")})); } catch (e) {} true;`);
+                    setTimeout(() => resolve(null), 3000);
+                }));
+                if (!token) { send({ type: "trail:state", state: "denied" }); break; }
+                const state = await startTrail(`${HUB_ORIGIN}/api/v1/admin/time-clock/trail`, token, m.interval_minutes ?? 5, m.distance_meters ?? 100).catch(() => "unsupported" as const);
+                send({ type: "trail:state", state });
+                break;
+            }
+            case "trail:stop": await stopTrail(); send({ type: "trail:state", state: "stopped" }); break;
         }
     }, [getPushToken, send, startGeo, stopGeo]);
 

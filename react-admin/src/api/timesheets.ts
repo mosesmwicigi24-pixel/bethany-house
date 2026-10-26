@@ -15,6 +15,13 @@ export interface PayGroup {
     round_to_minutes: number;
     is_default: boolean;
     is_active: boolean;
+    /** C1: the period ends on this day of the month (Bethany: 10 → 11th to 10th); null = calendar month. */
+    period_end_day?: number | null;
+    pay_date_day?: number | null;
+    /** C1: {"1": 12, …, "6": 6}; null = standard every day. */
+    hours_by_weekday?: Record<string, number> | null;
+    unpaid_break_minutes?: number;
+    unpaid_break_after_hours?: number | null;
 }
 
 export interface PayPeriod {
@@ -51,6 +58,10 @@ export interface TimesheetDay {
     holiday_minutes: number;
     leave: string | null;
     rostered: string[];
+    rostered_minutes?: number;
+    vs_scheduled_minutes?: number | null;
+    highlight?: "over" | "under" | null;
+    unpaid_break_minutes?: number;
     punches: { id: number; in: string; out: string | null; minutes: number; status: string; outlet: string | null; flags: string[] }[];
 }
 

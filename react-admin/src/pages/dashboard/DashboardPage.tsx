@@ -11,6 +11,7 @@ import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useIsFloorWorker } from "@/hooks/useHomePath";
 import { dueInfo, DUE_TONE_CLS } from "@/components/production/productionUi";
+import { PeopleDayBlock } from "@/components/people/PeopleDayBlock";
 import { clsx } from "clsx";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -909,6 +910,9 @@ export default function DashboardPage() {
                 task's due chip already say — three signals for one fact
                 pushed their tasks below the fold. */}
             {!floorWorker && <AlertBar alerts={alerts} />}
+
+            {/* People (C1): your day, and for a manager the team now and what needs them. */}
+            <PeopleDayBlock />
 
             {/* Revenue row: sparkline + channel split + cash today
                  Hidden for roles that have no business seeing financials:
