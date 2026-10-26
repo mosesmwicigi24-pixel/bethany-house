@@ -6,6 +6,7 @@ import { DocumentsCard } from "@/components/people/DocumentsCard";
 import { LeaveCard } from "@/components/people/LeaveCard";
 import { timesheetsApi } from "@/api/timesheets";
 import { SensitiveCard } from "@/components/people/SensitiveCard";
+import { PayStructureCard } from "@/components/people/PayStructureCard";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
 import type { ApiError } from "@/types";
@@ -162,6 +163,8 @@ export default function PersonPage() {
                         fetchFull={async () => (await peopleApi.sensitive(personId)).sensitive}
                         save={person.can.edit_sensitive ? async d => { const r = await peopleApi.updateSensitive(personId, d); void refresh(); return r.sensitive; } : undefined}
                     />
+
+                    <PayStructureCard userId={personId} canView={person.can.view_sensitive} />
                 </div>
             </div>
 

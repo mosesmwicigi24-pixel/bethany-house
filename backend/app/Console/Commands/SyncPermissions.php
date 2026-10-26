@@ -307,6 +307,8 @@ class SyncPermissions extends Command
         'roster.manage'        => ['Manage the Roster', 'Draft, publish, cancel and copy shifts for own outlets; decide swap requests (People PR 3). Viewing the roster is attendance.view_team', 'People'],
         'timesheets.lock'      => ['Lock Pay Periods', 'Lock a pay period once every timesheet is approved and export the approved hours (People PR 5); approving timesheets is attendance.manage', 'People'],
         'leave.approve'        => ['Decide Leave', 'Approve, decline, record and cancel leave for staff in own outlets (People PR 4). A person\'s own manager (users.reports_to) decides without this key; nobody decides their own', 'People'],
+        'payroll.view'         => ['View Payroll', 'Read payroll runs, lines, payslips and the statutory rate tables (People PR 6)', 'People'],
+        'payroll.run'          => ['Run Payroll', 'Draft, approve (step-up), pay and correct payroll runs; add and confirm statutory rate tables (People PR 6). Approving posts a Salaries expense', 'People'],
     ];
 
     /**
@@ -605,6 +607,8 @@ class SyncPermissions extends Command
             'hr.view', 'hr.view_sensitive',
             // Locks pay periods and exports the approved hours (People PR 5).
             'attendance.view_team', 'timesheets.lock',
+            // Runs payroll from locked periods; approval and payment behind step-up (People PR 6).
+            'payroll.view', 'payroll.run',
             // Payments - full approval authority + view transactions ledger
             'payments.view', 'payments.approve_international', 'payments.transactions',
             'payments.void', 'payments.reassign',
@@ -711,6 +715,7 @@ class SyncPermissions extends Command
             'roles.edit',
             'attendance.manage',
             'hr.edit', 'hr.view_sensitive', 'roster.manage', 'leave.approve',
+            'payroll.view', 'payroll.run',
             'bom.edit', 'setup.technical',
             // Phase 3A: Finance & Cash is not admin's (plan §6), and admin's
             // files come through reports.export, not the supply split.
