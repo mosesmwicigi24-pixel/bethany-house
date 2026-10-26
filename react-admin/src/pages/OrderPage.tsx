@@ -71,6 +71,12 @@ interface PublicOrder {
     business_name: string;
     business_logo: string | null;
     business_tagline: string | null;
+    /** False for a cancelled / voided / refunded order: no Pay button (2026-10-26). */
+    payable?: boolean;
+    closed?: {
+        message: string;
+        contact: { business_name: string; phone: string | null; email: string | null };
+    } | null;
 }
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
@@ -136,11 +142,14 @@ export default function OrderPage() {
         );
     }
 
-    const badge = STATUS_LABEL[order.payment_status] ?? {
-        label: order.payment_status,
-        cls: "bg-surface-100 text-surface-700 border-surface-200",
-    };
-    const owes = order.amount_due > 0;
+    const closed = order.payable === false ? order.closed ?? null : null;
+    const badge = closed
+        ? { label: order.status === "refunded" ? "Refunded" : "Cancelled", cls: "bg-surface-100 text-surface-700 border-surface-200" }
+        : STATUS_LABEL[order.payment_status] ?? {
+            label: order.payment_status,
+            cls: "bg-surface-100 text-surface-700 border-surface-200",
+        };
+    const owes = order.amount_due > 0 && !closed;
 
     return (
         <div className="min-h-screen bg-surface-50 py-6 px-4">
@@ -162,7 +171,7 @@ export default function OrderPage() {
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <p className="text-2xs text-surface-400 uppercase tracking-wide font-medium">
-                                    {owes ? "Order" : "Receipt"}
+                                    {owes || closed ? "Order" : "Receipt"}
                                 </p>
                                 <p className="text-xl font-bold font-mono text-surface-900">{order.order_number}</p>
                                 {order.customer_name && (
@@ -261,7 +270,21 @@ export default function OrderPage() {
                     </div>
                 </Card>
 
-                {owes ? (
+                {closed ? (
+                    <div className="text-center space-y-1">
+                        <p className="text-sm text-surface-700">{closed.message}</p>
+                        {closed.contact?.phone && (
+                            <p className="text-xs">
+                                <a href={`tel:${closed.contact.phone.replace(/\s+/g, "")}`} className="text-brand-600 hover:underline">{closed.contact.phone}</a>
+                            </p>
+                        )}
+                        {closed.contact?.email && (
+                            <p className="text-xs">
+                                <a href={`mailto:${closed.contact.email}`} className="text-brand-600 hover:underline">{closed.contact.email}</a>
+                            </p>
+                        )}
+                    </div>
+                ) : owes ? (
                     <>
                         <button onClick={payNow} disabled={paying}
                                 className="w-full rounded-full bg-brand-600 text-white text-sm font-semibold py-3.5 hover:bg-brand-700 disabled:opacity-60 transition-colors">

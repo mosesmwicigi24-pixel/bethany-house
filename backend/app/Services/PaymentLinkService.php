@@ -27,12 +27,18 @@ class PaymentLinkService
     /**
      * Return a live pay session for the order, minting or renewing the token
      * when it is missing or expired. Caller is responsible for refusing paid
-     * orders — this method has no opinion about whether payment is due.
+     * orders. A dead order throws OrderNotPayableException.
      *
      * @return array{token: string, expires_at: ?string, url: string}
      */
     public static function mint(Order $order): array
     {
+        // A dead order is never payable (Order::isPayable). The doors refuse
+        // first and say so; this is the backstop for one that forgets.
+        if (!$order->isPayable()) {
+            throw new \App\Exceptions\OrderNotPayableException($order);
+        }
+
         $needsToken = empty($order->payment_token)
             || ($order->payment_token_expires_at && $order->payment_token_expires_at->isPast());
 

@@ -38,6 +38,15 @@ function canVoid(inv: Invoice): boolean {
         && ["pending", "confirmed"].includes(inv.order.status ?? "pending");
 }
 
+/**
+ * Its order is dead — cancelled from the order screen, not by voiding the
+ * invoice. Not payable (owner, 2026-10-26): the API sends no pay_token and
+ * refuses a payment; this says why the Pay link is missing.
+ */
+function orderIsDead(inv: Invoice): boolean {
+    return ["cancelled", "voided", "refunded"].includes(inv.order?.status ?? "");
+}
+
 export default function InvoicesPage() {
     const navigate = useNavigate();
     const toast = useToastStore();
@@ -145,8 +154,13 @@ export default function InvoicesPage() {
                                     <td>
                                         <div className="flex justify-end gap-1">
                                             {inv.order && <PdfDownloadButton type="orders" id={inv.order.id} subtype="invoice" label="Invoice PDF" />}
-                                            {inv.order && inv.doc_status !== "void" && inv.order.payment_status !== "paid" && (
+                                            {inv.order && inv.doc_status !== "void" && inv.order.payment_status !== "paid" && !orderIsDead(inv) && (
                                                 <button className="btn-ghost btn-sm" onClick={() => copyPayLink(inv)}>Pay link</button>
+                                            )}
+                                            {inv.order && inv.doc_status !== "void" && orderIsDead(inv) && (
+                                                <span className="self-center text-2xs text-surface-500" title="A cancelled order takes no payment — no link, nothing recorded.">
+                                                    Order {inv.order.status} — no payments
+                                                </span>
                                             )}
                                             {inv.order && (
                                                 <button className="btn-ghost btn-sm" onClick={() => navigate(`/sales/orders/${inv.order!.id}`)}>

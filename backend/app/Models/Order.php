@@ -565,6 +565,24 @@ class Order extends Model
         return $this->status === 'cancelled';
     }
 
+    /**
+     * May anyone start, offer or record a payment against this order?
+     *
+     * One rule (owner, 2026-10-26: "block payment on cancelled orders"): a
+     * dead order is not payable — no pay page, no pay link, no STK push, no
+     * staff-recorded payment. Every door asks this; App\Support\PaymentGate
+     * words the refusal.
+     *
+     * NOT the rule for money that has already moved. A push approved before
+     * the cancel still lands through the gateway callbacks, and that money is
+     * recorded and flagged for a refund (App\Services\Payments\LatePayment),
+     * never refused.
+     */
+    public function isPayable(): bool
+    {
+        return !in_array($this->status, self::DEAD_STATUSES, true);
+    }
+
     public function canBeCancelled()
     {
         return in_array($this->status, ['pending', 'processing']) && !$this->cancelled_at;

@@ -17,7 +17,10 @@ export interface Invoice {
         /** The order's own status — pending | confirmed | cancelled … */
         status?: string;
         payment_status: string; // pending | partial | paid …
+        /** Null for a dead order: it is not payable (2026-10-26). */
         pay_token: string | null;
+        /** False when the order is cancelled / voided / refunded. */
+        payable?: boolean;
     } | null;
     customer_name: string | null;
     /** The staff member who issued the invoice. */

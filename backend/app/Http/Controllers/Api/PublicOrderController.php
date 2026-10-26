@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\PaymentLinkService;
+use App\Support\PaymentGate;
 
 /**
  * PublicOrderController — the customer's own view of one order.
@@ -103,10 +104,14 @@ class PublicOrderController extends Controller
             'business_logo'    => $settings['app_logo_url'] ?? null,
             'business_tagline' => $settings['app_tagline'] ?? null,
 
-            // ONE copy of the rail rule — see PublicPaymentController.
-            'available_methods' => $amountDue > 0
+            // ONE copy of the rail rule — see PublicPaymentController. A dead
+            // order offers no rails at all (Order::isPayable): the page shows
+            // why and whom to call instead of a Pay button.
+            'available_methods' => $amountDue > 0 && $order->isPayable()
                 ? PublicPaymentController::availableMethodsFor($order)
                 : [],
+            'payable' => $order->isPayable(),
+            'closed'  => $order->isPayable() ? null : PaymentGate::customerPayload($order),
         ]);
     }
 
@@ -120,6 +125,12 @@ class PublicOrderController extends Controller
         $order = $this->resolve($token);
         if (!$order) {
             return response()->json(['message' => 'Order not found.'], 404);
+        }
+
+        // A dead order is not payable — refuse BEFORE minting, with the same
+        // words as the pay page (PaymentLinkService::mint would throw anyway).
+        if ($refusal = PaymentGate::refuseCustomer($order)) {
+            return $refusal;
         }
 
         $totalPaid = (float) Payment::where('order_id', $order->id)

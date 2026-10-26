@@ -52,6 +52,11 @@ class PublicQuotationController extends Controller
             // as resolve(): Order is bounded too, and the customer's pay-link
             // must not depend on whose session is attached to the request.
             $order = Order::withoutViewerScope()->find($quotation->converted_order_id);
+            // Its order was cancelled after the quote was accepted (status
+            // dropdown, not a void): no pay-link for a dead order.
+            if ($order && ($refusal = \App\Support\PaymentGate::refuseCustomer($order))) {
+                return $refusal;
+            }
             return response()->json([
                 'message'   => 'This quotation was already accepted.',
                 'pay_token' => $order?->payment_token,

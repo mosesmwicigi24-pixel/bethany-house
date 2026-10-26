@@ -76,6 +76,7 @@ type Stage =
     | "loading"
     | "error"
     | "expired"
+    | "closed"            // the order is cancelled/voided/refunded — not payable
     | "select_method"
     | "mpesa"             // phone input + push waiting
     | "paystack_email"    // collecting email before redirect
@@ -90,13 +91,31 @@ type Stage =
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
+/** The 410 the API answers for a dead order (App\Support\PaymentGate). */
+interface ClosedInfo {
+    message: string;
+    reason: "order_not_payable";
+    order_number: string;
+    order_status: string;
+    contact: { business_name: string; phone: string | null; email: string | null };
+}
+
+class ApiError extends Error {
+    constructor(message: string, public status: number, public body: unknown) { super(message); }
+}
+
+const closedFrom = (e: unknown): ClosedInfo | null =>
+    e instanceof ApiError && e.status === 410 && (e.body as any)?.reason === "order_not_payable"
+        ? (e.body as ClosedInfo)
+        : null;
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const res  = await fetch(`${BASE}${path}`, {
         headers: { "Content-Type": "application/json", Accept: "application/json", ...init?.headers },
         ...init,
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((body as any)?.message ?? `Error ${res.status}`);
+    if (!res.ok) throw new ApiError((body as any)?.message ?? `Error ${res.status}`, res.status, body);
     return body as T;
 }
 
@@ -193,6 +212,27 @@ function LoadingScreen() {
     return (
         <div className="min-h-screen bg-surface-50 flex items-center justify-center">
             <Spinner size="lg" />
+        </div>
+    );
+}
+
+/** A dead order: said calmly, with whom to call — never "error". */
+function ClosedScreen({ info }: { info: ClosedInfo }) {
+    const { business_name, phone, email } = info.contact ?? {};
+    return (
+        <div className="min-h-screen bg-surface-50 flex items-center justify-center p-4">
+            <Card className="max-w-sm w-full p-8 text-center">
+                <p className="text-2xs text-surface-400 uppercase tracking-wide font-medium">Order</p>
+                <p className="text-lg font-bold font-mono text-surface-900 mb-3">{info.order_number}</p>
+                <p className="text-sm text-surface-700 mb-4">{info.message}</p>
+                {(phone || email) && (
+                    <div className="text-sm text-surface-600 space-y-1">
+                        {business_name && <p className="font-medium text-surface-800">{business_name}</p>}
+                        {phone && <p><a href={`tel:${phone.replace(/\s+/g, "")}`} className="text-brand-600 hover:underline">{phone}</a></p>}
+                        {email && <p><a href={`mailto:${email}`} className="text-brand-600 hover:underline">{email}</a></p>}
+                    </div>
+                )}
+            </Card>
         </div>
     );
 }
@@ -1212,6 +1252,7 @@ export default function PaymentLinkPage() {
     const [stage, setStage] = useState<Stage>("loading");
     const [order, setOrder] = useState<OrderInfo | null>(null);
     const [error, setError] = useState("");
+    const [closed, setClosed] = useState<ClosedInfo | null>(null);
     // The manual/instructional method the customer picked (Mukuru, WU/MoneyGram, …)
     const [manualMethod, setManualMethod] = useState<PaymentMethod | null>(null);
 
@@ -1248,6 +1289,8 @@ export default function PaymentLinkPage() {
                 updateStage(fromPaystack ? "paystack_return" : "select_method");
             }
         } catch (e: any) {
+            const c = closedFrom(e);
+            if (c) { setClosed(c); updateStage("closed"); clearOuterPoll(); return; }
             setError((e as Error).message ?? "Could not load payment details.");
             updateStage("error");
         }
@@ -1275,8 +1318,11 @@ export default function PaymentLinkPage() {
                 updateStage("expired");
             }
             // All other cases: leave stage alone - user is interacting
-        } catch {
-            // Silently ignore transient poll errors - don't show error to user
+        } catch (e) {
+            // Cancelled while the page was open: say so. Any other poll error
+            // is transient — don't show it to the user.
+            const c = closedFrom(e);
+            if (c) { clearOuterPoll(); setClosed(c); updateStage("closed"); }
         }
     }, [token]);
 
@@ -1290,6 +1336,7 @@ export default function PaymentLinkPage() {
     if (stage === "loading") return <LoadingScreen />;
     if (stage === "error")   return <ErrorScreen message={error} onRetry={initialLoad} />;
     if (stage === "expired") return <ErrorScreen message="This payment link has expired. Please contact the business for a new link." />;
+    if (stage === "closed" && closed) return <ClosedScreen info={closed} />;
     if (stage === "paid")    return <PaidScreen orderNumber={order?.order_number ?? ""} businessName={order?.business_name ?? ""} continueUrl={order?.continue_url} receiptUrl={order?.public_url} />;
     if (!order) return <LoadingScreen />;
 
@@ -1309,7 +1356,7 @@ export default function PaymentLinkPage() {
         bank_transfer:    "Bank Transfer",
         manual:           manualMethod?.name ?? "Payment",
         bank_pending:     "",
-        loading: "", error: "", expired: "", select_method: "", paid: "",
+        loading: "", error: "", expired: "", closed: "", select_method: "", paid: "",
     };
 
     return (

@@ -1359,8 +1359,9 @@ class OrderController extends Controller
 
         $order = Order::with('payments')->findOrFail($id);
 
-        if (in_array($order->status, ['cancelled', 'voided', 'refunded'])) {
-            return response()->json(['message' => 'Cannot add payment to a cancelled/voided/refunded order.'], 422);
+        // The one rule (Order::isPayable), in the one wording (PaymentGate).
+        if ($refusal = \App\Support\PaymentGate::refuseStaff($order)) {
+            return $refusal;
         }
 
         $taxInclusive       = $validated['tax_inclusive'] ?? true;
@@ -1613,6 +1614,11 @@ class OrderController extends Controller
     public function paymentLink(Request $request, $id)
     {
         $order = Order::findOrFail($id);
+
+        // A dead order is not payable — no link, new or renewed (Order::isPayable).
+        if ($refusal = \App\Support\PaymentGate::refuseStaff($order)) {
+            return $refusal;
+        }
 
         if ($order->payment_status === 'paid') {
             return response()->json(['message' => 'This order is already fully paid.'], 422);

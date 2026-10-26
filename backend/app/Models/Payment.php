@@ -40,6 +40,7 @@ class Payment extends Model
         'voided_at',
         'voided_by',
         'paid_at',
+        'received_after_cancel_at',
         // Who recorded it (4D) — stamped on every creation path; null for the
         // public pay page and gateway webhooks.
         'recorded_by',
@@ -59,6 +60,7 @@ class Payment extends Model
         'refunded_at'          => 'datetime',
         'voided_at'            => 'datetime',
         'paid_at'              => 'datetime',
+        'received_after_cancel_at' => 'datetime',
     ];
 
     protected static function boot()
@@ -78,6 +80,18 @@ class Payment extends Model
             // The reporting rate in force today travels with the payment (Step 3).
             \App\Support\ReportingRateStamp::apply($payment);
         });
+
+        // Money settling onto a dead order is recorded, never refused — and
+        // marked for a refund, with finance told (App\Services\Payments\LatePayment).
+        static::saving(fn ($payment) => \App\Services\Payments\LatePayment::stamp($payment));
+        static::saved(fn ($payment) => \App\Services\Payments\LatePayment::announce($payment));
+    }
+
+    /** Settled after its order was cancelled and not yet fully refunded. */
+    public function needsRefundAfterCancel(): bool
+    {
+        return $this->received_after_cancel_at !== null
+            && (float) $this->refund_amount + 0.005 < (float) $this->amount;
     }
 
     public function order()

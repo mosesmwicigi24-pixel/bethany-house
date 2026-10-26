@@ -30,6 +30,9 @@ class PublicPaymentController extends Controller
 
     public function show(string $token)
     {
+        if ($refusal = $this->deadOrderRefusal($token)) {
+            return $refusal;
+        }
         $order = $this->resolveOrder($token);
         if (!$order) {
             return response()->json(['message' => 'Payment link not found or has expired.'], 404);
@@ -90,6 +93,9 @@ class PublicPaymentController extends Controller
 
     public function initiate(Request $request, string $token)
     {
+        if ($refusal = $this->deadOrderRefusal($token)) {
+            return $refusal;
+        }
         $order = $this->resolveOrder($token);
         if (!$order) {
             return response()->json(['message' => 'Payment link not found or expired.'], 404);
@@ -157,6 +163,7 @@ class PublicPaymentController extends Controller
         return response()->json([
             'payment_status'      => $order->payment_status,
             'order_status'        => $order->status,
+            'payable'             => $order->isPayable(),
             'latest_payment'      => $latestPayment ? [
                 'status'               => $latestPayment->status,
                 'method'               => $latestPayment->payment_method,
@@ -450,6 +457,9 @@ class PublicPaymentController extends Controller
 
     public function uploadProof(Request $request, string $token)
     {
+        if ($refusal = $this->deadOrderRefusal($token)) {
+            return $refusal;
+        }
         $order = $this->resolveOrder($token);
         if (!$order) {
             return response()->json(['message' => 'Payment link not found or expired.'], 404);
@@ -511,6 +521,9 @@ class PublicPaymentController extends Controller
 
     public function confirmMpesa(Request $request, string $token)
     {
+        if ($refusal = $this->deadOrderRefusal($token)) {
+            return $refusal;
+        }
         $order = $this->resolveOrder($token);
         if (!$order) {
             return response()->json(['message' => 'Payment link not found or expired.'], 404);
@@ -758,6 +771,27 @@ class PublicPaymentController extends Controller
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * A dead order is not payable (Order::isPayable): the page and every
+     * customer action that would START a payment answer 410 with a calm
+     * message and the shop's contact.
+     *
+     * Looked up BEFORE the expiry check on purpose — voiding an invoice also
+     * expires its link, and that customer should hear "this order was
+     * cancelled", not "link not found".
+     *
+     * Deliberately NOT called by mpesaCallback (Safaricom reporting a push
+     * the customer already approved), verifyPaystack (a card already
+     * charged) or status (read-only): money that has moved is recorded and
+     * flagged for a refund, never turned away (Services\Payments\LatePayment).
+     */
+    private function deadOrderRefusal(string $token): ?\Illuminate\Http\JsonResponse
+    {
+        $order = Order::where('payment_token', $token)->first();
+
+        return $order ? \App\Support\PaymentGate::refuseCustomer($order) : null;
+    }
 
     private function resolveOrder(string $token): ?Order
     {

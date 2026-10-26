@@ -202,7 +202,9 @@ function PaymentLinkButton({ order }: { order: Order }) {
 
     const unpaidStatuses: string[] = ["pending", "deposit", "partial", "failed"];
     const isUnpaid = unpaidStatuses.includes(order.payment_status);
-    if (!isUnpaid) return null;
+    // A dead order is not payable (owner, 2026-10-26) — the API refuses the link too.
+    const isDead = ["cancelled", "voided", "refunded"].includes(order.status);
+    if (!isUnpaid || isDead) return null;
 
     const handleClick = async (e: React.MouseEvent) => {
         e.stopPropagation();

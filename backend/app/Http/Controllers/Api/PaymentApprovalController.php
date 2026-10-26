@@ -336,7 +336,14 @@ class PaymentApprovalController extends Controller
                 // Payment approval means money is confirmed - NOT that fulfilment
                 // is done. Advance to 'confirmed' so staff can proceed to ship/fulfil.
                 // 'completed' is reserved for explicit staff action after delivery.
-                if (in_array($order->payment_status, ['paid'])) {
+                //
+                // NEVER for a dead order: approving the proof of money sent
+                // before a cancel used to set a cancelled order back to
+                // 'confirmed' — reviving it, and its sale, off a refund-owed
+                // payment. The money is recorded and flagged (LatePayment);
+                // the order stays as it is. (The elseif's own status list
+                // already leaves dead orders alone.)
+                if ($order->isPayable() && in_array($order->payment_status, ['paid'])) {
                     // Fully paid and all approvals cleared → confirmed (ready to fulfil)
                     $order->update([
                         'status'       => 'confirmed',
@@ -383,8 +390,11 @@ class PaymentApprovalController extends Controller
             ]);
 
             return response()->json([
-                'message'        => 'Payment approved.',
+                'message'        => $order->isPayable()
+                    ? 'Payment approved.'
+                    : \App\Support\PaymentGate::lateMessage($order),
                 'payment_status' => $order->fresh()->payment_status,
+                'received_after_cancel' => $payment->fresh()->received_after_cancel_at !== null,
             ]);
 
         } catch (\Exception $e) {
