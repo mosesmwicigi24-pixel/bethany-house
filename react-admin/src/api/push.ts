@@ -19,6 +19,12 @@ export const pushApi = {
     subscribe: (subscription: PushSubscriptionJSON) =>
         post<{ message: string }>('/v1/admin/push/subscribe', subscription),
 
+    /** Store app (People PR 8): the Expo push token for this install */
+    subscribeExpo: (expo_token: string) =>
+        post<{ message: string }>('/v1/admin/push/subscribe-expo', { expo_token }),
+    unsubscribeExpo: (expo_token: string) =>
+        post<{ message: string }>('/v1/admin/push/unsubscribe-expo', { expo_token }),
+
     /** Remove a push subscription from the server */
     unsubscribe: (endpoint: string) =>
         del<{ message: string }>('/v1/admin/push/unsubscribe', {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isNative, onNative, postNative } from "@/lib/native";
 
 /**
  * The phone's position for a punch (Bethany People PR 1).
@@ -14,6 +15,8 @@ export interface Fix {
     /** Metres of uncertainty the phone reports for this fix. */
     accuracy: number;
     at: number;
+    /** The store app can tell when a fake-GPS app supplied the fix; a browser cannot. */
+    mocked?: boolean;
 }
 
 export type GeoState =
@@ -25,20 +28,34 @@ export type GeoState =
 
 export function useGeolocation(active = true) {
     const [state, setState] = useState<GeoState>(() =>
-        typeof navigator !== "undefined" && "geolocation" in navigator ? { status: "asking" } : { status: "unsupported" },
+        isNative() || (typeof navigator !== "undefined" && "geolocation" in navigator) ? { status: "asking" } : { status: "unsupported" },
     );
     const watchId = useRef<number | null>(null);
+    const offNative = useRef<(() => void) | null>(null);
 
     const stop = useCallback(() => {
         if (watchId.current !== null) {
             navigator.geolocation.clearWatch(watchId.current);
             watchId.current = null;
         }
+        if (offNative.current) { offNative.current(); offNative.current = null; postNative({ type: "geo:stop" }); }
     }, []);
 
     const start = useCallback(() => {
-        if (!("geolocation" in navigator)) return;
         stop();
+        // In the store app the fix comes from the phone's own location service,
+        // with the mocked flag Android reports when a fake-GPS app is on.
+        if (isNative()) {
+            setState(s => (s.status === "ok" ? s : { status: "asking" }));
+            const offFix = onNative("geo:fix", m => setState({ status: "ok", fix: {
+                latitude: Number(m.latitude), longitude: Number(m.longitude), accuracy: Math.round(Number(m.accuracy ?? 0)), at: Number(m.at ?? Date.now()), mocked: Boolean(m.mocked),
+            } }));
+            const offErr = onNative("geo:error", m => setState(m.code === "denied" ? { status: "denied" } : { status: "unavailable", message: String(m.message ?? "Location is not available right now.") }));
+            offNative.current = () => { offFix(); offErr(); };
+            postNative({ type: "geo:start" });
+            return;
+        }
+        if (!("geolocation" in navigator)) return;
         setState(s => (s.status === "ok" ? s : { status: "asking" }));
         watchId.current = navigator.geolocation.watchPosition(
             pos => setState({ status: "ok", fix: {

@@ -17,6 +17,7 @@ import {
 // XSS risk is acceptable here: the app is an internal admin tool served
 // over HTTPS with no user-generated HTML rendering.
 
+import "@/lib/native"; // window.BethanyNative typing
 const TOKEN_KEY = "bh_admin_token";
 
 export const tokenStorage = {
@@ -44,6 +45,10 @@ function randomKey(): string {
 
 export function deviceKey(): string | null {
     if (deviceKeyCache !== undefined) return deviceKeyCache;
+    // The store app keeps one id per install in secure storage (People PR 8):
+    // survives a WebView cache clear, so the named device stays the same.
+    const native = typeof window !== "undefined" ? window.BethanyNative?.deviceId : undefined;
+    if (native && /^[A-Za-z0-9-]{16,64}$/.test(native)) { deviceKeyCache = native; return native; }
     try {
         let key = localStorage.getItem(DEVICE_KEY);
         if (!key || !/^[A-Za-z0-9-]{16,64}$/.test(key)) {
@@ -58,7 +63,7 @@ export function deviceKey(): string | null {
     return deviceKeyCache;
 }
 
-const touchPoints = typeof navigator !== "undefined" ? String(Math.min(20, navigator.maxTouchPoints || 0)) : "0";
+const touchPoints = typeof navigator !== "undefined" ? String(Math.min(20, navigator.maxTouchPoints || (typeof window !== "undefined" && window.BethanyNative ? 5 : 0))) : "0";
 
 // ─── Activity (idle limits) ───────────────────────────────────────────────────
 // The server ends (or, for a clerk, PIN-locks) a session that has been idle

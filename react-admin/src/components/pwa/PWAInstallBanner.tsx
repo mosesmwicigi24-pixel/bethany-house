@@ -1,3 +1,4 @@
+import "@/lib/native";
 /**
  * PWAInstallBanner.tsx - All PWA-related UI prompts in one component.
  *
@@ -334,6 +335,12 @@ function ShareIcon() {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function PWAInstallBanner() {
+    // Inside the store app there is nothing to install or update here (People PR 8).
+    if (typeof window !== "undefined" && window.BethanyNative) return null;
+    return <PWABanners />;
+}
+
+function PWABanners() {
     const {
         isInstallable,
         isOnline,
