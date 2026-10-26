@@ -102,3 +102,8 @@ Schedule::command(\App\Console\Commands\AttendanceAutoClockOut::class)
 Schedule::command(\App\Console\Commands\HrDocumentExpiry::class)
     ->dailyAt('07:15')
     ->withoutOverlapping();
+
+// ── Roster: shift reminders an hour ahead (People PR 3) ──────────────────────
+Schedule::command(\App\Console\Commands\RosterRemind::class)
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();

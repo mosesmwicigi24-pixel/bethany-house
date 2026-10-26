@@ -173,6 +173,8 @@ const ClockPage = lazy(() => import("@/pages/me/ClockPage"));
 const PeoplePage = lazy(() => import("@/pages/people/PeoplePage"));
 const PersonPage = lazy(() => import("@/pages/people/PersonPage"));
 const HolidaysPage = lazy(() => import("@/pages/setup/holidays/HolidaysPage"));
+const RosterPage = lazy(() => import("@/pages/roster/RosterPage"));
+const ShiftsPage = lazy(() => import("@/pages/me/ShiftsPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
 );
@@ -947,6 +949,24 @@ export default function App() {
                                 <Suspense fallback={<PageLoader />}>
                                     <ClockPage />
                                 </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/me/shifts"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <ShiftsPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/roster"
+                            element={
+                                <ProtectedRoute permission="attendance.view_team">
+                                <Suspense fallback={<PageLoader />}>
+                                    <RosterPage />
+                                </Suspense>
+                                </ProtectedRoute>
                             }
                         />
                         <Route

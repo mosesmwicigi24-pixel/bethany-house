@@ -542,6 +542,31 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/holidays/{id}', [\App\Http\Controllers\Api\PeopleController::class, 'destroyHoliday'])->whereNumber('id');
             });
 
+            // ── My shifts (People PR 3) — every staff member ────────────────
+            Route::prefix('me/shifts')->group(function () {
+                $roster = \App\Http\Controllers\Api\RosterController::class;
+                Route::get('/',            [$roster, 'mine']);
+                Route::post('/{id}/claim', [$roster, 'claim'])->whereNumber('id');
+                Route::post('/{id}/swap',  [$roster, 'requestSwap'])->whereNumber('id');
+            });
+            Route::delete('/me/swaps/{id}', [\App\Http\Controllers\Api\RosterController::class, 'withdrawSwap'])->whereNumber('id');
+
+            // ── Roster (People PR 3): read with attendance.view_team, write with roster.manage ──
+            Route::middleware('permission:attendance.view_team,sanctum')->prefix('roster')->group(function () {
+                $roster = \App\Http\Controllers\Api\RosterController::class;
+                Route::get('/',                         [$roster, 'week']);
+                Route::get('/swaps',                    [$roster, 'swaps']);
+                Route::middleware('permission:roster.manage,sanctum')->group(function () use ($roster) {
+                    Route::post('/shifts',              [$roster, 'store']);
+                    Route::put('/shifts/{id}',          [$roster, 'update'])->whereNumber('id');
+                    Route::delete('/shifts/{id}',       [$roster, 'destroy'])->whereNumber('id');
+                    Route::post('/publish',             [$roster, 'publish']);
+                    Route::post('/copy-week',           [$roster, 'copyWeek']);
+                    Route::post('/swaps/{id}/approve',  [$roster, 'approveSwap'])->whereNumber('id');
+                    Route::post('/swaps/{id}/decline',  [$roster, 'declineSwap'])->whereNumber('id');
+                });
+            });
+
             // ── People: employee files and documents (People PR 2) ──────────
             Route::middleware('permission:hr.view,sanctum')->prefix('people')->group(function () {
                 $people = \App\Http\Controllers\Api\PeopleController::class;

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
+import { Link } from "react-router-dom";
 import { timeClockApi, type TimeClockOutlet, type TimeEntry, type Punch } from "@/api/attendance";
+import { rosterApi } from "@/api/roster";
 import { useGeolocation, distanceMeters } from "@/lib/useGeolocation";
 import { readPendingPunch, savePendingPunch, clearPendingPunch, type PendingPunch } from "@/lib/pendingPunch";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -65,6 +67,7 @@ export default function ClockPage() {
     const canOverride = can("attendance.manage") || can("outlets.all_access");
 
     const { data, isLoading, refetch } = useQuery({ queryKey: ["time-clock-status"], queryFn: () => timeClockApi.status(), refetchInterval: 60_000 });
+    const { data: mine } = useQuery({ queryKey: ["my-shifts"], queryFn: () => rosterApi.mine(), staleTime: 60_000 });
     const active = data?.active_entry ?? null;
 
     // The wall clock ticks every second so "clocked in 2 h 14 m" moves.
@@ -286,6 +289,12 @@ export default function ClockPage() {
 
             {/* Today, this week, last punch */}
             <div className="mt-4 rounded-2xl bg-white border border-line shadow-sm divide-y divide-line text-sm">
+                <div className="flex justify-between gap-3 px-4 py-3">
+                    <span className="text-surface-500">Today's shift</span>
+                    <Link to="/me/shifts" className="text-right font-semibold tabular-nums text-surface-900">
+                        {mine?.today ? `${mine.today.starts_at} – ${mine.today.ends_at}${mine.today.label ? ` · ${mine.today.label}` : ""}` : mine?.next ? `Next: ${new Date(mine.next.date + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short" })} ${mine.next.starts_at}` : "None rostered"}
+                    </Link>
+                </div>
                 <div className="flex justify-between px-4 py-3"><span className="text-surface-500">Today</span><span className="font-semibold tabular-nums text-surface-900">{fmtMinutes((data?.today_worked_minutes ?? 0) + (active ? Math.max(0, elapsed - active.elapsed_minutes) : 0))}</span></div>
                 <div className="flex justify-between px-4 py-3"><span className="text-surface-500">This week</span><span className="font-semibold tabular-nums text-surface-900">{fmtMinutes(data?.week_worked_minutes ?? 0)}</span></div>
                 <div className="flex justify-between gap-3 px-4 py-3">

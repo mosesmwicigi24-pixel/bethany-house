@@ -224,6 +224,8 @@ class RoleCatalogueV2Test extends TestCase
             'pos.approve_reversal',
             // People PR 2 (sync, 2026-10-26): the shop's employee files, identifiers masked.
             'hr.view',
+            // People PR 3 (sync, 2026-10-27): the shop's roster.
+            'roster.manage',
         ],
         'procurement_manager' => [
             // 3C (2026_10_03_530001): proposes cost changes.
@@ -238,6 +240,8 @@ class RoleCatalogueV2Test extends TestCase
             'production.confirm_order', 'production.manage_assignees',
             'production.raise_order', 'production.submit_qc', 'production.view',
             'products.view', 'reports.production',
+            // People PR 3 (sync, 2026-10-27): rosters the floor.
+            'attendance.view_team', 'roster.manage',
         ],
     ];
 

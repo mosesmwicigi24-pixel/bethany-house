@@ -47,6 +47,16 @@ class NotificationService
      * @param  User|Collection|array  $recipients
      * @param  \Illuminate\Notifications\Notification  $notification
      */
+    /**
+     * Send a ready-made notification to these people through the one delivery
+     * path (database row, Reverb badge, web and Expo push). For modules whose
+     * recipients are a list of users rather than a role (People PR 3).
+     */
+    public static function deliver($recipients, $notification): void
+    {
+        self::send($recipients, $notification);
+    }
+
     private static function send($recipients, $notification): void
     {
         $targets = $recipients instanceof User
