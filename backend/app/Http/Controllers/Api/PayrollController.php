@@ -17,6 +17,7 @@ use App\Services\People\Payroll;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 /**
  * Payroll (Bethany People PR 6). payroll.view reads runs, lines, rates and
@@ -127,6 +128,85 @@ class PayrollController extends Controller
         $l = PayrollLine::with(['run.period', 'run.group', 'user'])->where('payroll_run_id', $id)->findOrFail($line);
         abort_if($l->run->status === 'draft', 422, 'A draft has no payslip yet.');
         return $this->payslipPdf($l);
+    }
+
+    // ── Payout files and statutory returns (People PR 7) ───────────────────
+
+    /** GET /payroll/runs/{id}/payout?method=mpesa|bank — payroll.run + step.up, gated. Unpaid lines whose file carries the details. */
+    public function payoutFile(Request $request, int $id)
+    {
+        $run = PayrollRun::with('period')->findOrFail($id);
+        abort_if($run->status === 'draft', 422, 'Approve the run first.');
+        $method = $request->validate(['method' => 'required|in:mpesa,bank'])['method'];
+        $built = Payroll::payoutRows($run, $method);
+        abort_if(empty($built['rows']), 422, 'Nobody unpaid is set to ' . ($method === 'mpesa' ? 'M-Pesa' : 'bank') . ' with their details on file.');
+        ActivityLogService::log('payout_file_built', $run, ['method' => $method, 'rows' => count($built['rows'])], "{$request->user()->first_name} built the {$method} payout file for {$run->reference}");
+
+        $header = $method === 'mpesa' ? ['name', 'phone', 'amount', 'reference'] : ['account_name', 'bank', 'branch', 'account_no', 'amount', 'reference'];
+        $rows = array_map(fn ($r) => $method === 'mpesa' ? [$r['name'], $r['phone'], $r['amount'], $r['reference']] : [$r['account_name'], $r['bank'], $r['branch'], $r['account_no'], $r['amount'], $r['reference']], $built['rows']);
+
+        return $this->csv("payout-{$method}-{$run->reference}.csv", $header, $rows);
+    }
+
+    /** GET /payroll/runs/{id}/payout-readiness — payroll.view: who is in each file and who is missing details. */
+    public function payoutReadiness(int $id): JsonResponse
+    {
+        $run = PayrollRun::findOrFail($id);
+        $out = [];
+        foreach (['mpesa', 'bank'] as $m) {
+            $b = Payroll::payoutRows($run, $m);
+            $out[$m] = ['ready' => count($b['rows']), 'total' => number_format(array_sum(array_map(fn ($r) => (float) $r['amount'], $b['rows'])), 2, '.', ''), 'missing' => $b['missing']];
+        }
+        $cash = $run->lines()->with('user.employeeProfile')->whereNull('paid_at')->get()->filter(fn ($l) => ($l->user?->employeeProfile?->pay_method ?? null) === 'cash')->count();
+        $none = $run->lines()->with('user.employeeProfile')->whereNull('paid_at')->get()->filter(fn ($l) => !($l->user?->employeeProfile?->pay_method ?? null))->map(fn ($l) => trim("{$l->user?->first_name} {$l->user?->last_name}"))->values();
+
+        return response()->json($out + ['cash' => $cash, 'no_pay_method' => $none]);
+    }
+
+    /**
+     * GET /payroll/returns?month=YYYY-MM&kind=paye|nssf|shif|housing_levy — payroll.run + step.up, gated.
+     * Working CSVs over every approved/paid run whose period ends in the month.
+     * Column layouts are the Hub's own, NOT the authorities' upload templates
+     * (UNKNOWN — NEEDS VERIFICATION against KRA P10, NSSF and SHA formats).
+     */
+    public function returns(Request $request)
+    {
+        $v = $request->validate(['month' => 'required|date_format:Y-m', 'kind' => 'required|in:paye,nssf,shif,housing_levy']);
+        $start = Carbon::createFromFormat('Y-m', $v['month'])->startOfMonth(); $end = $start->copy()->endOfMonth();
+        $runs = PayrollRun::whereIn('status', ['approved', 'paid'])->whereHas('period', fn ($q) => $q->whereBetween('ends_on', [$start->toDateString(), $end->toDateString()]))->pluck('id');
+        $lines = PayrollLine::with(['user.employeeProfile', 'run'])->whereIn('payroll_run_id', $runs)->orderBy('user_id')->get();
+        abort_if($lines->isEmpty(), 422, 'No approved run ends in that month.');
+        ActivityLogService::log('statutory_return_built', null, ['kind' => $v['kind'], 'month' => $v['month'], 'lines' => $lines->count()], "{$request->user()->first_name} built the {$v['kind']} return for {$v['month']}");
+
+        $m = fn ($x) => number_format((float) $x, 2, '.', '');
+        [$header, $rows] = match ($v['kind']) {
+            'paye' => [['run', 'employee', 'kra_pin', 'gross_pay', 'taxable_pay', 'nssf', 'shif', 'housing_levy', 'paye'],
+                $lines->map(fn ($l) => [$l->run->reference, $this->name($l), $l->user?->employeeProfile?->kra_pin, $m($l->gross), $m($l->taxable), $m($l->nssf_employee), $m($l->shif), $m($l->housing_employee), $m($l->paye)])],
+            'nssf' => [['run', 'employee', 'national_id', 'nssf_no', 'gross_pay', 'employee_contribution', 'employer_contribution', 'total'],
+                $lines->map(fn ($l) => [$l->run->reference, $this->name($l), $l->user?->employeeProfile?->national_id_no, $l->user?->employeeProfile?->nssf_no, $m($l->gross), $m($l->nssf_employee), $m($l->nssf_employer), $m((float) $l->nssf_employee + (float) $l->nssf_employer)])],
+            'shif' => [['run', 'employee', 'national_id', 'shif_no', 'gross_pay', 'contribution'],
+                $lines->map(fn ($l) => [$l->run->reference, $this->name($l), $l->user?->employeeProfile?->national_id_no, $l->user?->employeeProfile?->shif_no, $m($l->gross), $m($l->shif)])],
+            'housing_levy' => [['run', 'employee', 'national_id', 'kra_pin', 'gross_pay', 'employee_levy', 'employer_levy', 'total'],
+                $lines->map(fn ($l) => [$l->run->reference, $this->name($l), $l->user?->employeeProfile?->national_id_no, $l->user?->employeeProfile?->kra_pin, $m($l->gross), $m($l->housing_employee), $m($l->housing_employer), $m((float) $l->housing_employee + (float) $l->housing_employer)])],
+        };
+
+        return $this->csv("{$v['kind']}-return-{$v['month']}.csv", $header, $rows->all());
+    }
+
+    private function name(PayrollLine $l): string
+    {
+        return trim(($l->user?->first_name ?? '') . ' ' . ($l->user?->last_name ?? ''));
+    }
+
+    private function csv(string $name, array $header, array $rows)
+    {
+        $out = fopen('php://temp', 'r+');
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, $header);
+        foreach ($rows as $r) fputcsv($out, $r);
+        rewind($out); $csv = stream_get_contents($out); fclose($out);
+
+        return response($csv, 200, ['Content-Type' => 'text/csv; charset=UTF-8', 'Content-Disposition' => "attachment; filename=\"{$name}\"", 'Cache-Control' => 'no-cache, no-store']);
     }
 
     // ── Me ──────────────────────────────────────────────────────────────────
@@ -292,7 +372,7 @@ class PayrollController extends Controller
     {
         $out = [
             'id' => $l->id, 'user' => $l->relationLoaded('user') && $l->user ? ['id' => $l->user->id, 'name' => trim("{$l->user->first_name} {$l->user->last_name}")] : ['id' => $l->user_id],
-            'hours' => $l->hours, 'items' => $l->items, 'structure' => ['kind' => $l->structure['kind'] ?? null, 'base_amount' => $l->structure['base_amount'] ?? null, 'hourly_equivalent' => $l->structure['hourly_equivalent'] ?? null, 'service_fraction' => $l->structure['service_fraction'] ?? null],
+            'hours' => $l->hours, 'items' => $l->items, 'deductions' => $l->deductions ?? [], 'structure' => ['kind' => $l->structure['kind'] ?? null, 'base_amount' => $l->structure['base_amount'] ?? null, 'hourly_equivalent' => $l->structure['hourly_equivalent'] ?? null, 'service_fraction' => $l->structure['service_fraction'] ?? null],
             'payment_method' => $l->payment_method, 'payment_reference' => $l->payment_reference, 'paid_at' => $l->paid_at?->toIso8601String(), 'notes' => $l->notes,
         ];
         foreach (PayrollLine::MONEY as $c) $out[$c] = (float) $l->{$c};

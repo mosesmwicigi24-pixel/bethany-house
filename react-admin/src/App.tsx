@@ -180,6 +180,7 @@ const LeaveAdminPage = lazy(() => import("@/pages/leave/LeaveAdminPage"));
 const MyTimesheetPage = lazy(() => import("@/pages/me/TimesheetPage"));
 const TimesheetsPage = lazy(() => import("@/pages/timesheets/TimesheetsPage"));
 const MyPayslipsPage = lazy(() => import("@/pages/me/PayslipsPage"));
+const MyAdvancesPage = lazy(() => import("@/pages/me/AdvancesPage"));
 const PayrollPage = lazy(() => import("@/pages/payroll/PayrollPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
@@ -1016,6 +1017,14 @@ export default function App() {
                             element={
                                 <Suspense fallback={<PageLoader />}>
                                     <MyPayslipsPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/me/advances"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <MyAdvancesPage />
                                 </Suspense>
                             }
                         />

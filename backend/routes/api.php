@@ -587,6 +587,9 @@ Route::prefix('v1')->group(function () {
             // ── Payroll (People PR 6): payroll.view reads; payroll.run drafts, approves and pays (step-up) ──
             Route::get('/me/payslips',             [\App\Http\Controllers\Api\PayrollController::class, 'myPayslips']);
             Route::get('/me/payslips/{line}/pdf',  [\App\Http\Controllers\Api\PayrollController::class, 'myPayslipPdf'])->whereNumber('line')->middleware('step.up');
+            Route::get('/me/advances',             [\App\Http\Controllers\Api\AdvancesController::class, 'mine']);
+            Route::post('/me/advances',            [\App\Http\Controllers\Api\AdvancesController::class, 'store']);
+            Route::delete('/me/advances/{id}',     [\App\Http\Controllers\Api\AdvancesController::class, 'cancelMine'])->whereNumber('id');
             Route::middleware('permission:payroll.view,sanctum')->prefix('payroll')->group(function () {
                 $pay = \App\Http\Controllers\Api\PayrollController::class;
                 Route::get('/runs',                              [$pay, 'index']);
@@ -597,6 +600,17 @@ Route::prefix('v1')->group(function () {
                 Route::post('/runs/{id}/approve',                [$pay, 'approve'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
                 Route::post('/runs/{id}/pay',                    [$pay, 'pay'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
                 Route::get('/runs/{id}/lines/{line}/payslip',    [$pay, 'payslip'])->whereNumber('id')->whereNumber('line')->middleware('step.up');
+                Route::get('/runs/{id}/payout',                  [$pay, 'payoutFile'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                Route::get('/runs/{id}/payout-readiness',        [$pay, 'payoutReadiness'])->whereNumber('id');
+                Route::get('/returns',                           [$pay, 'returns'])->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                // Advances and loans (People PR 7)
+                $adv = \App\Http\Controllers\Api\AdvancesController::class;
+                Route::get('/advances',                          [$adv, 'index']);
+                Route::post('/advances',                         [$adv, 'storeForPerson'])->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                Route::post('/advances/{id}/approve',            [$adv, 'approve'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                Route::post('/advances/{id}/decline',            [$adv, 'decline'])->whereNumber('id')->middleware('permission:payroll.run,sanctum');
+                Route::post('/advances/{id}/payout',             [$adv, 'payout'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                Route::post('/advances/{id}/repay',              [$adv, 'repay'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
                 Route::get('/rates',                             [$pay, 'rates']);
                 Route::post('/rates',                            [$pay, 'storeRate'])->middleware(['permission:payroll.run,sanctum', 'step.up']);
                 Route::post('/rates/{id}/confirm',               [$pay, 'confirmRate'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);

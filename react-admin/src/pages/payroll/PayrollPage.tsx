@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
-import { payrollApi, kes, saveBlob, RUN_TONE, RUN_LABEL, RATE_LABEL, type PayrollRun, type PayrollLine, type RateTable, type RateCode } from "@/api/payroll";
+import { useSearchParams } from "react-router-dom";
+import { payrollApi, advancesApi, kes, saveBlob, RUN_TONE, RUN_LABEL, RATE_LABEL, type PayrollRun, type PayrollLine, type RateTable, type RateCode } from "@/api/payroll";
+import { AdvancesPanel, ReturnsPanel } from "@/components/people/AdvancesPanel";
 import { PayslipItems } from "@/components/people/PayslipItems";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
@@ -16,7 +18,9 @@ type Method = "mpesa" | "bank" | "cash";
  * then paid line by line. The Rates tab holds the dated statutory tables.
  */
 export default function PayrollPage() {
-    const [tab, setTab] = useState<"runs" | "rates">("runs");
+    const [params, setParams] = useSearchParams();
+    const tab = (["runs", "advances", "returns", "rates"].includes(params.get("tab") ?? "") ? params.get("tab") : "runs") as "runs" | "advances" | "returns" | "rates";
+    const setTab = (t: string) => setParams(t === "runs" ? {} : { tab: t });
     const [open, setOpen] = useState<number | null>(null);
     return (
         <div className="space-y-5 animate-fade-in">
@@ -26,10 +30,13 @@ export default function PayrollPage() {
                     <p className="text-sm text-surface-500">Pay runs from locked timesheets. Approving posts the labour cost to Expenses.</p>
                 </div>
                 <div className="flex rounded-xl border border-line bg-surface-50 p-0.5 text-xs font-semibold">
-                    {(["runs", "rates"] as const).map(t => <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 rounded-lg", tab === t ? "bg-white shadow-sm text-surface-900" : "text-surface-500")}>{t === "runs" ? "Runs" : "Statutory rates"}</button>)}
+                    {([["runs", "Runs"], ["advances", "Advances & loans"], ["returns", "Returns"], ["rates", "Statutory rates"]] as const).map(([t, label]) => <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 rounded-lg", tab === t ? "bg-white shadow-sm text-surface-900" : "text-surface-500")}>{label}</button>)}
                 </div>
             </div>
-            {tab === "runs" ? <Runs onOpen={setOpen} /> : <Rates />}
+            {tab === "runs" && <Runs onOpen={setOpen} />}
+            {tab === "advances" && <AdvancesPanel />}
+            {tab === "returns" && <ReturnsPanel />}
+            {tab === "rates" && <Rates />}
             {open !== null && <RunModal id={open} onClose={() => setOpen(null)} />}
         </div>
     );
@@ -103,7 +110,11 @@ function RunModal({ id, onClose }: { id: number; onClose: () => void }) {
     const qc = useQueryClient();
     const toast = useToastStore();
     const { data, isLoading } = useQuery({ queryKey: ["payroll-run", id], queryFn: () => payrollApi.show(id) });
+    const { data: readiness } = useQuery({ queryKey: ["payout-readiness", id], queryFn: () => advancesApi.payoutReadiness(id), enabled: !!data && data.run.status === "approved" });
     const [line, setLine] = useState<PayrollLine | null>(null);
+    const payoutFile = async (method: "mpesa" | "bank") => {
+        try { saveBlob(await advancesApi.payoutFile(id, method), `payout-${method}-${data?.run.reference}.csv`); } catch (e) { const err = e as ApiError; if (err?.message) toast.error(err.message); }
+    };
     const [paying, setPaying] = useState<{ line: PayrollLine | null; method: Method; reference: string } | null>(null);
     const refresh = () => { void qc.invalidateQueries({ queryKey: ["payroll-run", id] }); void qc.invalidateQueries({ queryKey: ["payroll-runs"] }); };
     const onErr = (e: ApiError) => toast.error(e.message);
@@ -141,6 +152,17 @@ function RunModal({ id, onClose }: { id: number; onClose: () => void }) {
                         {run.reconciles === false && <span className="text-danger font-semibold">Does not reconcile: {run.breaks?.join("; ")}</span>}
                         {run.reconciles && run.status !== "draft" && <span className="text-success">Ties: lines = run = expense</span>}
                     </div>
+                    {run.status === "approved" && readiness && (
+                        <div className="rounded-xl border border-line bg-surface-50 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-surface-600">
+                            <span className="font-semibold text-surface-900">Payout files</span>
+                            <button onClick={() => void payoutFile("mpesa")} disabled={!readiness.mpesa.ready} className="btn-secondary btn-sm">M-Pesa bulk CSV · {readiness.mpesa.ready} · {kes(Number(readiness.mpesa.total))}</button>
+                            <button onClick={() => void payoutFile("bank")} disabled={!readiness.bank.ready} className="btn-secondary btn-sm">Bank CSV · {readiness.bank.ready} · {kes(Number(readiness.bank.total))}</button>
+                            {readiness.cash > 0 && <span>{readiness.cash} paid in cash</span>}
+                            {(readiness.mpesa.missing.length + readiness.bank.missing.length) > 0 && <span className="text-warning">Missing details on file: {[...readiness.mpesa.missing, ...readiness.bank.missing].join(", ")}</span>}
+                            {readiness.no_pay_method.length > 0 && <span className="text-warning">No pay method: {readiness.no_pay_method.join(", ")}</span>}
+                            <span className="text-surface-400">A file is a list to upload to M-Pesa or the bank; record the payments here once they go.</span>
+                        </div>
+                    )}
                     {run.unpayable.length > 0 && (
                         <p className="rounded-xl bg-warning-light text-warning text-xs px-3 py-2">Not on this run: {run.unpayable.map(u => `${u.name} (${u.why.toLowerCase()})`).join(", ")}. Fix the timesheet or pay structure and recalculate.</p>
                     )}
