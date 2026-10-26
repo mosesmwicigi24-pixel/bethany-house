@@ -17,6 +17,7 @@ class PayPeriod extends Model
 
     public function group()      { return $this->belongsTo(PayGroup::class, 'pay_group_id'); }
     public function timesheets() { return $this->hasMany(Timesheet::class); }
+    public function runs()       { return $this->hasMany(PayrollRun::class); }
 
     public function isLocked(): bool
     {

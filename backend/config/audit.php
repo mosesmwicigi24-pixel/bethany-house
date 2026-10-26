@@ -144,6 +144,10 @@ return [
         \App\Models\PayGroup::class,
         \App\Models\PayPeriod::class,
         \App\Models\Timesheet::class,
+        \App\Models\PayStructure::class,
+        \App\Models\StatutoryRateTable::class,
+        \App\Models\PayrollRun::class,
+        \App\Models\PayrollLine::class,
         // Catalogue & pricing
         \App\Models\Product::class,
         \App\Models\ProductVariant::class,
@@ -225,6 +229,9 @@ return [
         \App\Models\PaymentMethod::class => ['configuration'],
         // The employee file's identifiers and pay details (People PR 2).
         \App\Models\EmployeeProfile::class => ['national_id_no', 'kra_pin', 'nssf_no', 'shif_no', 'mpesa_phone', 'bank_account_no'],
+        // Pay is sensitive (People PR 6): the log records that a line or structure changed, not the figures.
+        \App\Models\PayStructure::class => ['base_amount', 'allowances'],
+        \App\Models\PayrollLine::class => ['structure', 'items', 'basic', 'overtime_pay', 'rest_day_pay', 'holiday_pay', 'allowances', 'unpaid_deduction', 'gross', 'taxable', 'paye', 'nssf_employee', 'nssf_employer', 'shif', 'housing_employee', 'housing_employer', 'other_deductions', 'net', 'employer_cost'],
     ],
 
     // Attributes that change on their own and carry no intent.
@@ -281,6 +288,8 @@ return [
             'PeopleController@documentLink',
             'PeopleController@myDocumentLink',
             'SignedFileController@staffDocument',
+            // A person's own payslip (People PR 6) — their document, like their file.
+            'PayrollController@myPayslipPdf',
             'ProductController@exportTemplate',
         ],
 
@@ -318,6 +327,7 @@ return [
             'SupplierController@export',
             'OrderController@exportCsv',
             'TimesheetController@export',
+            'PayrollController@payslip',
             'PaymentController@exportTransactions',
             'PurchaseOrderController@grnPDF',
             'ReportController@exportPDF',

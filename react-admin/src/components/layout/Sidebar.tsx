@@ -85,6 +85,12 @@ export const NAV: NavGroup[] = [
                 icon: "clock",
                 // Ungated: /me/timesheet is every staff member's own period (PR 5).
             },
+            {
+                label: "My payslips",
+                href: "/me/payslips",
+                icon: "expenses",
+                // Ungated: /me/payslips is every staff member's own pay (PR 6); the PDF asks for a step-up.
+            },
         ],
     },
 
@@ -537,6 +543,14 @@ export const NAV: NavGroup[] = [
                 // Read with attendance.view_team; approve needs attendance.manage,
                 // lock needs timesheets.lock (People PR 5).
                 permission: "attendance.view_team",
+            },
+            {
+                label: "Payroll",
+                href: "/payroll",
+                icon: "expenses",
+                // Read with payroll.view; drafting, approving (step-up) and
+                // paying need payroll.run (People PR 6).
+                permission: "payroll.view",
             },
             {
                 label: "Leave",

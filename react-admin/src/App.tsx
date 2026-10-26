@@ -179,6 +179,8 @@ const MyLeavePage = lazy(() => import("@/pages/me/LeavePage"));
 const LeaveAdminPage = lazy(() => import("@/pages/leave/LeaveAdminPage"));
 const MyTimesheetPage = lazy(() => import("@/pages/me/TimesheetPage"));
 const TimesheetsPage = lazy(() => import("@/pages/timesheets/TimesheetsPage"));
+const MyPayslipsPage = lazy(() => import("@/pages/me/PayslipsPage"));
+const PayrollPage = lazy(() => import("@/pages/payroll/PayrollPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
 );
@@ -1005,6 +1007,24 @@ export default function App() {
                                 <ProtectedRoute permission="attendance.view_team">
                                 <Suspense fallback={<PageLoader />}>
                                     <TimesheetsPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/me/payslips"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <MyPayslipsPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/payroll"
+                            element={
+                                <ProtectedRoute permission="payroll.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <PayrollPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

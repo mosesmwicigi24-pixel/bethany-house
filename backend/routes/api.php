@@ -584,6 +584,24 @@ Route::prefix('v1')->group(function () {
                 Route::put('/pay-groups/{id}',                   [$ts, 'updateGroup'])->whereNumber('id')->middleware('permission:hr.edit,sanctum');
             });
 
+            // ── Payroll (People PR 6): payroll.view reads; payroll.run drafts, approves and pays (step-up) ──
+            Route::get('/me/payslips',             [\App\Http\Controllers\Api\PayrollController::class, 'myPayslips']);
+            Route::get('/me/payslips/{line}/pdf',  [\App\Http\Controllers\Api\PayrollController::class, 'myPayslipPdf'])->whereNumber('line')->middleware('step.up');
+            Route::middleware('permission:payroll.view,sanctum')->prefix('payroll')->group(function () {
+                $pay = \App\Http\Controllers\Api\PayrollController::class;
+                Route::get('/runs',                              [$pay, 'index']);
+                Route::post('/runs',                             [$pay, 'store'])->middleware('permission:payroll.run,sanctum');
+                Route::get('/runs/{id}',                         [$pay, 'show'])->whereNumber('id');
+                Route::post('/runs/{id}/recalculate',            [$pay, 'recalculate'])->whereNumber('id')->middleware('permission:payroll.run,sanctum');
+                Route::delete('/runs/{id}',                      [$pay, 'destroy'])->whereNumber('id')->middleware('permission:payroll.run,sanctum');
+                Route::post('/runs/{id}/approve',                [$pay, 'approve'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                Route::post('/runs/{id}/pay',                    [$pay, 'pay'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                Route::get('/runs/{id}/lines/{line}/payslip',    [$pay, 'payslip'])->whereNumber('id')->whereNumber('line')->middleware('step.up');
+                Route::get('/rates',                             [$pay, 'rates']);
+                Route::post('/rates',                            [$pay, 'storeRate'])->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                Route::post('/rates/{id}/confirm',               [$pay, 'confirmRate'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+            });
+
             // ── Leave, team side (People PR 4): read with attendance.view_team; decisions are checked per person ──
             Route::middleware('permission:attendance.view_team,sanctum')->prefix('leave')->group(function () {
                 $leave = \App\Http\Controllers\Api\LeaveController::class;
@@ -621,6 +639,8 @@ Route::prefix('v1')->group(function () {
                 Route::put('/{user}',                           [$people, 'update'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
                 Route::get('/{user}/sensitive',                 [$people, 'sensitive'])->whereNumber('user')->middleware(['permission:hr.view_sensitive,sanctum', 'step.up']);
                 Route::put('/{user}/sensitive',                 [$people, 'updateSensitive'])->whereNumber('user')->middleware(['permission:hr.edit,sanctum', 'permission:hr.view_sensitive,sanctum', 'step.up']);
+                Route::get('/{user}/pay',                       [\App\Http\Controllers\Api\PayrollController::class, 'structures'])->whereNumber('user')->middleware(['permission:hr.view_sensitive,sanctum', 'step.up']);
+                Route::post('/{user}/pay',                      [\App\Http\Controllers\Api\PayrollController::class, 'storeStructure'])->whereNumber('user')->middleware(['permission:hr.edit,sanctum', 'permission:hr.view_sensitive,sanctum', 'step.up']);
                 Route::post('/{user}/documents',                [$people, 'storeDocument'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
                 Route::get('/{user}/documents/{doc}',           [$people, 'documentLink'])->whereNumber('user')->whereNumber('doc');
                 Route::delete('/{user}/documents/{doc}',        [$people, 'removeDocument'])->whereNumber('user')->whereNumber('doc')->middleware('permission:hr.edit,sanctum');

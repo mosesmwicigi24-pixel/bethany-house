@@ -209,6 +209,8 @@ class RoleCatalogueV2Test extends TestCase
             'hr.view', 'hr.view_sensitive',
             // People PR 5 (sync, 2026-10-29): locks pay periods and exports approved hours.
             'attendance.view_team', 'timesheets.lock',
+            // People PR 6 (sync, 2026-10-30): runs payroll; approval and payment behind step-up.
+            'payroll.view', 'payroll.run',
         ],
         'accountant' => [
             // 3B (2026_10_03_520002): asks for payment voids and moves; signs nothing.
