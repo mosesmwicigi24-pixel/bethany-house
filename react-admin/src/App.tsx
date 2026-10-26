@@ -175,6 +175,10 @@ const PersonPage = lazy(() => import("@/pages/people/PersonPage"));
 const HolidaysPage = lazy(() => import("@/pages/setup/holidays/HolidaysPage"));
 const RosterPage = lazy(() => import("@/pages/roster/RosterPage"));
 const ShiftsPage = lazy(() => import("@/pages/me/ShiftsPage"));
+const MyLeavePage = lazy(() => import("@/pages/me/LeavePage"));
+const LeaveAdminPage = lazy(() => import("@/pages/leave/LeaveAdminPage"));
+const MyTimesheetPage = lazy(() => import("@/pages/me/TimesheetPage"));
+const TimesheetsPage = lazy(() => import("@/pages/timesheets/TimesheetsPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
 );
@@ -965,6 +969,42 @@ export default function App() {
                                 <ProtectedRoute permission="attendance.view_team">
                                 <Suspense fallback={<PageLoader />}>
                                     <RosterPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/me/leave"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <MyLeavePage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/leave"
+                            element={
+                                <ProtectedRoute permission="attendance.view_team">
+                                <Suspense fallback={<PageLoader />}>
+                                    <LeaveAdminPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/me/timesheet"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <MyTimesheetPage />
+                                </Suspense>
+                            }
+                        />
+                        <Route
+                            path="/timesheets"
+                            element={
+                                <ProtectedRoute permission="attendance.view_team">
+                                <Suspense fallback={<PageLoader />}>
+                                    <TimesheetsPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

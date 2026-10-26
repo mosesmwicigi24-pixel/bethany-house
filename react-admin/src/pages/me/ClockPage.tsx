@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import { Link } from "react-router-dom";
 import { timeClockApi, type TimeClockOutlet, type TimeEntry, type Punch } from "@/api/attendance";
 import { rosterApi } from "@/api/roster";
+import { leaveApi } from "@/api/leave";
 import { useGeolocation, distanceMeters } from "@/lib/useGeolocation";
 import { readPendingPunch, savePendingPunch, clearPendingPunch, type PendingPunch } from "@/lib/pendingPunch";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -68,6 +69,8 @@ export default function ClockPage() {
 
     const { data, isLoading, refetch } = useQuery({ queryKey: ["time-clock-status"], queryFn: () => timeClockApi.status(), refetchInterval: 60_000 });
     const { data: mine } = useQuery({ queryKey: ["my-shifts"], queryFn: () => rosterApi.mine(), staleTime: 60_000 });
+    const { data: leave } = useQuery({ queryKey: ["my-leave"], queryFn: () => leaveApi.mine(), staleTime: 300_000 });
+    const annual = leave?.balances.find(b => b.type.code === "annual") ?? leave?.balances.find(b => b.available !== null);
     const active = data?.active_entry ?? null;
 
     // The wall clock ticks every second so "clocked in 2 h 14 m" moves.
@@ -296,7 +299,11 @@ export default function ClockPage() {
                     </Link>
                 </div>
                 <div className="flex justify-between px-4 py-3"><span className="text-surface-500">Today</span><span className="font-semibold tabular-nums text-surface-900">{fmtMinutes((data?.today_worked_minutes ?? 0) + (active ? Math.max(0, elapsed - active.elapsed_minutes) : 0))}</span></div>
-                <div className="flex justify-between px-4 py-3"><span className="text-surface-500">This week</span><span className="font-semibold tabular-nums text-surface-900">{fmtMinutes(data?.week_worked_minutes ?? 0)}</span></div>
+                <div className="flex justify-between gap-3 px-4 py-3">
+                    <span className="text-surface-500">Leave balance</span>
+                    <Link to="/me/leave" className="font-semibold tabular-nums text-surface-900">{annual && annual.available !== null ? `${annual.available} days` : "—"}</Link>
+                </div>
+                <div className="flex justify-between px-4 py-3"><span className="text-surface-500">This week</span><Link to="/me/timesheet" className="font-semibold tabular-nums text-surface-900">{fmtMinutes(data?.week_worked_minutes ?? 0)}</Link></div>
                 <div className="flex justify-between gap-3 px-4 py-3">
                     <span className="text-surface-500">Last punch</span>
                     <span className="text-right text-surface-900">

@@ -16,4 +16,8 @@ return [
 
     // The oldest phone time accepted for a late punch, in hours.
     'late_sync_max_hours' => 24,
+
+    // Days of the week the business works (ISO: 1 = Monday … 7 = Sunday).
+    // Leave measured in working days counts only these, minus public holidays.
+    'working_days' => array_map('intval', explode(',', env('ATTENDANCE_WORKING_DAYS', '1,2,3,4,5,6'))),
 ];

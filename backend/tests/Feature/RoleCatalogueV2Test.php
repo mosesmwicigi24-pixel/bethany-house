@@ -207,6 +207,8 @@ class RoleCatalogueV2Test extends TestCase
             'procurement.view', 'procurement.pay', 'procurement.pay_void',
             // People PR 2 (sync, 2026-10-26): employee files and, behind step-up, pay details.
             'hr.view', 'hr.view_sensitive',
+            // People PR 5 (sync, 2026-10-29): locks pay periods and exports approved hours.
+            'attendance.view_team', 'timesheets.lock',
         ],
         'accountant' => [
             // 3B (2026_10_03_520002): asks for payment voids and moves; signs nothing.
@@ -226,6 +228,8 @@ class RoleCatalogueV2Test extends TestCase
             'hr.view',
             // People PR 3 (sync, 2026-10-27): the shop's roster.
             'roster.manage',
+            // People PR 4 (sync, 2026-10-28): the shop's leave.
+            'leave.approve',
         ],
         'procurement_manager' => [
             // 3C (2026_10_03_530001): proposes cost changes.
@@ -242,6 +246,8 @@ class RoleCatalogueV2Test extends TestCase
             'products.view', 'reports.production',
             // People PR 3 (sync, 2026-10-27): rosters the floor.
             'attendance.view_team', 'roster.manage',
+            // People PR 4 (sync, 2026-10-28): decides the floor's leave.
+            'leave.approve',
         ],
     ];
 

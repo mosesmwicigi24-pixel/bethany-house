@@ -151,6 +151,11 @@ export default function RosterPage() {
                                         {data.days.map(d => (
                                             <td key={d} className={clsx("px-1 py-1 align-top", dow(d) === 0 && "bg-surface-50/60")}>
                                                 <div className="space-y-1">
+                                                    {data.leave?.[String(m.id)]?.[d] && (
+                                                        <div className={clsx("rounded-lg px-2 py-1 text-2xs leading-tight border", data.leave[String(m.id)][d].status === "approved" ? "border-surface-300 bg-surface-100 text-surface-600" : "border-dashed border-warning bg-warning-light/50 text-warning")}>
+                                                            {data.leave[String(m.id)][d].status === "approved" ? "Off" : "Leave asked"}{data.leave[String(m.id)][d].type ? ` · ${data.leave[String(m.id)][d].type}` : ""}
+                                                        </div>
+                                                    )}
                                                     {(byCell.get(`${m.id}:${d}`) ?? []).map(s => <ShiftChip key={s.id} s={s} onClick={can ? () => setEditing({ shift: s, user_id: m.id, date: d }) : undefined} />)}
                                                     {can && <button onClick={() => setEditing({ user_id: m.id, date: d })} className="w-full text-2xs text-surface-300 hover:text-brand-600 py-0.5" aria-label={`Add shift for ${m.name} on ${d}`}>+</button>}
                                                 </div>

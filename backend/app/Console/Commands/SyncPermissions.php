@@ -305,6 +305,8 @@ class SyncPermissions extends Command
         'hr.edit'              => ['Edit Employee Files',  'Update employee files, upload and remove staff documents, manage public holidays', 'People'],
         'hr.view_sensitive'    => ['View Identifiers & Pay Details', 'Read and write national ID, KRA PIN, NSSF, SHIF, M-Pesa and bank details in full (step-up each time)', 'People'],
         'roster.manage'        => ['Manage the Roster', 'Draft, publish, cancel and copy shifts for own outlets; decide swap requests (People PR 3). Viewing the roster is attendance.view_team', 'People'],
+        'timesheets.lock'      => ['Lock Pay Periods', 'Lock a pay period once every timesheet is approved and export the approved hours (People PR 5); approving timesheets is attendance.manage', 'People'],
+        'leave.approve'        => ['Decide Leave', 'Approve, decline, record and cancel leave for staff in own outlets (People PR 4). A person\'s own manager (users.reports_to) decides without this key; nobody decides their own', 'People'],
     ];
 
     /**
@@ -452,6 +454,8 @@ class SyncPermissions extends Command
             'hr.view',
             // The shop's weekly roster and its swap requests (People PR 3).
             'roster.manage',
+            // The shop's leave (People PR 4).
+            'leave.approve',
             // Quotes for the shop's customers and issues them — the second
             // person a clerk's draft quotation needs before it reaches a
             // customer (Phase 2; until now only admin could issue).
@@ -572,6 +576,8 @@ class SyncPermissions extends Command
             'reports.production',
             // Rosters the floor: sees who is in, drafts and publishes the week (People PR 3).
             'attendance.view_team', 'roster.manage',
+            // Decides the floor's leave (People PR 4).
+            'leave.approve',
         ],
 
         // The procurement checker: approves POs, returns and stock movements
@@ -597,6 +603,8 @@ class SyncPermissions extends Command
             '@self', '@workspace',
             // Reads employee files and, behind step-up, the pay details payroll needs (People PR 2).
             'hr.view', 'hr.view_sensitive',
+            // Locks pay periods and exports the approved hours (People PR 5).
+            'attendance.view_team', 'timesheets.lock',
             // Payments - full approval authority + view transactions ledger
             'payments.view', 'payments.approve_international', 'payments.transactions',
             'payments.void', 'payments.reassign',
@@ -702,7 +710,7 @@ class SyncPermissions extends Command
             'users.create', 'users.edit', 'users.delete',
             'roles.edit',
             'attendance.manage',
-            'hr.edit', 'hr.view_sensitive', 'roster.manage',
+            'hr.edit', 'hr.view_sensitive', 'roster.manage', 'leave.approve',
             'bom.edit', 'setup.technical',
             // Phase 3A: Finance & Cash is not admin's (plan §6), and admin's
             // files come through reports.export, not the supply split.

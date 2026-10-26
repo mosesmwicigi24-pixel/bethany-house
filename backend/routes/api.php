@@ -551,6 +551,50 @@ Route::prefix('v1')->group(function () {
             });
             Route::delete('/me/swaps/{id}', [\App\Http\Controllers\Api\RosterController::class, 'withdrawSwap'])->whereNumber('id');
 
+            // ── My leave (People PR 4) — every staff member ─────────────────
+            Route::prefix('me/leave')->group(function () {
+                $leave = \App\Http\Controllers\Api\LeaveController::class;
+                Route::get('/',           [$leave, 'mine']);
+                Route::get('/preview',    [$leave, 'preview']);
+                Route::post('/',          [$leave, 'store']);
+                Route::delete('/{id}',    [$leave, 'cancelMine'])->whereNumber('id');
+            });
+            Route::get('/leave/types',    [\App\Http\Controllers\Api\LeaveController::class, 'types']);
+            Route::middleware('permission:hr.edit,sanctum')->group(function () {
+                Route::put('/leave/types/{id}',  [\App\Http\Controllers\Api\LeaveController::class, 'updateType'])->whereNumber('id');
+                Route::post('/leave/adjustments', [\App\Http\Controllers\Api\LeaveController::class, 'adjust']);
+            });
+
+            // ── My timesheet (People PR 5) — every staff member ─────────────
+            Route::get('/me/timesheet',         [\App\Http\Controllers\Api\TimesheetController::class, 'mine']);
+            Route::post('/me/timesheet/submit', [\App\Http\Controllers\Api\TimesheetController::class, 'submit']);
+
+            // ── Timesheets, team side (People PR 5) ─────────────────────────
+            Route::middleware('permission:attendance.view_team,sanctum')->group(function () {
+                $ts = \App\Http\Controllers\Api\TimesheetController::class;
+                Route::get('/timesheets',                        [$ts, 'index']);
+                Route::get('/timesheets/export',                 [$ts, 'export'])->middleware(['permission:timesheets.lock,sanctum', 'step.up']);
+                Route::get('/timesheets/person/{user}',          [$ts, 'show'])->whereNumber('user');
+                Route::post('/timesheets/person/{user}/approve', [$ts, 'approve'])->whereNumber('user')->middleware('permission:attendance.manage,sanctum');
+                Route::post('/timesheets/person/{user}/send-back', [$ts, 'sendBack'])->whereNumber('user')->middleware('permission:attendance.manage,sanctum');
+                Route::post('/pay-periods/{id}/lock',            [$ts, 'lock'])->whereNumber('id')->middleware('permission:timesheets.lock,sanctum');
+                Route::post('/pay-periods/{id}/unlock',          [$ts, 'unlock'])->whereNumber('id')->middleware('step.up');
+                Route::get('/pay-groups',                        [$ts, 'groups']);
+                Route::post('/pay-groups',                       [$ts, 'storeGroup'])->middleware('permission:hr.edit,sanctum');
+                Route::put('/pay-groups/{id}',                   [$ts, 'updateGroup'])->whereNumber('id')->middleware('permission:hr.edit,sanctum');
+            });
+
+            // ── Leave, team side (People PR 4): read with attendance.view_team; decisions are checked per person ──
+            Route::middleware('permission:attendance.view_team,sanctum')->prefix('leave')->group(function () {
+                $leave = \App\Http\Controllers\Api\LeaveController::class;
+                Route::get('/requests',                 [$leave, 'requests']);
+                Route::get('/calendar',                 [$leave, 'calendar']);
+                Route::post('/requests',                [$leave, 'storeForPerson']);
+                Route::post('/requests/{id}/approve',   [$leave, 'approve'])->whereNumber('id');
+                Route::post('/requests/{id}/decline',   [$leave, 'decline'])->whereNumber('id');
+                Route::delete('/requests/{id}',         [$leave, 'cancel'])->whereNumber('id');
+            });
+
             // ── Roster (People PR 3): read with attendance.view_team, write with roster.manage ──
             Route::middleware('permission:attendance.view_team,sanctum')->prefix('roster')->group(function () {
                 $roster = \App\Http\Controllers\Api\RosterController::class;
@@ -573,6 +617,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',                                 [$people, 'index']);
                 Route::get('/documents/expiring',               [$people, 'expiring']);
                 Route::get('/{user}',                           [$people, 'show'])->whereNumber('user');
+                Route::get('/{user}/leave',                     [\App\Http\Controllers\Api\LeaveController::class, 'forPerson'])->whereNumber('user');
                 Route::put('/{user}',                           [$people, 'update'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
                 Route::get('/{user}/sensitive',                 [$people, 'sensitive'])->whereNumber('user')->middleware(['permission:hr.view_sensitive,sanctum', 'step.up']);
                 Route::put('/{user}/sensitive',                 [$people, 'updateSensitive'])->whereNumber('user')->middleware(['permission:hr.edit,sanctum', 'permission:hr.view_sensitive,sanctum', 'step.up']);

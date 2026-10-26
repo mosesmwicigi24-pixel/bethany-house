@@ -61,6 +61,7 @@ export interface EmployeeProfileFields {
     emergency_contact_phone: string | null;
     emergency_contact_relationship: string | null;
     pay_method: PayMethod | null;
+    pay_group_id: number | null;
     bank_name: string | null;
     bank_branch: string | null;
     bank_account_name: string | null;
