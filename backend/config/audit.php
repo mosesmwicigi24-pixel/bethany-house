@@ -141,6 +141,9 @@ return [
         \App\Models\LeaveType::class,
         \App\Models\LeaveRequest::class,
         \App\Models\LeaveAdjustment::class,
+        \App\Models\PayGroup::class,
+        \App\Models\PayPeriod::class,
+        \App\Models\Timesheet::class,
         // Catalogue & pricing
         \App\Models\Product::class,
         \App\Models\ProductVariant::class,
@@ -314,6 +317,7 @@ return [
             'UserController@export',
             'SupplierController@export',
             'OrderController@exportCsv',
+            'TimesheetController@export',
             'PaymentController@exportTransactions',
             'PurchaseOrderController@grnPDF',
             'ReportController@exportPDF',

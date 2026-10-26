@@ -20,7 +20,7 @@ class EmployeeProfile extends Model
     public const SENSITIVE        = ['national_id_no', 'kra_pin', 'nssf_no', 'shif_no', 'mpesa_phone', 'bank_account_no'];
 
     protected $fillable = [
-        'user_id', 'job_title', 'department', 'employment_type', 'hire_date', 'end_date', 'date_of_birth',
+        'user_id', 'job_title', 'department', 'employment_type', 'pay_group_id', 'hire_date', 'end_date', 'date_of_birth',
         'national_id_no', 'kra_pin', 'nssf_no', 'shif_no',
         'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relationship',
         'pay_method', 'mpesa_phone', 'bank_name', 'bank_branch', 'bank_account_name', 'bank_account_no',
@@ -42,6 +42,11 @@ class EmployeeProfile extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function payGroup()
+    {
+        return $this->belongsTo(PayGroup::class);
     }
 
     /** "•••• 4521" — the last few characters only, enough to recognise, never enough to use. */

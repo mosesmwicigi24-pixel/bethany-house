@@ -303,7 +303,7 @@ export default function ClockPage() {
                     <span className="text-surface-500">Leave balance</span>
                     <Link to="/me/leave" className="font-semibold tabular-nums text-surface-900">{annual && annual.available !== null ? `${annual.available} days` : "—"}</Link>
                 </div>
-                <div className="flex justify-between px-4 py-3"><span className="text-surface-500">This week</span><span className="font-semibold tabular-nums text-surface-900">{fmtMinutes(data?.week_worked_minutes ?? 0)}</span></div>
+                <div className="flex justify-between px-4 py-3"><span className="text-surface-500">This week</span><Link to="/me/timesheet" className="font-semibold tabular-nums text-surface-900">{fmtMinutes(data?.week_worked_minutes ?? 0)}</Link></div>
                 <div className="flex justify-between gap-3 px-4 py-3">
                     <span className="text-surface-500">Last punch</span>
                     <span className="text-right text-surface-900">

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { peopleApi, type EmployeeProfileFields, type PersonFile } from "@/api/people";
 import { DocumentsCard } from "@/components/people/DocumentsCard";
 import { LeaveCard } from "@/components/people/LeaveCard";
+import { timesheetsApi } from "@/api/timesheets";
 import { SensitiveCard } from "@/components/people/SensitiveCard";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
@@ -32,6 +33,7 @@ export default function PersonPage() {
     const qc = useQueryClient();
     const toast = useToastStore();
     const { data, isLoading } = useQuery({ queryKey: ["person", personId], queryFn: () => peopleApi.show(personId), enabled: Number.isFinite(personId) });
+    const { data: payGroups } = useQuery({ queryKey: ["pay-groups"], queryFn: () => timesheetsApi.groups() });
     const person: PersonFile | undefined = data?.person;
 
     const [editing, setEditing] = useState(false);
@@ -93,6 +95,12 @@ export default function PersonPage() {
                                         <option value="permanent">Permanent</option><option value="contract">Contract</option><option value="casual">Casual</option><option value="intern">Intern</option>
                                     </select>
                                 </label>
+                                <label className="text-xs text-surface-500">Pay group
+                                    <select className="input mt-1" value={draft.pay_group_id ?? ""} onChange={e => set("pay_group_id", e.target.value ? Number(e.target.value) : null)}>
+                                        <option value="">Default group</option>
+                                        {(payGroups?.data ?? []).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                    </select>
+                                </label>
                                 <label className="text-xs text-surface-500">Pay method
                                     <select className="input mt-1" value={draft.pay_method ?? ""} onChange={e => set("pay_method", (e.target.value || null) as Draft["pay_method"])}>
                                         <option value="">—</option><option value="mpesa">M-Pesa</option><option value="bank">Bank</option><option value="cash">Cash</option>
@@ -116,6 +124,7 @@ export default function PersonPage() {
                                 <Row label="Department" value={p.department} />
                                 <Row label="Type" value={{ permanent: "Permanent", contract: "Contract", casual: "Casual", intern: "Intern" }[p.employment_type]} />
                                 <Row label="Pay method" value={p.pay_method ? { mpesa: "M-Pesa", bank: "Bank", cash: "Cash" }[p.pay_method] : null} />
+                                <Row label="Pay group" value={payGroups?.data.find(g => g.id === p.pay_group_id)?.name ?? "Default group"} />
                                 <Row label="Hire date" value={p.hire_date} />
                                 <Row label="End date" value={p.end_date} />
                                 <Row label="Date of birth" value={p.date_of_birth} />

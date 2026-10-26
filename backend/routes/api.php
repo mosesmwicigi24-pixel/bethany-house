@@ -565,6 +565,25 @@ Route::prefix('v1')->group(function () {
                 Route::post('/leave/adjustments', [\App\Http\Controllers\Api\LeaveController::class, 'adjust']);
             });
 
+            // ── My timesheet (People PR 5) — every staff member ─────────────
+            Route::get('/me/timesheet',         [\App\Http\Controllers\Api\TimesheetController::class, 'mine']);
+            Route::post('/me/timesheet/submit', [\App\Http\Controllers\Api\TimesheetController::class, 'submit']);
+
+            // ── Timesheets, team side (People PR 5) ─────────────────────────
+            Route::middleware('permission:attendance.view_team,sanctum')->group(function () {
+                $ts = \App\Http\Controllers\Api\TimesheetController::class;
+                Route::get('/timesheets',                        [$ts, 'index']);
+                Route::get('/timesheets/export',                 [$ts, 'export'])->middleware(['permission:timesheets.lock,sanctum', 'step.up']);
+                Route::get('/timesheets/person/{user}',          [$ts, 'show'])->whereNumber('user');
+                Route::post('/timesheets/person/{user}/approve', [$ts, 'approve'])->whereNumber('user')->middleware('permission:attendance.manage,sanctum');
+                Route::post('/timesheets/person/{user}/send-back', [$ts, 'sendBack'])->whereNumber('user')->middleware('permission:attendance.manage,sanctum');
+                Route::post('/pay-periods/{id}/lock',            [$ts, 'lock'])->whereNumber('id')->middleware('permission:timesheets.lock,sanctum');
+                Route::post('/pay-periods/{id}/unlock',          [$ts, 'unlock'])->whereNumber('id')->middleware('step.up');
+                Route::get('/pay-groups',                        [$ts, 'groups']);
+                Route::post('/pay-groups',                       [$ts, 'storeGroup'])->middleware('permission:hr.edit,sanctum');
+                Route::put('/pay-groups/{id}',                   [$ts, 'updateGroup'])->whereNumber('id')->middleware('permission:hr.edit,sanctum');
+            });
+
             // ── Leave, team side (People PR 4): read with attendance.view_team; decisions are checked per person ──
             Route::middleware('permission:attendance.view_team,sanctum')->prefix('leave')->group(function () {
                 $leave = \App\Http\Controllers\Api\LeaveController::class;
