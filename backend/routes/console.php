@@ -97,3 +97,8 @@ Schedule::command(\App\Console\Commands\ApplyDueProposals::class)
 Schedule::command(\App\Console\Commands\AttendanceAutoClockOut::class)
     ->everyFifteenMinutes()
     ->withoutOverlapping();
+
+// ── People: staff documents about to expire (config: 30 days) ────────────────
+Schedule::command(\App\Console\Commands\HrDocumentExpiry::class)
+    ->dailyAt('07:15')
+    ->withoutOverlapping();

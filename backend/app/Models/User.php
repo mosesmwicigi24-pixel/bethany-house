@@ -331,6 +331,16 @@ class User extends Authenticatable
     }
 
     /** The line manager this person reports to (owner, 2026-10-15). */
+    public function employeeProfile()
+    {
+        return $this->hasOne(EmployeeProfile::class);
+    }
+
+    public function staffDocuments()
+    {
+        return $this->hasMany(StaffDocument::class);
+    }
+
     public function reportsTo()
     {
         return $this->belongsTo(User::class, 'reports_to');

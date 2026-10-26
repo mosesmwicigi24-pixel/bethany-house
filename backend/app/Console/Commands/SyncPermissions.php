@@ -299,6 +299,11 @@ class SyncPermissions extends Command
         // ── Attendance ──────────────────────────────────────────────────────
         'attendance.view_team' => ['View Team Attendance', 'View clock-in/out records for outlet or workshop staff', 'Attendance'],
         'attendance.manage'    => ['Manage Attendance',     'Correct time entries, resolve flags, and override geofence restrictions', 'Attendance'],
+
+        // ── People (employee files, documents, holidays — People PR 2) ────
+        'hr.view'              => ['View Employee Files',  'See job, department, dates, emergency contact and documents for staff in own outlets (all outlets with outlets.all_access); identifiers and pay details masked', 'People'],
+        'hr.edit'              => ['Edit Employee Files',  'Update employee files, upload and remove staff documents, manage public holidays', 'People'],
+        'hr.view_sensitive'    => ['View Identifiers & Pay Details', 'Read and write national ID, KRA PIN, NSSF, SHIF, M-Pesa and bank details in full (step-up each time)', 'People'],
     ];
 
     /**
@@ -435,12 +440,15 @@ class SyncPermissions extends Command
             'settings.pricing_rate_propose',
             'users.view', 'roles.view',
             'attendance.view_team',
+            'hr.view',
         ],
 
         // Runs one shop: its till, its stock, its production, its people.
         'outlet_manager' => [
             '@self', '@workspace', '@till', '@sell', '@take_payment',
             '@walkin_customer', '@stock',
+            // The shop's people: files and documents, identifiers masked (People PR 2).
+            'hr.view',
             // Quotes for the shop's customers and issues them — the second
             // person a clerk's draft quotation needs before it reaches a
             // customer (Phase 2; until now only admin could issue).
@@ -582,6 +590,8 @@ class SyncPermissions extends Command
 
         'finance_manager' => [
             '@self', '@workspace',
+            // Reads employee files and, behind step-up, the pay details payroll needs (People PR 2).
+            'hr.view', 'hr.view_sensitive',
             // Payments - full approval authority + view transactions ledger
             'payments.view', 'payments.approve_international', 'payments.transactions',
             'payments.void', 'payments.reassign',
@@ -687,6 +697,7 @@ class SyncPermissions extends Command
             'users.create', 'users.edit', 'users.delete',
             'roles.edit',
             'attendance.manage',
+            'hr.edit', 'hr.view_sensitive',
             'bom.edit', 'setup.technical',
             // Phase 3A: Finance & Cash is not admin's (plan §6), and admin's
             // files come through reports.export, not the supply split.

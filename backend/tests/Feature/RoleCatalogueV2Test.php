@@ -193,6 +193,8 @@ class RoleCatalogueV2Test extends TestCase
             // 4D (2026_10_03_480001): works across every outlet — the grant
             // that replaced the hasRole('admin') checks.
             'outlets.all_access',
+            // People PR 2 (sync, 2026-10-26): reads employee files; identifiers masked.
+            'hr.view',
         ],
         'finance_manager' => [
             // 3B (2026_10_03_520002): signs the finance band.
@@ -203,6 +205,8 @@ class RoleCatalogueV2Test extends TestCase
             'pos.reconcile', 'pos.till_correction', 'pos.tills_view_all',
             // Payables (2026_10_18_100000): pays suppliers, voids a payment someone else recorded.
             'procurement.view', 'procurement.pay', 'procurement.pay_void',
+            // People PR 2 (sync, 2026-10-26): employee files and, behind step-up, pay details.
+            'hr.view', 'hr.view_sensitive',
         ],
         'accountant' => [
             // 3B (2026_10_03_520002): asks for payment voids and moves; signs nothing.
@@ -218,6 +222,8 @@ class RoleCatalogueV2Test extends TestCase
             // 4B part 2 (2026_10_03_860002): the band key for till voids and
             // refunds — a key no clerk holds.
             'pos.approve_reversal',
+            // People PR 2 (sync, 2026-10-26): the shop's employee files, identifiers masked.
+            'hr.view',
         ],
         'procurement_manager' => [
             // 3C (2026_10_03_530001): proposes cost changes.

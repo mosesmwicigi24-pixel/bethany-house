@@ -171,6 +171,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/expense-receipts/{expense}',        [$files, 'expenseReceipt'])->whereNumber('expense')->name('files.expense-receipt');
         Route::get('/expense-attachments/{attachment}', [$files, 'expenseAttachment'])->whereNumber('attachment')->name('files.expense-attachment');
         Route::get('/channel-attachments',               [$files, 'channelAttachment'])->name('files.channel-attachment');
+        Route::get('/staff-documents/{document}',        [$files, 'staffDocument'])->whereNumber('document')->name('files.staff-document');
     });
 
     // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
@@ -524,6 +525,35 @@ Route::prefix('v1')->group(function () {
                 Route::post('/break/start', [TimeClockController::class, 'startBreak']);
                 Route::post('/break/end',   [TimeClockController::class, 'endBreak']);
                 Route::get('/my-entries',   [TimeClockController::class, 'myEntries']);
+            });
+
+            // ── My employee file (People PR 2) — every staff member ─────────
+            Route::prefix('me/file')->group(function () {
+                Route::get('/',                 [\App\Http\Controllers\Api\PeopleController::class, 'myFile']);
+                Route::put('/',                 [\App\Http\Controllers\Api\PeopleController::class, 'updateMyFile']);
+                Route::get('/sensitive',        [\App\Http\Controllers\Api\PeopleController::class, 'mySensitive'])->middleware('step.up');
+                Route::get('/documents/{doc}',  [\App\Http\Controllers\Api\PeopleController::class, 'myDocumentLink'])->whereNumber('doc');
+            });
+            // Public holidays: read by everyone (roster, leave); written by hr.edit.
+            Route::get('/holidays',             [\App\Http\Controllers\Api\PeopleController::class, 'holidays']);
+            Route::middleware('permission:hr.edit,sanctum')->group(function () {
+                Route::post('/holidays',        [\App\Http\Controllers\Api\PeopleController::class, 'storeHoliday']);
+                Route::put('/holidays/{id}',    [\App\Http\Controllers\Api\PeopleController::class, 'updateHoliday'])->whereNumber('id');
+                Route::delete('/holidays/{id}', [\App\Http\Controllers\Api\PeopleController::class, 'destroyHoliday'])->whereNumber('id');
+            });
+
+            // ── People: employee files and documents (People PR 2) ──────────
+            Route::middleware('permission:hr.view,sanctum')->prefix('people')->group(function () {
+                $people = \App\Http\Controllers\Api\PeopleController::class;
+                Route::get('/',                                 [$people, 'index']);
+                Route::get('/documents/expiring',               [$people, 'expiring']);
+                Route::get('/{user}',                           [$people, 'show'])->whereNumber('user');
+                Route::put('/{user}',                           [$people, 'update'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
+                Route::get('/{user}/sensitive',                 [$people, 'sensitive'])->whereNumber('user')->middleware(['permission:hr.view_sensitive,sanctum', 'step.up']);
+                Route::put('/{user}/sensitive',                 [$people, 'updateSensitive'])->whereNumber('user')->middleware(['permission:hr.edit,sanctum', 'permission:hr.view_sensitive,sanctum', 'step.up']);
+                Route::post('/{user}/documents',                [$people, 'storeDocument'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
+                Route::get('/{user}/documents/{doc}',           [$people, 'documentLink'])->whereNumber('user')->whereNumber('doc');
+                Route::delete('/{user}/documents/{doc}',        [$people, 'removeDocument'])->whereNumber('user')->whereNumber('doc')->middleware('permission:hr.edit,sanctum');
             });
 
             // ── Activity logs: the audit trail — super_admin only ────────────

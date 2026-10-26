@@ -504,6 +504,20 @@ export const NAV: NavGroup[] = [
                 icon: "attendance",
                 permission: "attendance.view_team",
             },
+            {
+                label: "People",
+                href: "/people",
+                icon: "people",
+                // Employee files for the staff in own outlets (People PR 2).
+                permission: "hr.view",
+            },
+            {
+                label: "Holidays",
+                href: "/settings/holidays",
+                icon: "calendar",
+                // Ungated like Messages: /holidays is read by every staff
+                // member; the page hides its buttons without hr.edit.
+            },
             // Access control (grouped together)
             {
                 label: "Roles",
@@ -863,6 +877,13 @@ const Icon = ({ name }: { name: string }) => {
             <>
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 7v5l3 2" />
+            </>
+        ),
+        people: (
+            <>
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
             </>
         ),
         // Approvals - checkmark shield

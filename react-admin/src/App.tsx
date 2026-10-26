@@ -170,6 +170,9 @@ const NotificationsPage = lazy(
 );
 const CommsHub = lazy(() => import("@/pages/comms/CommsHub"));
 const ClockPage = lazy(() => import("@/pages/me/ClockPage"));
+const PeoplePage = lazy(() => import("@/pages/people/PeoplePage"));
+const PersonPage = lazy(() => import("@/pages/people/PersonPage"));
+const HolidaysPage = lazy(() => import("@/pages/setup/holidays/HolidaysPage"));
 const ProductionAutoAssigneesPage = lazy(
     () => import("@/pages/setup/production/ProductionAutoAssigneesPage"),
 );
@@ -1286,6 +1289,36 @@ export default function App() {
                                     <AttendancePage />
                                 </Suspense>
                                 </ProtectedRoute>
+                            }
+                        />
+                        {/* People (PR 2): employee files are hr.view; holidays are
+                            read by everyone and edited by hr.edit. */}
+                        <Route
+                            path="/people"
+                            element={
+                                <ProtectedRoute permission="hr.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <PeoplePage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/people/:id"
+                            element={
+                                <ProtectedRoute permission="hr.view">
+                                <Suspense fallback={<PageLoader />}>
+                                    <PersonPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/settings/holidays"
+                            element={
+                                <Suspense fallback={<PageLoader />}>
+                                    <HolidaysPage />
+                                </Suspense>
                             }
                         />
                         <Route

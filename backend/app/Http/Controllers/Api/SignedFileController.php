@@ -71,6 +71,17 @@ class SignedFileController extends Controller
         return $this->recordExempt($request, $recorder, $response, 'ExpenseController@attachmentLink', ['attachment' => $attachment]);
     }
 
+    public function staffDocument(Request $request, DownloadRecorder $recorder, int $document)
+    {
+        $row = \App\Models\StaffDocument::whereNull('removed_at')->find($document);
+        if (!$row) {
+            return response()->json(['message' => 'File not found.'], 404);
+        }
+        $response = SignedFiles::stream($request, $row->disk ?: 'private', (string) $row->path, $row->original_name);
+
+        return $this->recordExempt($request, $recorder, $response, 'PeopleController@documentLink', ['document' => $document]);
+    }
+
     private function recordExempt(Request $request, DownloadRecorder $recorder, $response, string $action, array $context)
     {
         // If the fetch also carried a staff bearer token, DownloadGate records
