@@ -24,7 +24,7 @@ class QuotationController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Quotation::query()->with(['items', 'invoiceDocument:id,number,documentable_id'])->latest('id');
+        $query = Quotation::query()->with(['items', 'invoiceDocument:id,number,documentable_id,status', 'voider:id,first_name,last_name'])->latest('id');
 
         if ($request->filled('status')) {
             $query->where('status', $request->string('status'));
@@ -80,7 +80,7 @@ class QuotationController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $quotation = Quotation::with(['items', 'documents', 'convertedOrder:id,order_number,status,payment_status'])
+        $quotation = Quotation::with(['items', 'documents', 'convertedOrder:id,order_number,status,payment_status', 'voider:id,first_name,last_name'])
             ->findOrFail($id);
 
         return response()->json(['quotation' => $quotation]);
@@ -338,6 +338,10 @@ class QuotationController extends Controller
     {
         $quotation = Quotation::with('items')->findOrFail($id);
 
+        // A void quotation is withdrawn for good — its invoice was voided.
+        if ($quotation->status === Quotation::VOID) {
+            return response()->json(['message' => 'This quotation was voided and can no longer be accepted.'], 422);
+        }
         if ($quotation->converted_order_id) {
             return response()->json(['message' => 'This quotation has already been converted to an invoice.'], 422);
         }

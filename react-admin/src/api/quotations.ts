@@ -6,7 +6,9 @@ export type QuotationStatus =
     | "accepted"
     | "declined"
     | "expired"
-    | "converted";
+    | "converted"
+    /** Voided with its invoice by the super admin (2026-10-26) — final. */
+    | "void";
 
 export interface QuotationItem {
     id: number;
@@ -48,6 +50,10 @@ export interface Quotation {
     issued_at: string | null;
     accepted_at: string | null;
     quote_token: string | null;
+    /** Set when the quotation was voided with its invoice. */
+    voided_at?: string | null;
+    void_reason?: string | null;
+    voider?: { id: number; first_name: string | null; last_name: string | null } | null;
     items?: QuotationItem[];
     invoice_document?: { id: number; number: string; documentable_id: number } | null;
     created_at: string;

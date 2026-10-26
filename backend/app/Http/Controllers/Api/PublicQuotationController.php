@@ -18,8 +18,14 @@ use Illuminate\Support\Facades\DB;
  */
 class PublicQuotationController extends Controller
 {
+    /** What the customer is told when the quotation was voided (with its invoice). */
+    public const VOID_MESSAGE = 'This quotation is no longer valid. Please contact us for a new quotation.';
+
     public function show(string $token): JsonResponse
     {
+        if ($this->isVoid($token)) {
+            return response()->json(['message' => self::VOID_MESSAGE, 'status' => Quotation::VOID], 410);
+        }
         $quotation = $this->resolve($token);
         if (!$quotation) {
             return response()->json(['message' => 'Quotation link not found or expired.'], 404);
@@ -30,6 +36,11 @@ class PublicQuotationController extends Controller
 
     public function accept(string $token): JsonResponse
     {
+        // Before anything else: a void quotation still points at its
+        // (cancelled) order, and the branch below would hand back its pay-link.
+        if ($this->isVoid($token)) {
+            return response()->json(['message' => self::VOID_MESSAGE, 'status' => Quotation::VOID], 410);
+        }
         $quotation = $this->resolve($token);
         if (!$quotation) {
             return response()->json(['message' => 'Quotation link not found or expired.'], 404);
@@ -62,6 +73,17 @@ class PublicQuotationController extends Controller
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Was the quotation behind this link voided? Checked before the expiry
+     * (a void also expires the link) so the customer is told it is no longer
+     * valid rather than "not found". Unscoped for the same reason as resolve().
+     */
+    private function isVoid(string $token): bool
+    {
+        return Quotation::withoutViewerScope()->where('quote_token', $token)
+            ->where('status', Quotation::VOID)->exists();
+    }
 
     private function resolve(string $token): ?Quotation
     {

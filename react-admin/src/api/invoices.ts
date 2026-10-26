@@ -1,4 +1,4 @@
-import { get } from "@/api/client";
+import { get, post } from "@/api/client";
 import type { Paginated } from "@/api/quotations";
 
 export interface Invoice {
@@ -14,6 +14,8 @@ export interface Invoice {
     order: {
         id: number;
         order_number: string;
+        /** The order's own status — pending | confirmed | cancelled … */
+        status?: string;
         payment_status: string; // pending | partial | paid …
         pay_token: string | null;
     } | null;
@@ -28,4 +30,8 @@ export const invoiceApi = {
         get<Paginated<Invoice>>("/v1/admin/invoices", { params }),
 
     get: (id: number) => get<{ invoice: Invoice }>(`/v1/admin/invoices/${id}`),
+
+    /** Super admin only (by role) + step-up, which the client asks for itself. */
+    void: (id: number, reason: string) =>
+        post<{ message: string; invoice: Invoice }>(`/v1/admin/invoices/${id}/void`, { reason }),
 };

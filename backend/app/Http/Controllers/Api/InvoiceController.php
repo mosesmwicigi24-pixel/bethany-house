@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\SalesDocument;
 use App\Services\DataScopeResolver;
+use App\Services\Documents\InvoiceVoid;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -77,7 +78,7 @@ class InvoiceController extends Controller
             $s = trim((string) $request->string('search'));
             $query->where('number', 'ILIKE', "%{$s}%");
         }
-        // status = issued | paid (the document's own state).
+        // status = issued | paid | void (the document's own state).
         if ($request->filled('status')) {
             $query->where('status', $request->string('status'));
         }
@@ -105,6 +106,40 @@ class InvoiceController extends Controller
         return response()->json(['invoice' => $this->present($doc)]);
     }
 
+    /**
+     * POST /api/v1/admin/invoices/{id}/void — the super admin voids an
+     * unpaid invoice: its order is cancelled (stock released), the invoice
+     * and the quotation it came from are void. Super admin by role
+     * (owner.only) and a fresh step-up, both on the route. The rules and the
+     * refusals are App\Services\Documents\InvoiceVoid's.
+     */
+    public function void(Request $request, int $id): JsonResponse
+    {
+        $reason = trim((string) $request->validate([
+            'reason' => 'required|string|min:5|max:500',
+        ])['reason']);
+
+        // The invoice must be one this caller may see (always, for the super admin).
+        $this->scopeToViewer(SalesDocument::query(), $request)
+            ->where('type', SalesDocument::INVOICE)->findOrFail($id);
+
+        $result = InvoiceVoid::void($id, $reason, $request->user());
+
+        $invoice   = $result['invoice'];
+        $order     = $result['order'];
+        $quotation = $result['quotation'];
+
+        return response()->json([
+            'message' => "Invoice {$invoice->number} voided. Order {$order->order_number} cancelled and its stock released"
+                . ($quotation ? "; quotation {$quotation->quote_number} voided." : '.'),
+            'invoice' => $this->present($invoice->load([
+                'documentable' => fn ($m) => $m->morphWith([Order::class => ['creator:id,first_name,last_name']]),
+                'parent',
+                'creator:id,first_name,last_name',
+            ])),
+        ]);
+    }
+
     /** Flatten an invoice document into a row with its order + quotation links. */
     private function present(SalesDocument $doc): array
     {
@@ -125,6 +160,7 @@ class InvoiceController extends Controller
             'order'          => $order ? [
                 'id'             => $order->id,
                 'order_number'   => $order->order_number,
+                'status'         => $order->status,
                 'payment_status' => $order->payment_status,   // pending | partial | paid …
                 'pay_token'      => $order->payment_token,
             ] : null,

@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { invoiceApi, type Invoice } from "@/api/invoices";
+import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useToastStore } from "@/store/toast.store";
+import type { ApiError } from "@/types";
 
 const num = (v: unknown): number => Number(v ?? 0) || 0;
 const money = (v: unknown, currency = "KES"): string =>
@@ -22,9 +25,39 @@ function PaymentBadge({ status }: { status: string }) {
     return <span className={`badge ${s.badge}`}>{s.label}</span>;
 }
 
+/**
+ * The super admin may void an invoice before it is paid (owner, 2026-10-26):
+ * open (issued), no payment at all on its order (not partial, not awaiting
+ * approval), and the order still pending or confirmed. The API decides —
+ * this only keeps the button off rows it would refuse.
+ */
+function canVoid(inv: Invoice): boolean {
+    return inv.doc_status === "issued"
+        && !!inv.order
+        && inv.order.payment_status === "pending"
+        && ["pending", "confirmed"].includes(inv.order.status ?? "pending");
+}
+
 export default function InvoicesPage() {
     const navigate = useNavigate();
     const toast = useToastStore();
+    const qc = useQueryClient();
+    const { isSuperAdmin } = usePermissions();
+    const [voiding, setVoiding] = useState<Invoice | null>(null);
+    const [voidReason, setVoidReason] = useState("");
+
+    const voidMutation = useMutation({
+        // A fresh step-up is asked for by the API client when the server wants one.
+        mutationFn: ({ id, reason }: { id: number; reason: string }) => invoiceApi.void(id, reason),
+        onSuccess: (res) => {
+            toast.success(res.message);
+            setVoiding(null);
+            setVoidReason("");
+            void qc.invalidateQueries({ queryKey: ["invoices"] });
+            void qc.invalidateQueries({ queryKey: ["quotations"] });
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
     const [page, setPage] = useState(1);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("");
@@ -68,6 +101,7 @@ export default function InvoicesPage() {
                     <option value="">All</option>
                     <option value="issued">Open (issued)</option>
                     <option value="paid">Paid</option>
+                    <option value="void">Void</option>
                 </select>
             </div>
 
@@ -101,18 +135,27 @@ export default function InvoicesPage() {
                                     <td>{inv.customer_name ?? "—"}</td>
                                     <td className="text-sm text-surface-500 tabular-nums">{inv.quotation?.number ?? "—"}</td>
                                     <td className="text-right tabular-nums">{money(inv.amount, inv.currency_code)}</td>
-                                    <td>{inv.order ? <PaymentBadge status={inv.order.payment_status} /> : "—"}</td>
+                                    <td>
+                                        {inv.doc_status === "void"
+                                            ? <span className="badge badge-danger">Void</span>
+                                            : inv.order ? <PaymentBadge status={inv.order.payment_status} /> : "—"}
+                                    </td>
                                     <td className="text-sm">{inv.served_by ?? "—"}</td>
                                     <td>{inv.due_date ?? "—"}</td>
                                     <td>
                                         <div className="flex justify-end gap-1">
                                             {inv.order && <PdfDownloadButton type="orders" id={inv.order.id} subtype="invoice" label="Invoice PDF" />}
-                                            {inv.order && inv.order.payment_status !== "paid" && (
+                                            {inv.order && inv.doc_status !== "void" && inv.order.payment_status !== "paid" && (
                                                 <button className="btn-ghost btn-sm" onClick={() => copyPayLink(inv)}>Pay link</button>
                                             )}
                                             {inv.order && (
                                                 <button className="btn-ghost btn-sm" onClick={() => navigate(`/sales/orders/${inv.order!.id}`)}>
                                                     View order
+                                                </button>
+                                            )}
+                                            {isSuperAdmin && canVoid(inv) && (
+                                                <button className="btn-ghost btn-sm text-danger" onClick={() => { setVoiding(inv); setVoidReason(""); }}>
+                                                    Void invoice
                                                 </button>
                                             )}
                                         </div>
@@ -133,6 +176,48 @@ export default function InvoicesPage() {
                         <button className="btn-secondary btn-sm" disabled={page >= data.last_page} onClick={() => setPage((p) => p + 1)}>Next</button>
                     </div>
                 </div>
+            )}
+
+            {voiding && (
+                <Modal
+                    open
+                    onClose={() => { if (!voidMutation.isPending) setVoiding(null); }}
+                    size="md"
+                    title="Void invoice"
+                    footer={
+                        <div className="flex justify-end gap-2">
+                            <button className="btn-secondary" disabled={voidMutation.isPending} onClick={() => setVoiding(null)}>Cancel</button>
+                            <button
+                                className="btn-danger"
+                                disabled={voidMutation.isPending || voidReason.trim().length < 5}
+                                onClick={() => voidMutation.mutate({ id: voiding.id, reason: voidReason.trim() })}
+                            >
+                                {voidMutation.isPending ? <Spinner size="sm" /> : "Void invoice"}
+                            </button>
+                        </div>
+                    }
+                >
+                    <div className="space-y-3 text-sm">
+                        <p className="text-surface-600">
+                            Voids <span className="font-medium">{voiding.invoice_number}</span>
+                            {voiding.order && <>, cancels order <span className="font-medium">{voiding.order.order_number}</span>, releases its stock</>}
+                            {voiding.quotation && <>, and voids quotation <span className="font-medium">{voiding.quotation.number}</span></>}
+                            . This can't be undone.
+                        </p>
+                        <label className="block">
+                            <span className="mb-1 block font-medium text-surface-700">Reason (required)</span>
+                            <textarea
+                                className="input min-h-[80px] w-full"
+                                maxLength={500}
+                                value={voidReason}
+                                onChange={(e) => setVoidReason(e.target.value)}
+                                placeholder="e.g. Duplicate of INV-2026-0015"
+                                autoFocus
+                            />
+                            <span className="mt-1 block text-xs text-surface-500">At least 5 characters. You will be asked to confirm it's you.</span>
+                        </label>
+                    </div>
+                </Modal>
             )}
         </div>
     );
