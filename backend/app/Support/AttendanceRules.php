@@ -91,4 +91,31 @@ class AttendanceRules
             default => $raw,
         };
     }
+
+    /**
+     * The rostered-shift gate at clock-in (C1 rules, shared by the phone and
+     * the kiosk in C2): without a published shift today → allow / flag
+     * ('no_shift') / refuse; with one, not before earliest_clock_in_minutes.
+     * Returns ['refusal' => message|null, 'earliest_at' => Carbon|null,
+     * 'flags' => [...], 'shift' => Shift|null].
+     */
+    public static function shiftGate(\App\Models\User $user, ?\Carbon\Carbon $now = null): array
+    {
+        $now = $now ?? now();
+        $rules = self::all();
+        $flags = [];
+        $shift = \App\Models\Shift::where('user_id', $user->id)->where('status', 'published')->where('date', $now->toDateString())->orderBy('starts_at')->first();
+        if (!$shift) {
+            if ($rules['clock_in_without_shift'] === 'refuse') {
+                return ['refusal' => 'You have no shift on the roster today. Ask your manager to add one before clocking in.', 'earliest_at' => null, 'flags' => [], 'shift' => null];
+            }
+            if ($rules['clock_in_without_shift'] === 'flag') $flags[] = 'no_shift';
+        } elseif ((int) $rules['earliest_clock_in_minutes'] > 0) {
+            $earliest = $shift->startsAtCarbon()->subMinutes((int) $rules['earliest_clock_in_minutes']);
+            if ($now->lt($earliest)) {
+                return ['refusal' => 'Your shift starts at ' . $shift->startsAtCarbon()->format('H:i') . '. You can clock in from ' . $earliest->format('H:i') . '.', 'earliest_at' => $earliest, 'flags' => [], 'shift' => $shift];
+            }
+        }
+        return ['refusal' => null, 'earliest_at' => null, 'flags' => $flags, 'shift' => $shift];
+    }
 }

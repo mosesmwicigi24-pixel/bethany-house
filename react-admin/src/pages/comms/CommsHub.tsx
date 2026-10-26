@@ -18,6 +18,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { get } from "@/api/client";
 import { channelApi, quickRepliesApi, type QuickReply, type Channel, type ChannelMessage, type ChannelUser, type ChannelAttachment, type ChannelRead, type LinkedEntity, type EntitySearchResult, type EntityPreview } from "@/api/channels";
+import { audiencesApi, type Audience } from "@/api/people-c2";
 import { EntityChipWithPreview, ENTITY_CHIP } from "@/components/comms/EntityChipWithPreview";
 import { commentApi, type MentionUser } from "@/api/comments";
 import { useAuthStore } from "@/store/auth.store";
@@ -3374,6 +3375,17 @@ function UserDirectory({ onOpenDm, onClose }: { onOpenDm: (id: number) => void; 
         mutationFn: (userId: number) => channelApi.openDm(userId),
         onSuccess: data => { qc.invalidateQueries({ queryKey: ["channels"] }); onOpenDm(data.channel.id); onClose(); },
     });
+    // Message by work status (People C2): everyone clocked in now / on today's roster → a space with those people.
+    const { can } = usePermissions();
+    const audiences = useQuery({ queryKey: ["message-audiences"], queryFn: () => audiencesApi.list(), enabled: can("attendance.view_team"), staleTime: 30_000 });
+    const spaceMutation = useMutation({
+        mutationFn: (a: Audience) => channelApi.create({
+            name: (a.key === "clocked_in" ? "On shift · " : "Today's roster · ") + new Date().toLocaleDateString("en-KE", { day: "numeric", month: "short" }),
+            description: a.key === "clocked_in" ? "Everyone clocked in when this was opened." : "Everyone on today's published roster.",
+            is_private: true, member_ids: a.people.map(p => p.id),
+        }),
+        onSuccess: data => { qc.invalidateQueries({ queryKey: ["channels"] }); onOpenDm(data.channel.id); onClose(); },
+    });
 
     return (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4">
@@ -3391,6 +3403,16 @@ aria-label="Close">
                     <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder={searchHint} autoFocus />
                 </div>
                 <div className="flex-1 overflow-y-auto py-2">
+                    {!q.trim() && (audiences.data?.audiences ?? []).map(a => (
+                        <button key={a.key} onClick={() => a.people.length && spaceMutation.mutate(a)} disabled={spaceMutation.isPending || a.people.length === 0}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-50 transition-colors text-left disabled:opacity-50">
+                            <div className="w-9 h-9 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0 text-emerald-700">{a.key === "clocked_in" ? "🟢" : "📅"}</div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-surface-800 truncate">{a.label}</p>
+                                <p className="text-xs text-surface-400 truncate">{a.people.length === 0 ? "Nobody right now" : a.people.length === 1 ? a.people[0].name : `${a.people.length} people · opens a space`}</p>
+                            </div>
+                        </button>
+                    ))}
                     {isLoading ? (
                         <div className="flex items-center justify-center py-8 text-sm text-surface-400">Loading…</div>
                     ) : list.filter(u => u.id !== user?.id).length === 0 ? (

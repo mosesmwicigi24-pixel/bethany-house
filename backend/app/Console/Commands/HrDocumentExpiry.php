@@ -17,12 +17,18 @@ use Illuminate\Support\Facades\Notification;
  */
 class HrDocumentExpiry extends Command
 {
-    protected $signature = 'hr:document-expiry {--days=30 : Window in days} {--dry-run : Print, send nothing}';
+    protected $signature = 'hr:document-expiry {--days= : Window in days (default: the automation\'s)} {--dry-run : Print, send nothing}';
     protected $description = 'Notify hr.edit holders of staff documents expiring within the window';
 
     public function handle(): int
     {
-        $days = max(1, (int) $this->option('days'));
+        // C2: the Document expiring automation holds the switch, the window and who hears it; --days overrides the window.
+        $auto = \App\Support\Automations::get('document_expiring');
+        if (!$auto['enabled'] && !$this->option('dry-run')) {
+            $this->info('Document expiring automation is off.');
+            return self::SUCCESS;
+        }
+        $days = max(1, (int) ($this->option('days') ?: $auto['threshold'] ?: 30));
         $docs = StaffDocument::with('user:id,first_name,last_name')
             ->whereNull('removed_at')
             ->whereNotNull('expires_at')
@@ -42,10 +48,9 @@ class HrDocumentExpiry extends Command
             return self::SUCCESS;
         }
 
-        $holders = User::where('user_type', 'staff')->where('status', 'active')->get()
-            ->filter(fn (User $u) => $u->can('hr.edit'))->values();
+        $holders = \App\Support\Automations::recipientsFor('document_expiring');
         if ($holders->isEmpty()) {
-            $this->warn('Nobody holds hr.edit; nothing sent.');
+            $this->warn('Nobody to tell (automation recipients); nothing sent.');
             return self::SUCCESS;
         }
 

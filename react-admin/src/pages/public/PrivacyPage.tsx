@@ -21,6 +21,7 @@ export default function PrivacyPage() {
                         <li><b>At clock-in and clock-out</b> we keep your position and how precise it was, to confirm you are at the shop. A manager can see it on each punch.</li>
                         <li><b>While you are clocked in</b>, the Bethany House Hub app records your position about every five minutes, or when you move about a hundred metres. This starts when you clock in and stops when you clock out. It never runs off shift, and the web app never does it at all. The app shows a notice on your phone while it is running.</li>
                         <li><b>Leaving the shop</b> while clocked in: if you are more than about 250 metres away for 15 minutes, the Hub tells you first. Depending on the rule the shop has set, the shift is then noted for your manager or clocked out at the time you left. You can always clock out yourself.</li>
+                        <li><b>At the kiosk</b> (a tablet at the door): no location is read. You tap your name, type your PIN and the tablet takes one picture of you at the punch, which your manager can see on that punch. The picture is deleted after 90 days with the shift trail. If the tablet has no camera, the punch is recorded without one.</li>
                         <li><b>Fake-location apps</b>: on Android the app records whether another app supplied the position, and the punch is noted for your manager.</li>
                         <li><b>How long</b>: the trail of positions is deleted after 90 days. The positions on the clock-in and clock-out stay with the attendance record.</li>
                         <li><b>Who sees it</b>: you, your manager, HR and the super admin. Nobody else, and never outside Bethany House.</li>
@@ -43,7 +44,7 @@ export default function PrivacyPage() {
                     You see your own records. Your manager sees your attendance, shifts, leave and timesheet. HR sees employee files. Finance sees pay. The super admin can see everything, and every look at sensitive data is in the audit trail. Statutory filings go to KRA, NSSF and SHA as the law requires.
                 </Section>
                 <Section title="How long">
-                    Employment and pay records are kept for the period Kenyan law requires after you leave (at least seven years for payroll and tax). Punch locations are kept with the attendance record; the on-shift trail for 90 days. Device ids and push tokens are removed when you sign out of that device or remove it from your account.
+                    Employment and pay records are kept for the period Kenyan law requires after you leave (at least seven years for payroll and tax). Punch locations are kept with the attendance record; the on-shift trail and kiosk pictures for 90 days. Device ids and push tokens are removed when you sign out of that device or remove it from your account.
                 </Section>
                 <Section title="Your choices">
                     Decline location and you can still use everything except clocking in from the phone; ask your manager to record a punch. Decline notifications and you will see the same information when you open the Hub. To see, correct or export your records, or to ask a question about this policy, write to <a className="text-brand-600 underline" href="mailto:info@bethanyhouse.co.ke">info@bethanyhouse.co.ke</a>.

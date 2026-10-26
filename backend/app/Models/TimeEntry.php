@@ -26,7 +26,7 @@ class TimeEntry extends Model
         'clock_out_longitude',
         'clock_out_distance_meters',
         'clock_out_accuracy_meters',
-        'breaks', 'left_site_at', 'trail_points',
+        'breaks', 'left_site_at', 'trail_points', 'overtime_alerted_at', 'clock_in_photo_path', 'clock_out_photo_path',
         'total_break_minutes',
         'worked_minutes',
         'status',
@@ -79,6 +79,7 @@ class TimeEntry extends Model
         'clock_out_accuracy_meters'=> 'decimal:2',
         'breaks'                   => 'array',
         'left_site_at'             => 'datetime',
+        'overtime_alerted_at'      => 'datetime',
     ];
 
     // =========================================================================

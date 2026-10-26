@@ -172,6 +172,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/expense-attachments/{attachment}', [$files, 'expenseAttachment'])->whereNumber('attachment')->name('files.expense-attachment');
         Route::get('/channel-attachments',               [$files, 'channelAttachment'])->name('files.channel-attachment');
         Route::get('/staff-documents/{document}',        [$files, 'staffDocument'])->whereNumber('document')->name('files.staff-document');
+        Route::get('/attendance-photos/{entry}/{which}', [$files, 'attendancePhoto'])->whereNumber('entry')->whereIn('which', ['in', 'out'])->name('files.attendance-photo');
     });
 
     // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
@@ -372,6 +373,8 @@ Route::prefix('v1')->group(function () {
 
             // ── Channels - DMs and Spaces (Phase 3) ──────────────────────────
             Route::prefix('channels')->group(function () {
+                // C2: message by work status — who is clocked in now, who is on today's roster.
+                Route::get('/audiences', [ChannelController::class, 'audiences'])->middleware('permission:attendance.view_team,sanctum');
                 Route::get('/',                                    [ChannelController::class, 'index']);
                 Route::post('/',                                   [ChannelController::class, 'store']);
                 Route::post('/dm',                                 [ChannelController::class, 'openDm']);
@@ -526,6 +529,12 @@ Route::prefix('v1')->group(function () {
                 Route::post('/break/end',   [TimeClockController::class, 'endBreak']);
                 Route::get('/my-entries',   [TimeClockController::class, 'myEntries']);
                 Route::post('/trail',       [TimeClockController::class, 'trail']);   // location on shift (C1)
+            });
+            // The clock-in kiosk (C2): the tablet's token has the single ability `kiosk` and reaches only these.
+            Route::prefix('kiosk')->group(function () {
+                Route::get('/board',     [\App\Http\Controllers\Api\KioskController::class, 'board']);
+                Route::post('/punch',    [\App\Http\Controllers\Api\KioskController::class, 'punch']);
+                Route::delete('/token',  [\App\Http\Controllers\Api\KioskController::class, 'leave']);
             });
             // Timesheet fix requests (C1) — every staff member
             Route::get('/me/timesheet/fixes',         [\App\Http\Controllers\Api\PeopleRequestsController::class, 'myFixes']);
@@ -1367,6 +1376,13 @@ Route::prefix('v1')->group(function () {
                 Route::get('/entries/{id}/trail', [TimeClockController::class, 'entryTrail'])->whereNumber('id'); // C1
                 Route::get('/rules',        [\App\Http\Controllers\Api\AttendanceRulesController::class, 'show']);           // C1
                 Route::put('/rules',        [\App\Http\Controllers\Api\AttendanceRulesController::class, 'update'])->middleware('permission:settings.edit,sanctum');
+                // C2: automations, the kiosk tablets, punch photos
+                Route::get('/automations',        [\App\Http\Controllers\Api\AutomationsController::class, 'index']);
+                Route::put('/automations/{key}',  [\App\Http\Controllers\Api\AutomationsController::class, 'update'])->middleware('permission:settings.edit,sanctum');
+                Route::get('/kiosks',             [\App\Http\Controllers\Api\KioskController::class, 'index'])->middleware('permission:attendance.manage,sanctum');
+                Route::post('/kiosks',            [\App\Http\Controllers\Api\KioskController::class, 'store'])->middleware(['permission:attendance.manage,sanctum', 'step.up']);
+                Route::delete('/kiosks/{id}',     [\App\Http\Controllers\Api\KioskController::class, 'destroy'])->whereNumber('id')->middleware('permission:attendance.manage,sanctum');
+                Route::get('/entries/{id}/photo/{which}', [\App\Http\Controllers\Api\KioskController::class, 'photoLink'])->whereNumber('id')->whereIn('which', ['in', 'out']);
 
                 Route::put('/entries/{id}', [TimeClockController::class, 'updateEntry'])
                     ->middleware('permission:attendance.manage,sanctum');

@@ -32,6 +32,13 @@ class PayGroup extends Model
         return self::where('is_default', true)->first() ?? self::where('is_active', true)->orderBy('id')->first();
     }
 
+    /** The group a person is paid in: their employee file's, else the default (the rule Payroll::rows uses). */
+    public static function forUser(User $user): ?self
+    {
+        $id = $user->employeeProfile?->pay_group_id;
+        return ($id ? self::find($id) : null) ?? self::defaultGroup();
+    }
+
     /**
      * [starts_on, ends_on] of the period containing $date.
      * Weekly = Monday to Sunday. Monthly = calendar month, or, with

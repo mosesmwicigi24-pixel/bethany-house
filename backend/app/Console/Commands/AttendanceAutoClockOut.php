@@ -33,6 +33,7 @@ class AttendanceAutoClockOut extends Command
         $limitHours = (int) $rules['daily_limit_hours'];
         $now = now();
         $closed = 0;
+        $overtime = \App\Support\Automations::active('overtime_soon');
 
         foreach (TimeEntry::with('user')->active()->orderBy('clock_in_at')->cursor() as $entry) {
             $cutoff = $entry->clock_in_at->copy()->setTime($h, $m, 0);
@@ -53,6 +54,20 @@ class AttendanceAutoClockOut extends Command
                     NotificationService::deliver(AttendanceAlerts::managersFor($entry->user), new InAppNotification(
                         title: "{$name} has worked {$limitHours} h today", body: "Still clocked in since {$entry->clock_in_at->format('H:i')}. The shift closes on its own at {$cutoff->format('H:i')}.",
                         actionUrl: '/settings/attendance', icon: 'clock', data: ['entry_id' => $entry->id]));
+                }
+            }
+            // C2 automation: N minutes before today's regular hours run out → the manager, once per entry.
+            if ($overtime && $entry->user && !$entry->overtime_alerted_at && !$this->option('dry-run')) {
+                $group = \App\Models\PayGroup::forUser($entry->user);
+                $capMinutes = $group ? (int) round($group->hoursFor($entry->clock_in_at->dayOfWeekIso) * 60) : 0;
+                if ($capMinutes > 0 && $entry->elapsedMinutes() >= $capMinutes - (int) $overtime['threshold']) {
+                    $entry->forceFill(['overtime_alerted_at' => $now])->save();
+                    $name = trim("{$entry->user->first_name} {$entry->user->last_name}");
+                    $left = max(0, $capMinutes - $entry->elapsedMinutes());
+                    NotificationService::deliver(\App\Support\Automations::recipientsFor('overtime_soon', $entry->user), new InAppNotification(
+                        title: $left > 0 ? "{$name} reaches overtime in {$left} min" : "{$name} is in overtime",
+                        body:  'Clocked in since ' . $entry->clock_in_at->format('H:i') . '; regular hours today are ' . rtrim(rtrim(number_format($capMinutes / 60, 1), '0'), '.') . ' h.',
+                        actionUrl: '/people/overview', icon: 'clock', data: ['entry_id' => $entry->id, 'automation' => 'overtime_soon']));
                 }
             }
             if ($now->lt($cutoff)) {

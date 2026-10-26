@@ -98,6 +98,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // export id, archive, the owner's silent copy). After the request
         // logger, so a held attempt still shows as a staff call.
         $middleware->api(append: [
+            // A kiosk token (People C2) reaches /admin/kiosk/* and nothing else.
+            \App\Http\Middleware\KioskTokensStayAtTheKiosk::class,
             \App\Http\Middleware\AuditStaffRequests::class,
             \App\Http\Middleware\DownloadGate::class,
             // A 403 on a sensitive route → activity_log authorization_denied (4D).

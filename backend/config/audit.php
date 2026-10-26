@@ -291,6 +291,9 @@ return [
             // Staff documents (ID copies, contracts, certificates) — People PR 2.
             // Reached only through hr.view + outlet scope (or one's own file).
             'PeopleController@documentLink',
+            // C2: a kiosk punch photo, read by the manager on the Attendance page.
+            'KioskController@photoLink',
+            'SignedFileController@attendancePhoto',
             'PeopleController@myDocumentLink',
             'SignedFileController@staffDocument',
             // A person's own payslip (People PR 6) — their document, like their file.
