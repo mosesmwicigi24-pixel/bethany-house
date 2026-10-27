@@ -4,6 +4,7 @@ import { peopleApi } from "@/api/people";
 import { DocumentsCard } from "@/components/people/DocumentsCard";
 import { TrainingCard } from "@/components/people/TrainingSigningCards";
 import { SensitiveCard } from "@/components/people/SensitiveCard";
+import { EmergencyContactCard } from "@/components/people/EmergencyContactCard";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
 import type { ApiError } from "@/types";
@@ -18,15 +19,10 @@ export function MyFileTab() {
     const toast = useToastStore();
     const { data, isLoading } = useQuery({ queryKey: ["my-file"], queryFn: () => peopleApi.myFile() });
     const person = data?.person;
-    const [contact, setContact] = useState({ emergency_contact_name: "", emergency_contact_phone: "", emergency_contact_relationship: "", date_of_birth: "" });
-    useEffect(() => {
-        if (person) setContact({
-            emergency_contact_name: person.profile.emergency_contact_name ?? "", emergency_contact_phone: person.profile.emergency_contact_phone ?? "",
-            emergency_contact_relationship: person.profile.emergency_contact_relationship ?? "", date_of_birth: person.profile.date_of_birth ?? "",
-        });
-    }, [person]);
+    const [dob, setDob] = useState("");
+    useEffect(() => { if (person) setDob(person.profile.date_of_birth ?? ""); }, [person]);
     const save = useMutation({
-        mutationFn: () => peopleApi.updateMyFile({ ...contact, date_of_birth: contact.date_of_birth || null }),
+        mutationFn: () => peopleApi.updateMyFile({ date_of_birth: dob || null }),
         onSuccess: r => { qc.setQueryData(["my-file"], r); toast.success(r.message); },
         onError: (e: ApiError) => toast.error(e.message),
     });
@@ -51,18 +47,14 @@ export function MyFileTab() {
                 </div>
             </div>
 
+            <EmergencyContactCard person={person} canEdit
+                save={async body => { const r = await peopleApi.updateMyFile(body); qc.setQueryData(["my-file"], r); return r.person; }} />
+
             <div className="card">
-                <div className="card-header"><h3 className="font-semibold text-sm text-surface-900">Emergency contact</h3></div>
-                <div className="card-body">
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                        <label className="text-xs text-surface-500">Name<input className="input mt-1" value={contact.emergency_contact_name} onChange={e => setContact({ ...contact, emergency_contact_name: e.target.value })} maxLength={120} /></label>
-                        <label className="text-xs text-surface-500">Phone<input className="input mt-1" value={contact.emergency_contact_phone} onChange={e => setContact({ ...contact, emergency_contact_phone: e.target.value })} maxLength={32} /></label>
-                        <label className="text-xs text-surface-500">Relationship<input className="input mt-1" value={contact.emergency_contact_relationship} onChange={e => setContact({ ...contact, emergency_contact_relationship: e.target.value })} maxLength={60} /></label>
-                        <label className="text-xs text-surface-500">Date of birth<input type="date" className="input mt-1" value={contact.date_of_birth} onChange={e => setContact({ ...contact, date_of_birth: e.target.value })} /></label>
-                    </div>
-                    <div className="mt-3 flex justify-end">
-                        <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-primary btn-sm">{save.isPending && <Spinner size="xs" className="border-white/30 border-t-white" />}Save</button>
-                    </div>
+                <div className="card-header"><h3 className="font-semibold text-sm text-surface-900">Date of birth</h3></div>
+                <div className="card-body flex flex-col sm:flex-row sm:items-end gap-3">
+                    <label className="text-xs text-surface-500 flex-1 max-w-xs">Date of birth<input type="date" className="input mt-1" value={dob} max={new Date().toISOString().slice(0, 10)} onChange={e => setDob(e.target.value)} /></label>
+                    <button onClick={() => save.mutate()} disabled={save.isPending || dob === (p.date_of_birth ?? "")} className="btn-primary btn-sm">{save.isPending && <Spinner size="xs" className="border-white/30 border-t-white" />}Save</button>
                 </div>
             </div>
 
