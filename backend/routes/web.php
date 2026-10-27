@@ -338,6 +338,17 @@ Route::middleware(['auth'])
     });
 /*
 |--------------------------------------------------------------------------
+| App-link association files (native apps programme, Step 2)
+|--------------------------------------------------------------------------
+| Universal links (Apple) and App Links (Android) for hub.bethanyhouse.co.ke.
+| Both answer 404 until their identifiers are configured: config/applinks.php.
+| The host nginx must route /.well-known/ on the Hub host to Laravel.
+*/
+Route::get('/.well-known/apple-app-site-association', [\App\Http\Controllers\WellKnownController::class, 'appleAppSiteAssociation']);
+Route::get('/.well-known/assetlinks.json',            [\App\Http\Controllers\WellKnownController::class, 'assetLinks']);
+
+/*
+|--------------------------------------------------------------------------
 | Public SPA pages — /pay/{token}, /track/{token} and /order/{token}
 |--------------------------------------------------------------------------
 | In production Nginx rewrites these to the react-admin bundle; this
@@ -345,7 +356,7 @@ Route::middleware(['auth'])
 | where the built frontend is copied into public/. Guarded so nothing
 | changes when no bundle is present.
 */
-foreach (['/pay/{token}', '/track/{token}', '/order/{token}'] as $spaRoute) {
+foreach (['/pay/{token}', '/track/{token}', '/order/{token}', '/quote/{token}'] as $spaRoute) {
     Route::get($spaRoute, function () {
         $index = public_path('index.html');
         abort_unless(file_exists($index), 404);

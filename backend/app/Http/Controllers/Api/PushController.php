@@ -25,6 +25,8 @@ use Illuminate\Support\Facades\Log;
  *   Expo Push (React Native mobile app):
  *     POST   /subscribe-expo     → Save or update an Expo push token
  *     POST   /unsubscribe-expo   → Remove an Expo push token
+ *     POST   /subscribe-device   → Save or update a native APNs/FCM token
+ *     POST   /unsubscribe-device → Remove a native APNs/FCM token
  */
 class PushController extends Controller
 {
@@ -156,6 +158,71 @@ class PushController extends Controller
         );
 
         return response()->json(['message' => 'Expo push token registered.'], 201);
+    }
+
+    // ── POST /api/v1/admin/push/subscribe-device ─────────────────────────────
+
+    /**
+     * Register a native app's platform push token (native apps programme, Step 2).
+     *
+     * Body: { "platform": "ios"|"ipados"|"macos"|"android",
+     *         "token": "<APNs device token | FCM registration token>",
+     *         "model": "iPhone15,2" (optional) }
+     *
+     * Apple platforms store as token_type 'apns', Android as 'fcm'. Upsert on
+     * the endpoint ('apns:<token>' / 'fcm:<token>') so a reinstall or a
+     * sign-in by another person on the same device re-points the one row.
+     * The X-Device-Id header (App\Services\Auth\Devices) is kept beside it so
+     * removing a named device can drop its push registration too.
+     */
+    public function subscribeDevice(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'platform' => 'required|string|in:ios,ipados,macos,android',
+            'token'    => 'required|string|min:8|max:512|regex:/^[A-Za-z0-9:_\-]+$/',
+            'model'    => 'nullable|string|max:120',
+        ]);
+
+        $type     = $validated['platform'] === 'android' ? 'fcm' : 'apns';
+        $deviceId = (string) $request->header('X-Device-Id', '');
+        $deviceId = preg_match('/^[A-Za-z0-9-]{16,64}$/', $deviceId) ? $deviceId : null;
+
+        PushSubscription::upsert(
+            [
+                'endpoint'     => $type . ':' . $validated['token'],
+                'user_id'      => $request->user()->id,
+                'p256dh'       => '',
+                'auth'         => '',
+                'expo_token'   => null,
+                'device_token' => $validated['token'],
+                'token_type'   => $type,
+                'platform'     => $validated['platform'],
+                'device_model' => $validated['model'] ?? null,
+                'device_id'    => $deviceId,
+                'user_agent'   => substr($request->userAgent() ?? '', 0, 500),
+                'is_active'    => true,
+            ],
+            ['endpoint'],
+            ['user_id', 'device_token', 'token_type', 'platform', 'device_model', 'device_id', 'user_agent', 'is_active']
+        );
+
+        return response()->json(['message' => 'Device push token registered.', 'token_type' => $type], 201);
+    }
+
+    // ── POST /api/v1/admin/push/unsubscribe-device ───────────────────────────
+
+    /** Remove a native registration — on sign-out, or when the OS hands the app a new token. */
+    public function unsubscribeDevice(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'token' => 'required|string|max:512',
+        ]);
+
+        PushSubscription::where('user_id', $request->user()->id)
+            ->where('device_token', $validated['token'])
+            ->delete();
+
+        return response()->json(['message' => 'Device push token removed.']);
     }
 
     // ── POST /api/v1/admin/push/unsubscribe-expo ─────────────────────────────

@@ -335,9 +335,9 @@ function MovedReport({ to }: { to: string }) {
 export default function App() {
     // Detect public pages before React Router initialises so we can render
     // a minimal router (basename="/") instead of the full admin app.
-    // Matches /pay/..., /track/..., /order/... and their /admin/ Nginx-rewrite twins.
+    // Matches /pay/..., /track/..., /order/..., /handoff/..., /quote/... and their /admin/ Nginx-rewrite twins.
     // /order/{public_token} is the customer's durable receipt — public by design.
-    const isPublicPage = /^\/(admin\/)?(pay|track|order|handoff)\//.test(window.location.pathname);
+    const isPublicPage = /^\/(admin\/)?(pay|track|order|handoff|quote)\//.test(window.location.pathname);
 
     return (
         <QueryClientProvider client={queryClient}>

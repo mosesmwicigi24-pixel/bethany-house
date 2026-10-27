@@ -730,6 +730,40 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Renew the signed-in session — POST /api/v1/admin/auth/renew
+     *
+     * Native clients call this before the bearer token's expires_at so a phone
+     * in daily use is not signed out once a week. Nothing is widened: the
+     * request has already passed SessionPolicy::admit() (idle, absolute, PIN
+     * lock), the replacement keeps the session's sign-in time, its expiry is
+     * capped at the role's absolute limit, and the old token is revoked.
+     * See App\Services\Auth\SessionRenewal.
+     */
+    public function renew(Request $request)
+    {
+        /** @var \App\Models\PersonalAccessToken $current */
+        $current = $request->user()->currentAccessToken();
+        $renewal = app(\App\Services\Auth\SessionRenewal::class);
+
+        if ($reason = $renewal->refusal($current)) {
+            return response()->json([
+                'message' => 'This session cannot be renewed. Sign in again.',
+                'reason'  => $reason,
+            ], 409);
+        }
+
+        $result = $renewal->renew($request->user(), $current);
+
+        return response()->json([
+            'message'            => 'Session renewed',
+            'token'              => $result['token']->plainTextToken,
+            'expires_at'         => $result['expires_at']->toIso8601String(),
+            'session_started_at' => $result['session_started_at']?->toIso8601String(),
+            'session_policy'     => app(SessionPolicy::class)->describe($request->user()),
+        ]);
+    }
+
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================

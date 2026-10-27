@@ -16,6 +16,8 @@ use Minishlink\WebPush\Subscription;
  *
  *   • Web Push (VAPID) — browser PWA subscriptions (token_type = 'web')
  *   • Expo Push Service — React Native mobile app (token_type = 'expo')
+ *   • APNs — native Apple apps (token_type = 'apns'), App\Services\Push\ApnsSender
+ *   • FCM  — native Android apps (token_type = 'fcm'), App\Services\Push\FcmSender
  *
  * Called from NotificationService::send() alongside the existing
  * database + Reverb broadcast channels.
@@ -78,11 +80,30 @@ class WebPushService
             );
         }
 
+        // ── Native apps: APNs (Apple) and FCM (Android) ───────────────────────
+        // Native apps programme Step 2. Each sender is disabled until its
+        // credentials are set (config/push.php) and never throws.
+
+        foreach ($allSubscriptions->where('token_type', 'apns') as $sub) {
+            app(\App\Services\Push\ApnsSender::class)->send($sub, $title, $body, $url, $icon, $data);
+        }
+        foreach ($allSubscriptions->where('token_type', 'fcm') as $sub) {
+            app(\App\Services\Push\FcmSender::class)->send($sub, $title, $body, $url, $icon, $data);
+        }
+
         // ── VAPID Web Push (PWA) ──────────────────────────────────────────────
 
         $webSubscriptions = $allSubscriptions->where('token_type', 'web');
 
         if ($webSubscriptions->isEmpty()) return;
+
+        // No key pair → browser push is off (the console also stops subscribing
+        // when the public key is empty). Nothing else is affected.
+        if (config('webpush.vapid.public_key') === '' || config('webpush.vapid.private_key') === ''
+            || config('webpush.vapid.public_key') === null || config('webpush.vapid.private_key') === null) {
+            Log::warning('[WebPush] VAPID keys not configured; browser push skipped', ['user_id' => $userId]);
+            return;
+        }
 
         $auth = [
             'VAPID' => [

@@ -143,6 +143,9 @@ Route::prefix('v1')->group(function () {
         Route::post('/step-up/passkey/options', [\App\Http\Controllers\Api\PasskeyController::class, 'stepUpOptions']);
         Route::post('/step-up/passkey',         [\App\Http\Controllers\Api\PasskeyController::class, 'stepUp']);
         Route::post('/pin/unlock',          [AccountSecurityController::class, 'unlock']);
+        // Sliding renewal for native clients (native apps Step 2): a new token for
+        // the same session, inside the role's limits; the old one is revoked.
+        Route::post('/renew',               [AuthController::class, 'renew']);
         Route::post('/2fa/recovery-codes',  [AccountSecurityController::class, 'regenerateRecoveryCodes'])
             ->middleware('step.up');
     });
@@ -425,6 +428,10 @@ Route::prefix('v1')->group(function () {
                 // Expo Push Service — React Native mobile app
                 Route::post('/subscribe-expo',   [PushController::class, 'subscribeExpo']);
                 Route::post('/unsubscribe-expo', [PushController::class, 'unsubscribeExpo']);
+
+                // Native apps (Step 2): APNs / FCM device tokens
+                Route::post('/subscribe-device',   [PushController::class, 'subscribeDevice']);
+                Route::post('/unsubscribe-device', [PushController::class, 'unsubscribeDevice']);
             });
 
         });
