@@ -5,6 +5,7 @@ import { timeClockApi } from "@/api/attendance";
 import { leaveApi } from "@/api/leave";
 import { peopleC1Api } from "@/api/people-c1";
 import { updatesApi } from "@/api/updates";
+import { formsApi } from "@/api/forms";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { TeamNow } from "@/pages/people/OverviewPage";
@@ -18,6 +19,8 @@ export default function MePage() {
     const teamView = can("attendance.view_team");
     const { data: overview } = useQuery({ queryKey: ["people-overview"], queryFn: () => peopleC1Api.overview(), enabled: teamView, refetchInterval: 60_000 });
     const { data: feed } = useQuery({ queryKey: ["updates", "", 1], queryFn: () => updatesApi.feed(1), staleTime: 60_000 });
+    const { data: forms } = useQuery({ queryKey: ["forms-today", ""], queryFn: () => formsApi.today(), staleTime: 60_000 });
+    const formsDue = (forms?.data ?? []).filter(r => r.template.kind === "checklist" && !["submitted", "late"].includes(r.state));
     const active = status?.active_entry ?? null;
     const annual = leave?.balances.find(b => b.type.code === "annual") ?? leave?.balances.find(b => b.available !== null);
     const hm = (m: number) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
@@ -26,6 +29,8 @@ export default function MePage() {
         { to: "/me/leave", label: "My leave", hint: annual && annual.available !== null ? `${annual.available} days left` : undefined },
         { to: "/me/timesheet", label: "My hours", hint: status ? `${hm(status.week_worked_minutes)} this week` : undefined },
         { to: "/me/payslips", label: "My pay", hint: "payslips" },
+        { to: "/forms", label: "Checklists & forms", hint: formsDue.length ? `${formsDue.length} to do` : forms ? "all done" : undefined },
+        { to: "/handbook", label: "Handbook", hint: "policies, how-tos" },
         { to: "/me/advances", label: "Advances & loans" },
         { to: "/profile", label: "My file", hint: "contact, documents, identifiers" },
     ];

@@ -93,6 +93,11 @@ Schedule::command(\App\Console\Commands\ApplyDueProposals::class)
     ->everyMinute()
     ->withoutOverlapping();
 
+// People C4: a checklist nobody did by its due time plus the grace is recorded as missed.
+Schedule::command(\App\Console\Commands\FormsRemind::class)
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();
+
 // People C3: scheduled Updates posts go out; birthdays and anniversaries each morning.
 Schedule::command(\App\Console\Commands\UpdatesPublish::class)
     ->everyFiveMinutes()

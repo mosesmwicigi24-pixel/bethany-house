@@ -297,6 +297,9 @@ return [
             // C3: a photo on an Updates post, for everyone who may see the post.
             'UpdatesController@photoLink',
             'SignedFileController@updatePhoto',
+            // C4: photos and signatures on checklists and reports, for the submitter and the outlet's managers.
+            'FormsController@fileLink',
+            'SignedFileController@formFile',
             'PeopleController@myDocumentLink',
             'SignedFileController@staffDocument',
             // A person's own payslip (People PR 6) — their document, like their file.

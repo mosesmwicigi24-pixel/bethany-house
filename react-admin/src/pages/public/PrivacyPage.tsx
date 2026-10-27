@@ -34,6 +34,7 @@ export default function PrivacyPage() {
                         <li><b>Your employee file</b> — name, contact details, job, hire date, identifiers for statutory filings (ID, KRA PIN, NSSF, SHIF), bank or M-Pesa details for pay, emergency contact, documents you or HR upload. Identifiers and pay details are encrypted at rest and shown only to HR and finance after they confirm it is them, and every reveal is recorded.</li>
                         <li><b>Work records</b> — hours, shifts, leave, timesheets, payslips, advances. These exist to pay you correctly and to meet Kenyan employment and tax law.</li>
                         <li><b>Your device</b> — a random id per browser or app install, the device type, and the app version, so you can see and remove the devices signed in to your account and so a punch can be tied to a known device.</li>
+                        <li><b>Checklists and reports</b> — what you fill in on an opening or closing list or an incident report, any photo you attach, and your signature where the form asks for one. Kept with the shop's records; seen by you and the outlet's managers.</li>
                         <li><b>Notifications</b> — a push token for your browser or phone, used only to tell you about your shifts, leave, pay and messages. Remove it by signing out or turning notifications off.</li>
                     </ul>
                 </Section>

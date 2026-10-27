@@ -62,6 +62,18 @@ class SignedFileController extends Controller
         return SignedFiles::stream($request, 'private', (string) $path, basename($path));
     }
 
+    /** A photo or the signature on a form submission (People C4): private disk, issued by FormsController::fileLink. */
+    public function formFile(Request $request, int $submission, string $key)
+    {
+        $row = \App\Models\FormSubmission::find($submission);
+        $path = $row ? ($key === 'signature' ? $row->signature_path : ($row->photos[$key] ?? null)) : null;
+        if (!$path) {
+            return response()->json(['message' => 'File not found.'], 404);
+        }
+
+        return SignedFiles::stream($request, 'private', (string) $path, basename($path));
+    }
+
     public function channelAttachment(Request $request)
     {
         // The issuer validated the path's shape; the signature pins it.

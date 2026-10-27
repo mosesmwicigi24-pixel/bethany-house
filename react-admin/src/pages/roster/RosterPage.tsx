@@ -50,6 +50,8 @@ export default function RosterPage() {
     const refresh = () => qc.invalidateQueries({ queryKey: ["roster", outletId, week] });
     const onErr = (e: ApiError) => toast.error(e.message);
 
+    const templates = useQuery({ queryKey: ["shift-templates", outletId], queryFn: () => rosterApi.templates(outletId), enabled: outletId > 0, staleTime: 300_000 });
+    const [showTemplates, setShowTemplates] = useState(false);
     const [editing, setEditing] = useState<{ shift?: Shift; user_id: number | null; date: string } | null>(null);
     const [form, setForm] = useState({ starts_at: "08:00", ends_at: "17:00", label: "", notes: "" });
     useEffect(() => {
@@ -101,6 +103,7 @@ export default function RosterPage() {
                     {can && (
                         <>
                             <button onClick={() => copy.mutate()} disabled={copy.isPending} className="btn-secondary btn-sm">Copy last week</button>
+                            <button onClick={() => setShowTemplates(true)} className="btn-secondary btn-sm">Templates</button>
                             <button onClick={() => pub.mutate()} disabled={pub.isPending || !data?.draft_count} className="btn-primary btn-sm">
                                 Publish{data?.draft_count ? ` ${data.draft_count}` : ""}
                             </button>
@@ -193,6 +196,7 @@ export default function RosterPage() {
                 </>
             )}
 
+            {showTemplates && <TemplatesModal outletId={outletId} onClose={() => setShowTemplates(false)} />}
             <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.shift ? "Edit shift" : editing?.user_id ? "Add shift" : "Add open shift"} size="md"
                 footer={editing && (
                     <>
@@ -207,6 +211,9 @@ export default function RosterPage() {
                             {editing.user_id ? data?.members.find(m => m.id === editing.user_id)?.name : "Open shift (anyone at the outlet can claim it once published)"} · {fmtDay(editing.date, { weekday: "long", day: "numeric", month: "long" })}
                             {editing.shift && <span className={clsx("ml-2 text-2xs font-semibold px-2 py-0.5 rounded-full", editing.shift.status === "published" ? "bg-success-light text-success" : "bg-surface-100 text-surface-600")}>{editing.shift.status}</span>}
                         </p>
+                        {(templates.data?.data.length ?? 0) > 0 && (
+                            <div className="flex flex-wrap gap-1">{templates.data!.data.map(t => <button key={t.id} type="button" onClick={() => setForm(f => ({ ...f, starts_at: t.starts_at, ends_at: t.ends_at, label: t.label ?? f.label }))} className={clsx("px-2 py-0.5 rounded-full text-xs border", form.starts_at === t.starts_at && form.ends_at === t.ends_at ? "bg-brand-600 text-white border-brand-600" : "bg-white border-line text-surface-600")} title={`${t.starts_at}–${t.ends_at}`}>{t.name}</button>)}</div>
+                        )}
                         <div className="grid grid-cols-2 gap-3">
                             <label className="text-xs text-surface-500">Starts<input type="time" className="input mt-1" value={form.starts_at} onChange={e => setForm({ ...form, starts_at: e.target.value })} /></label>
                             <label className="text-xs text-surface-500">Ends<input type="time" className="input mt-1" value={form.ends_at} onChange={e => setForm({ ...form, ends_at: e.target.value })} /></label>
@@ -218,5 +225,34 @@ export default function RosterPage() {
                 )}
             </Modal>
         </div>
+    );
+}
+
+/** Shift templates (People C4): named start/end/label pairs the shift modal offers as chips. roster.manage adds and removes. */
+function TemplatesModal({ outletId, onClose }: { outletId: number; onClose: () => void }) {
+    const qc = useQueryClient();
+    const toast = useToastStore();
+    const q = useQuery({ queryKey: ["shift-templates", outletId], queryFn: () => rosterApi.templates(outletId) });
+    const [d, setD] = useState({ name: "", starts_at: "08:00", ends_at: "17:00", label: "", here: true });
+    const refresh = () => qc.invalidateQueries({ queryKey: ["shift-templates", outletId] });
+    const add = useMutation({ mutationFn: () => rosterApi.addTemplate({ outlet_id: d.here ? outletId : null, name: d.name.trim(), starts_at: d.starts_at, ends_at: d.ends_at, label: d.label || null }), onSuccess: r => { toast.success(r.message); setD(x => ({ ...x, name: "", label: "" })); refresh(); }, onError: (e: ApiError) => toast.error(e.message) });
+    const rem = useMutation({ mutationFn: (id: number) => rosterApi.removeTemplate(id), onSuccess: refresh, onError: (e: ApiError) => toast.error(e.message) });
+    return (
+        <Modal open onClose={onClose} title="Shift templates" size="md">
+            <div className="space-y-3 text-sm">
+                <ul className="divide-y divide-line rounded-xl border border-line">
+                    {(q.data?.data ?? []).map(t => <li key={t.id} className="flex items-center justify-between px-3 py-2"><span><b>{t.name}</b> <span className="text-surface-500">{t.starts_at}–{t.ends_at}{t.label ? ` · ${t.label}` : ""}{t.outlet_id ? "" : " · every outlet"}</span></span><button onClick={() => rem.mutate(t.id)} className="btn-ghost btn-sm text-xs text-danger">Remove</button></li>)}
+                    {q.data && q.data.data.length === 0 && <li className="px-3 py-3 text-surface-500">No templates yet.</li>}
+                </ul>
+                <form onSubmit={e => { e.preventDefault(); if (d.name.trim()) add.mutate(); }} className="grid grid-cols-2 gap-2 rounded-xl bg-surface-50 p-3">
+                    <label className="text-xs text-surface-500 col-span-2">Name<input className="input mt-1" value={d.name} onChange={e => setD({ ...d, name: e.target.value })} placeholder="Morning, Evening, Saturday…" maxLength={60} /></label>
+                    <label className="text-xs text-surface-500">Starts<input type="time" className="input mt-1" value={d.starts_at} onChange={e => setD({ ...d, starts_at: e.target.value })} /></label>
+                    <label className="text-xs text-surface-500">Ends<input type="time" className="input mt-1" value={d.ends_at} onChange={e => setD({ ...d, ends_at: e.target.value })} /></label>
+                    <label className="text-xs text-surface-500 col-span-2">Label<input className="input mt-1" value={d.label} onChange={e => setD({ ...d, label: e.target.value })} maxLength={60} /></label>
+                    <label className="inline-flex items-center gap-2 text-xs"><input type="checkbox" checked={d.here} onChange={e => setD({ ...d, here: e.target.checked })} />This outlet only</label>
+                    <button type="submit" disabled={add.isPending || !d.name.trim()} className="btn-primary btn-sm justify-self-end">Add</button>
+                </form>
+            </div>
+        </Modal>
     );
 }
