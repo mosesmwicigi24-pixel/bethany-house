@@ -301,6 +301,8 @@ return [
             'FormsController@fileLink',
             'SignedFileController@formFile',
             'PeopleController@myDocumentLink',
+            // C4 part 2: the document a person is asked to sign is their own document.
+            'SigningController@show',
             'SignedFileController@staffDocument',
             // A person's own payslip (People PR 6) — their document, like their file.
             'PayrollController@myPayslipPdf',

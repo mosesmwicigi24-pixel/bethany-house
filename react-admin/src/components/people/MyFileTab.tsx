@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { peopleApi } from "@/api/people";
 import { DocumentsCard } from "@/components/people/DocumentsCard";
+import { TrainingCard } from "@/components/people/TrainingSigningCards";
 import { SensitiveCard } from "@/components/people/SensitiveCard";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
@@ -66,6 +67,8 @@ export function MyFileTab() {
             </div>
 
             <SensitiveCard masked={person.masked} canView canEdit={false} fetchFull={async () => (await peopleApi.mySensitive()).sensitive} />
+
+            <TrainingCard courses={person.courses ?? []} self />
 
             <DocumentsCard title="My documents" documents={person.documents} fetchBlob={docId => peopleApi.fetchMyDocumentBlob(docId)} />
         </div>

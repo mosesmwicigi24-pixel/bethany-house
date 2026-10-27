@@ -65,7 +65,11 @@ class RosterController extends Controller
             }
         }
 
+        // Labour cost (C4 part 2): an estimate from each person's pay structure, for payroll.view only.
+        $cost = $request->user()->can('payroll.view') ? \App\Support\LabourCost::forShifts($shifts, $members) : null;
+
         return response()->json([
+            'cost'        => $cost,
             'outlet'      => ['id' => $outlet->id, 'name' => $outlet->name, 'operating_hours' => $outlet->operating_hours],
             'week_start'  => $start->toDateString(),
             'week_end'    => $end->toDateString(),

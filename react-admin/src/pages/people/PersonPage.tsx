@@ -5,6 +5,7 @@ import { peopleApi, type EmployeeProfileFields, type PersonFile } from "@/api/pe
 import { DocumentsCard } from "@/components/people/DocumentsCard";
 import { LeaveCard } from "@/components/people/LeaveCard";
 import { RecognitionsCard } from "@/components/people/RecognitionsCard";
+import { SigningCard, TrainingCard } from "@/components/people/TrainingSigningCards";
 import { timesheetsApi } from "@/api/timesheets";
 import { SensitiveCard } from "@/components/people/SensitiveCard";
 import { PayStructureCard } from "@/components/people/PayStructureCard";
@@ -172,6 +173,11 @@ export default function PersonPage() {
             <LeaveCard userId={personId} />
 
             <RecognitionsCard recognitions={person.recognitions ?? []} points={person.recognition_points ?? 0} />
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <TrainingCard courses={person.courses ?? []} />
+                <SigningCard userId={personId} signing={person.signing ?? []} documents={person.documents} canAsk={person.can.edit} onChanged={() => void refresh()} />
+            </div>
 
             <DocumentsCard
                 documents={person.documents}

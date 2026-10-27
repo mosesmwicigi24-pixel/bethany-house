@@ -569,6 +569,28 @@ Route::prefix('v1')->group(function () {
                     Route::delete('/templates/{id}',          [$f, 'destroyTemplate'])->whereNumber('id');
                 });
             });
+            // ── Signing (People C4 part 2) — the signer's side ──
+            Route::prefix('me/sign')->group(function () {
+                $sg = \App\Http\Controllers\Api\SigningController::class;
+                Route::get('/',              [$sg, 'mine']);
+                Route::get('/{id}',          [$sg, 'show'])->whereNumber('id');
+                Route::post('/{id}/sign',    [$sg, 'sign'])->whereNumber('id');
+                Route::post('/{id}/decline', [$sg, 'decline'])->whereNumber('id');
+            });
+            // ── Courses (People C4 part 2) — every staff member learns; updates.post writes ──
+            Route::prefix('courses')->group(function () {
+                $co = \App\Http\Controllers\Api\CoursesController::class;
+                Route::get('/',                              [$co, 'index']);
+                Route::get('/{id}',                          [$co, 'show'])->whereNumber('id');
+                Route::post('/{id}/lessons/{lesson}/done',   [$co, 'lessonDone'])->whereNumber('id')->whereNumber('lesson');
+                Route::post('/{id}/quiz',                    [$co, 'quiz'])->whereNumber('id');
+                Route::middleware('permission:updates.post,sanctum')->group(function () use ($co) {
+                    Route::post('/',                         [$co, 'store']);
+                    Route::put('/{id}',                      [$co, 'update'])->whereNumber('id');
+                    Route::delete('/{id}',                   [$co, 'destroy'])->whereNumber('id');
+                    Route::get('/{id}/progress',             [$co, 'progress'])->whereNumber('id');
+                });
+            });
             // ── The handbook (People C4) — every staff member reads; updates.post writes ──
             Route::prefix('handbook')->group(function () {
                 $h = \App\Http\Controllers\Api\HandbookController::class;
@@ -722,6 +744,10 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{user}/documents',                [$people, 'storeDocument'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
                 Route::get('/{user}/documents/{doc}',           [$people, 'documentLink'])->whereNumber('user')->whereNumber('doc');
                 Route::delete('/{user}/documents/{doc}',        [$people, 'removeDocument'])->whereNumber('user')->whereNumber('doc')->middleware('permission:hr.edit,sanctum');
+                // Signing requests (C4 part 2): HR asks, cancels; the list is for hr.view.
+                Route::get('/{user}/signing',                   [\App\Http\Controllers\Api\SigningController::class, 'index'])->whereNumber('user');
+                Route::post('/{user}/signing',                  [\App\Http\Controllers\Api\SigningController::class, 'store'])->whereNumber('user')->middleware('permission:hr.edit,sanctum');
+                Route::delete('/{user}/signing/{id}',           [\App\Http\Controllers\Api\SigningController::class, 'cancel'])->whereNumber('user')->whereNumber('id')->middleware('permission:hr.edit,sanctum');
             });
 
             // ── Activity logs: the audit trail — super_admin only ────────────

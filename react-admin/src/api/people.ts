@@ -6,7 +6,7 @@ import type { PaginatedResponse } from "@/types";
 
 export type EmploymentType = "permanent" | "contract" | "casual" | "intern";
 export type PayMethod = "mpesa" | "bank" | "cash";
-export type DocumentKind = "national_id" | "kra_pin" | "nssf" | "shif" | "contract" | "certificate" | "passport_photo" | "medical" | "other";
+export type DocumentKind = "national_id" | "kra_pin" | "nssf" | "shif" | "contract" | "certificate" | "passport_photo" | "medical" | "signed" | "other";
 
 export const DOCUMENT_KINDS: { value: DocumentKind; label: string }[] = [
     { value: "national_id", label: "National ID" },
@@ -17,6 +17,7 @@ export const DOCUMENT_KINDS: { value: DocumentKind; label: string }[] = [
     { value: "certificate", label: "Certificate" },
     { value: "passport_photo", label: "Passport photo" },
     { value: "medical", label: "Medical" },
+    { value: "signed", label: "Signed record" },
     { value: "other", label: "Other" },
 ];
 
@@ -90,7 +91,13 @@ export interface PersonFile {
     documents: StaffDocument[];
     recognitions: Recognition[];
     recognition_points: number;
+    courses: FileCourse[];
+    signing: FileSigning[];
 }
+
+/** Training on the file (People C4 part 2). */
+export interface FileCourse { id: number; title: string; required: boolean; passed: boolean; best_score: number | null; attempts: number; completed_at: string | null }
+export interface FileSigning { id: number; kind: "document" | "article" | "text"; title: string; status: "pending" | "signed" | "declined" | "cancelled"; due_at: string | null; signed_at: string | null; note: string | null; requested_by: string | null; signed_document_id: number | null }
 
 /** A shout-out on the Updates feed, as shown on the file (People C3). */
 export interface Recognition { id: number; body: string | null; points: number | null; at: string | null; by: string | null }

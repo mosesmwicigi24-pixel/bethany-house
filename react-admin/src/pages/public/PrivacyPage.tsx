@@ -35,6 +35,7 @@ export default function PrivacyPage() {
                         <li><b>Work records</b> — hours, shifts, leave, timesheets, payslips, advances. These exist to pay you correctly and to meet Kenyan employment and tax law.</li>
                         <li><b>Your device</b> — a random id per browser or app install, the device type, and the app version, so you can see and remove the devices signed in to your account and so a punch can be tied to a known device.</li>
                         <li><b>Checklists and reports</b> — what you fill in on an opening or closing list or an incident report, any photo you attach, and your signature where the form asks for one. Kept with the shop's records; seen by you and the outlet's managers.</li>
+                        <li><b>Signatures and training</b> — when HR asks you to sign a document or a policy on your phone, the Hub keeps your signature, the time, the address it was signed from and a signing record on your employee file. Training courses record which lessons you read and your quiz scores, on your file.</li>
                         <li><b>Notifications</b> — a push token for your browser or phone, used only to tell you about your shifts, leave, pay and messages. Remove it by signing out or turning notifications off.</li>
                     </ul>
                 </Section>
