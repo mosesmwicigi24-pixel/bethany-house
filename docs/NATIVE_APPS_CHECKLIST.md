@@ -38,7 +38,9 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | Profile (sessions, devices, password) | N (2FA/passkey/PIN management: B) | — | — | — | — |
 | People: overview, requests, attendance, roster, timesheets, leave, files, payroll, checklists | B | — | — | — | — |
 | Catalog: products, categories | B | — | — | — | — |
-| Sales: POS, order lists, order detail, quotations, invoices, carts, shipments, customers, balances, tills, EoD | B | — | — | — | — |
+| POS (register, sale, split tender, M-PESA/Paystack, receipt print, history, voids/returns via PIN, user EoD) | N | — | — | — | — |
+| Tills (verify/finalize, reconcile, corrections, per-currency) and EoD reports/settings | N | — | — | — | — |
+| Sales: order lists, order detail, quotations, invoices, carts, shipments, customers, balances | B | — | — | — | — |
 | Production: my tasks, orders, WIP, QC, calendar, BOM | B | — | — | — | — |
 | Inventory: stock, serials, adjustments, transfers, materials, low stock | B | — | — | — | — |
 | Procurement: POs, suppliers, GRN, returns | B | — | — | — | — |
