@@ -40,7 +40,11 @@ class PushSubscription extends Model
         'p256dh',
         'auth',
         'expo_token',
+        'device_token',
         'token_type',
+        'platform',
+        'device_model',
+        'device_id',
         'user_agent',
         'is_active',
     ];
@@ -71,6 +75,12 @@ class PushSubscription extends Model
     public function scopeExpo($query)
     {
         return $query->where('token_type', 'expo');
+    }
+
+    /** Native registrations: APNs (Apple) and FCM (Android). */
+    public function scopeNative($query)
+    {
+        return $query->whereIn('token_type', ['apns', 'fcm']);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -104,5 +114,15 @@ class PushSubscription extends Model
     public function isWeb(): bool
     {
         return $this->token_type === 'web';
+    }
+
+    public function isApns(): bool
+    {
+        return $this->token_type === 'apns';
+    }
+
+    public function isFcm(): bool
+    {
+        return $this->token_type === 'fcm';
     }
 }

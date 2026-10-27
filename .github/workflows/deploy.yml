@@ -122,9 +122,37 @@ jobs:
         working-directory: react-admin
         run: node scripts/check-nav-gates.mjs
 
+  api-contract:
+    name: API contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql, gd, zip, intl, bcmath
+          coverage: none
+
+      - name: Install Composer dependencies
+        working-directory: backend
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Seed environment
+        working-directory: backend
+        run: cp .env.example .env && php artisan key:generate
+
+      # docs/api/openapi.json is generated from the routes (native apps Step 2)
+      # and is the contract the Swift and Kotlin clients are built from. A
+      # route change without a regenerated file fails here.
+      - name: OpenAPI contract is current
+        working-directory: backend
+        run: php artisan openapi:generate --check
+
   build:
     name: Build ${{ matrix.service }}
-    needs: [test, frontend-checks]
+    needs: [test, frontend-checks, api-contract]
     # Only build/deploy on pushes to main (and manual dispatch); PRs run tests only.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest

@@ -42,7 +42,7 @@ export default function MePage() {
         { to: "/courses", label: "Training", hint: courses ? (courses.to_do ? `${courses.to_do} to complete` : "all done") : undefined },
         ...(signing && signing.pending > 0 ? [{ to: "/me/sign", label: "To sign", hint: `${signing.pending} waiting` }] : []),
         { to: "/me/advances", label: "Advances & loans" },
-        { to: "/profile", label: "My file", hint: "contact, documents, identifiers" },
+        { to: "/settings/profile", label: "My file", hint: "contact, documents, identifiers" },
     ];
     return (
         <div className="mx-auto w-full max-w-lg px-4 py-4 sm:py-8 space-y-4">

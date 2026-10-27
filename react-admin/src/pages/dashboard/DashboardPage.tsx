@@ -1056,7 +1056,7 @@ function useQuickActions(
             { label: "Messages",          href: "/comms",               icon: "message"  },
             { label: "Notifications",     href: "/notifications",       icon: "bell",    badge: stats?.unread_notifications },
             { label: "Production Orders", href: "/production",          icon: "scissors" },
-            { label: "My Profile",        href: "/profile",             icon: "profile"  },
+            { label: "My Profile",        href: "/settings/profile",             icon: "profile"  },
         ];
     }
 
@@ -1068,7 +1068,7 @@ function useQuickActions(
             { label: "New Customer",     href: "/sales/customers",  icon: "customer"  },
             { label: "Notifications",    href: "/notifications",    icon: "bell",     badge: stats?.unread_notifications },
             { label: "Messages",         href: "/comms",            icon: "message"   },
-            { label: "My Profile",       href: "/profile",          icon: "profile"   },
+            { label: "My Profile",       href: "/settings/profile",          icon: "profile"   },
         ];
     }
 

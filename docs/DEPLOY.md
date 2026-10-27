@@ -165,3 +165,43 @@ systemctl start box-deploy.timer
 | —                         | `/opt/bethany-house/.poll-etag`         | ETag cache for the GitHub poll   |
 | —                         | `/opt/bethany-house/deploy.log`         | Timestamped deploy transcript    |
 | —                         | `/opt/bethany-house/.box-deploy.lock`   | flock guard                      |
+
+## Native apps programme, Step 2 — required operator actions
+
+These land with the Step 2 backend contract (PR "feat: native apps Step 2").
+Two of them must be done on the VPS **before** that merge deploys, or the
+laravel container will refuse to start (by design: it no longer falls back
+to a committed key).
+
+1. **Rotate the Web Push (VAPID) key pair** and put it in `/opt/bethany-house/.env`.
+   The previous pair was an inline default in `docker-compose.yml`, i.e. a
+   committed private key (audit backlog 2026-08-08). Existing browser push
+   subscriptions stop working after rotation and re-register on the next
+   console sign-in.
+
+   ```bash
+   docker compose -f /opt/bethany-house/docker-compose.yml exec laravel php artisan webpush:vapid
+   # paste the two values into /opt/bethany-house/.env as
+   # VAPID_PUBLIC_KEY=...  VAPID_PRIVATE_KEY=...
+   ```
+
+2. **Route `/.well-known/` on the Hub host to Laravel** in the host nginx, next
+   to the existing `/api` location, so the app-link files are reachable:
+
+   ```nginx
+   location /.well-known/ { proxy_pass http://127.0.0.1:8010; }
+   ```
+
+   The files answer 404 until `APPLE_TEAM_ID` and `ANDROID_SHA256_FINGERPRINTS`
+   are set in `.env` (see `backend/config/applinks.php`), so this is safe to
+   do at any time.
+
+3. **Native push credentials** (only when the apps ship): `APNS_KEY_ID`,
+   `APNS_TEAM_ID`, `APNS_PRIVATE_KEY` (the `.p8` contents, `\n` for newlines),
+   `FCM_PROJECT_ID`, `FCM_SERVICE_ACCOUNT` (the service-account JSON or its
+   base64). Unset means that sender is disabled and logs one line per skipped
+   delivery. Never commit any of these.
+
+4. **If the host nginx has a rewrite list for the public console pages**
+   (`/pay`, `/track`, `/order`, `/handoff`), add `/quote` to it: the console
+   now serves `/quote/{token}` as a public page.

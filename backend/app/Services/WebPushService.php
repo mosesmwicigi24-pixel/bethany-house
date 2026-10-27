@@ -16,6 +16,8 @@ use Minishlink\WebPush\Subscription;
  *
  *   • Web Push (VAPID) — browser PWA subscriptions (token_type = 'web')
  *   • Expo Push Service — React Native mobile app (token_type = 'expo')
+ *   • APNs — native Apple apps (token_type = 'apns'), App\Services\Push\ApnsSender
+ *   • FCM  — native Android apps (token_type = 'fcm'), App\Services\Push\FcmSender
  *
  * Called from NotificationService::send() alongside the existing
  * database + Reverb broadcast channels.
@@ -76,6 +78,17 @@ class WebPushService
                 icon:      $icon,
                 data:      $data,
             );
+        }
+
+        // ── Native apps: APNs (Apple) and FCM (Android) ───────────────────────
+        // Native apps programme Step 2. Each sender is disabled until its
+        // credentials are set (config/push.php) and never throws.
+
+        foreach ($allSubscriptions->where('token_type', 'apns') as $sub) {
+            app(\App\Services\Push\ApnsSender::class)->send($sub, $title, $body, $url, $icon, $data);
+        }
+        foreach ($allSubscriptions->where('token_type', 'fcm') as $sub) {
+            app(\App\Services\Push\FcmSender::class)->send($sub, $title, $body, $url, $icon, $data);
         }
 
         // ── VAPID Web Push (PWA) ──────────────────────────────────────────────
