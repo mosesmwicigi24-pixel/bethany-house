@@ -143,11 +143,11 @@ class EmployeeEmergencyContactTest extends TestCase
         $this->assertTrue($this->getJson('/api/v1/admin/me/file')->assertOk()->json('person.can.edit_contact'));
 
         $r = $this->putJson('/api/v1/admin/me/file', [
-            'emergency_contact_name' => 'Mum', 'emergency_contact_phone' => '712345678', 'emergency_contact_relationship' => 'Parent',
+            'emergency_contact_name' => 'Mum', 'emergency_contact_phone' => '712480391', 'emergency_contact_relationship' => 'Parent',
             'emergency_contact_2_name' => 'Brother', 'emergency_contact_2_phone' => '+255 754 123 456',
             'job_title' => 'Owner',
         ])->assertOk();
-        $this->assertSame('+254712345678', $r->json('person.profile.emergency_contact_phone'));
+        $this->assertSame('+254712480391', $r->json('person.profile.emergency_contact_phone'));
         $this->assertSame('+255754123456', $r->json('person.profile.emergency_contact_2_phone'));
         $this->assertNull(EmployeeProfile::where('user_id', $me->id)->value('job_title'), 'job title is the file keeper\'s');
 

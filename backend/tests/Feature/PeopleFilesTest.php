@@ -141,10 +141,10 @@ class PeopleFilesTest extends TestCase
 
         // A part-number is refused (one phone rule, EmployeeEmergencyContactTest); a real one is saved as E.164.
         $this->putJson('/api/v1/admin/me/file', ['emergency_contact_name' => 'Mum', 'emergency_contact_phone' => '0700'])->assertStatus(422);
-        $this->putJson('/api/v1/admin/me/file', ['emergency_contact_name' => 'Mum', 'emergency_contact_phone' => '0712 345 678', 'job_title' => 'Owner'])->assertOk();
+        $this->putJson('/api/v1/admin/me/file', ['emergency_contact_name' => 'Mum', 'emergency_contact_phone' => '0712 480 391', 'job_title' => 'Owner'])->assertOk();
         $p = EmployeeProfile::where('user_id', $me->id)->first();
         $this->assertSame('Mum', $p->emergency_contact_name);
-        $this->assertSame('+254712345678', $p->emergency_contact_phone);
+        $this->assertSame('+254712480391', $p->emergency_contact_phone);
         $this->assertSame('Tailor', $p->job_title);
 
         $this->getJson('/api/v1/admin/me/file/sensitive')->assertStatus(403)->assertJsonPath('code', 'step_up_required');
