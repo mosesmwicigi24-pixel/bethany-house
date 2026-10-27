@@ -45,7 +45,6 @@ struct PhoneShell: View {
                 }
                 .tabItem { Label(item.label, systemImage: item.icon) }
                 .tag(i)
-                .badge(item.route == .comms() ? 0 : 0)
             }
             NavigationStack(path: pathBinding(99)) {
                 MoreList()

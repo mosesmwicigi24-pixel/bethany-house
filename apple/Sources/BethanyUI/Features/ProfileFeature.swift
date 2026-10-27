@@ -44,10 +44,7 @@ struct ProfileView: View {
                         DetailRow("Recovery codes left", "\(left)")
                     }
                     DetailRow("Terminal PIN") { StatusBadge(me.terminalPinSet ? "set" : "not set", tone: me.terminalPinSet ? .success : .neutral) }
-                    HStack {
-                        Button("Change password…") { showPassword = true }
-                        Button("Manage 2FA and passkeys in the console") { env.navigator.push(.profile) }.disabled(true).opacity(0)
-                    }
+                    Button("Change password…") { showPassword = true }
                     Text("Two-step setup, passkeys and the terminal PIN are managed from Setup › Profile in the console until their native screens ship; passkeys registered there already work for step-up here.")
                         .font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                 }

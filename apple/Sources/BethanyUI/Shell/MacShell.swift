@@ -33,7 +33,17 @@ public struct MacShell: View {
             .background(Theme.canvas)
         }
         .navigationSplitViewStyle(.balanced)
-        .toolbar { ShellToolbar() }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { env.navigator.go(.notifications) } label: { Label("Notifications", systemImage: "bell") }
+                    .badge(env.unreadNotifications)
+                    .help("Notifications")
+                Button { env.navigator.searchPresented = true } label: { Label("Search", systemImage: "magnifyingglass") }
+                    .help("Search (⌘K)")
+                Button { Task { await env.session.refreshMe(background: false) } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                    .help("Refresh (⌘R)")
+            }
+        }
         .sheet(isPresented: $nav.searchPresented) { CommandPalette() }
         .onAppear {
             if nav.selection == nil {
@@ -123,21 +133,6 @@ struct SidebarFooter: View {
         }
         .padding(Theme.Space.m)
         .background(.bar)
-    }
-}
-
-struct ShellToolbar: ToolbarContent {
-    @Environment(AppEnvironment.self) private var env
-    var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button { env.navigator.go(.notifications) } label: { Label("Notifications", systemImage: "bell") }
-                .badge(env.unreadNotifications)
-                .help("Notifications")
-            Button { env.navigator.searchPresented = true } label: { Label("Search", systemImage: "magnifyingglass") }
-                .help("Search (⌘K)")
-            Button { Task { await env.session.refreshMe(background: false) } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                .help("Refresh (⌘R)")
-        }
     }
 }
 
