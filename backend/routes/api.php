@@ -569,6 +569,17 @@ Route::prefix('v1')->group(function () {
                     Route::delete('/templates/{id}',          [$f, 'destroyTemplate'])->whereNumber('id');
                 });
             });
+            // ── Directory and to-dos (People C5) — every staff member ──
+            Route::get('/directory',       [\App\Http\Controllers\Api\DirectoryController::class, 'index']);
+            Route::put('/me/directory',    [\App\Http\Controllers\Api\DirectoryController::class, 'updateMine']);
+            Route::prefix('todos')->group(function () {
+                $td = \App\Http\Controllers\Api\TodosController::class;
+                Route::get('/',            [$td, 'index']);
+                Route::get('/people',      [$td, 'people']);
+                Route::post('/',           [$td, 'store']);
+                Route::patch('/{id}',      [$td, 'update'])->whereNumber('id');
+                Route::delete('/{id}',     [$td, 'destroy'])->whereNumber('id');
+            });
             // ── Signing (People C4 part 2) — the signer's side ──
             Route::prefix('me/sign')->group(function () {
                 $sg = \App\Http\Controllers\Api\SigningController::class;

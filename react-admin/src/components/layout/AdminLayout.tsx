@@ -102,6 +102,7 @@ const SEGMENT_LABELS: Record<string, string> = {
     stages: "Production Stages",
     pos: "Point of Sale",
     new: "New",
+    todos: "To-dos",
 }
 
 const REPORT_PAGE_LABELS: Record<string, string> = {
