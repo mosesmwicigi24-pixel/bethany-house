@@ -16,6 +16,10 @@ public enum Features {
         ProductionFeature.register()
         InventoryFeature.register()
         ProcurementFeature.register()
+        ExpensesFeature.register()
+        FinanceFeature.register()
+        ReportsFeature.register()
+        CatalogFeature.register()
         // Modules added by Steps 3–5 register below; order is irrelevant.
         for register in extraRegistrars { register() }
     }
