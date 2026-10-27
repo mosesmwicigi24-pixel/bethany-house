@@ -1,0 +1,107 @@
+# XcodeGen spec for the Apple apps (native apps programme).
+#   brew install xcodegen
+#   cd apple && xcodegen generate && open BethanyHub.xcodeproj
+#
+# Two app targets share the local Swift package (BethanyKit + BethanyUI):
+#   HubMac     macOS 14+, Apple Silicon and Intel, App Sandbox, APNs
+#   HubMobile  iOS/iPadOS 17+, universal (iPhone + iPad layouts), APNs,
+#              background location while clocked in
+# Signing: set DEVELOPMENT_TEAM in Signing.xcconfig (not committed) or in
+# Xcode; the bundle id ke.co.bethanyhouse.hub matches the Expo shell so the
+# store listing continues (docs/NATIVE_APPS_APPLE.md).
+name: BethanyHub
+options:
+  bundleIdPrefix: ke.co.bethanyhouse
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  createIntermediateGroups: true
+  xcodeVersion: "15.4"
+  groupSortPosition: top
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "2.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+packages:
+  BethanyHub:
+    path: .
+targets:
+  HubMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Apps/HubMac
+    dependencies:
+      - package: BethanyHub
+        product: BethanyKit
+      - package: BethanyHub
+        product: BethanyUI
+    entitlements:
+      path: Apps/HubMac/HubMac.entitlements
+    info:
+      path: Apps/HubMac/Info.plist
+      properties:
+        CFBundleDisplayName: Bethany House Hub
+        CFBundleName: Bethany House Hub
+        LSApplicationCategoryType: public.app-category.business
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: © Bethany House
+        NSLocationUsageDescription: Bethany House Hub checks that you are at the shop when you clock in or out.
+        NSCameraUsageDescription: Attach receipts and QC photos.
+        BHReverbKey: ""
+        CFBundleURLTypes:
+          - CFBundleURLName: ke.co.bethanyhouse.hub
+            CFBundleURLSchemes: [bethanyhub]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
+        PRODUCT_NAME: Bethany House Hub
+        ENABLE_HARDENED_RUNTIME: YES
+        ARCHS: $(ARCHS_STANDARD)
+  HubMobile:
+    type: application
+    platform: iOS
+    supportedDestinations: [iOS, iPadOS]
+    sources:
+      - path: Apps/HubMobile
+    dependencies:
+      - package: BethanyHub
+        product: BethanyKit
+      - package: BethanyHub
+        product: BethanyUI
+    entitlements:
+      path: Apps/HubMobile/HubMobile.entitlements
+    info:
+      path: Apps/HubMobile/Info.plist
+      properties:
+        CFBundleDisplayName: Bethany Hub
+        CFBundleName: Bethany House Hub
+        UILaunchScreen: {}
+        UIBackgroundModes: [location, remote-notification]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        NSLocationWhenInUseUsageDescription: Bethany House Hub checks that you are at the shop when you clock in or out, and records your position while you are on shift.
+        NSLocationAlwaysAndWhenInUseUsageDescription: While you are clocked in, Bethany House Hub records your position every few minutes so your manager can see you are on site. It stops when you clock out and never runs off shift.
+        NSFaceIDUsageDescription: Unlock the Hub with Face ID instead of typing your password.
+        NSCameraUsageDescription: Attach receipts, QC photos and scan serial numbers.
+        NSPhotoLibraryUsageDescription: Attach photos to expenses, products and messages.
+        ITSAppUsesNonExemptEncryption: false
+        CFBundleURLTypes:
+          - CFBundleURLName: ke.co.bethanyhouse.hub
+            CFBundleURLSchemes: [bethanyhub]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
+        PRODUCT_NAME: Bethany House Hub
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
