@@ -51,6 +51,17 @@ class SignedFileController extends Controller
         return SignedFiles::stream($request, 'private', (string) $path, "punch-{$entry}-{$which}.jpg");
     }
 
+    /** A photo on an Updates post (People C3): private disk, issued by UpdatesController::photoLink to whoever may see the post. */
+    public function updatePhoto(Request $request, int $post)
+    {
+        $path = \App\Models\Post::withTrashed()->find($post)?->photo_path;
+        if (!$path) {
+            return response()->json(['message' => 'File not found.'], 404);
+        }
+
+        return SignedFiles::stream($request, 'private', (string) $path, basename($path));
+    }
+
     public function channelAttachment(Request $request)
     {
         // The issuer validated the path's shape; the signature pins it.

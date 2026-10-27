@@ -396,6 +396,10 @@ class PeopleController extends Controller
                 'notes'                          => $p?->notes,
                 'updated_at'                     => $p?->updated_at?->toIso8601String(),
             ],
+            // Recognitions on the feed (People C3): the last ten, newest first.
+            'recognitions' => \App\Models\Post::with('author:id,first_name,last_name')->where('kind', 'recognition')->where('recipient_id', $person->id)->published()->orderByDesc('published_at')->orderByDesc('id')->limit(10)->get()
+                ->map(fn ($r) => ['id' => $r->id, 'body' => $r->body, 'points' => $r->points, 'at' => $r->published_at?->toIso8601String(), 'by' => $r->author ? trim("{$r->author->first_name} {$r->author->last_name}") : null])->values(),
+            'recognition_points' => (int) \App\Models\Post::where('kind', 'recognition')->where('recipient_id', $person->id)->published()->sum('points'),
             // Masked always; the full values are /sensitive behind step-up.
             'masked'     => collect(EmployeeProfile::SENSITIVE)->mapWithKeys(fn ($k) => [$k => EmployeeProfile::mask($p?->{$k})])->all(),
             'can'        => [

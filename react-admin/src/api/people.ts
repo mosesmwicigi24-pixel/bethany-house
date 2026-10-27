@@ -88,7 +88,12 @@ export interface PersonFile {
     masked: Sensitive;
     can: { edit: boolean; view_sensitive: boolean; edit_sensitive: boolean };
     documents: StaffDocument[];
+    recognitions: Recognition[];
+    recognition_points: number;
 }
+
+/** A shout-out on the Updates feed, as shown on the file (People C3). */
+export interface Recognition { id: number; body: string | null; points: number | null; at: string | null; by: string | null }
 
 export interface Holiday {
     id: number;

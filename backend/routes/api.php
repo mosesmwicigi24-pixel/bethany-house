@@ -173,6 +173,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/channel-attachments',               [$files, 'channelAttachment'])->name('files.channel-attachment');
         Route::get('/staff-documents/{document}',        [$files, 'staffDocument'])->whereNumber('document')->name('files.staff-document');
         Route::get('/attendance-photos/{entry}/{which}', [$files, 'attendancePhoto'])->whereNumber('entry')->whereIn('which', ['in', 'out'])->name('files.attendance-photo');
+        Route::get('/update-photos/{post}',              [$files, 'updatePhoto'])->whereNumber('post')->name('files.update-photo');
     });
 
     // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
@@ -549,6 +550,24 @@ Route::prefix('v1')->group(function () {
                 Route::get('/documents/{doc}',  [\App\Http\Controllers\Api\PeopleController::class, 'myDocumentLink'])->whereNumber('doc');
             });
             // Public holidays: read by everyone (roster, leave); written by hr.edit.
+            // ── The Updates feed (People C3) — every staff member; updates.post inside the controller ──
+            Route::prefix('updates')->group(function () {
+                $u = \App\Http\Controllers\Api\UpdatesController::class;
+                Route::get('/',                          [$u, 'index']);
+                Route::get('/people',                    [$u, 'people']);
+                Route::get('/scheduled',                 [$u, 'scheduled'])->middleware('permission:updates.post,sanctum');
+                Route::post('/',                         [$u, 'store']);
+                Route::get('/{id}',                      [$u, 'show'])->whereNumber('id');
+                Route::put('/{id}',                      [$u, 'update'])->whereNumber('id');
+                Route::delete('/{id}',                   [$u, 'destroy'])->whereNumber('id');
+                Route::post('/{id}/read',                [$u, 'read'])->whereNumber('id');
+                Route::post('/{id}/acknowledge',         [$u, 'acknowledge'])->whereNumber('id');
+                Route::post('/{id}/comments',            [$u, 'comment'])->whereNumber('id');
+                Route::delete('/{id}/comments/{cid}',    [$u, 'removeComment'])->whereNumber('id')->whereNumber('cid');
+                Route::post('/{id}/rsvp',                [$u, 'rsvp'])->whereNumber('id');
+                Route::get('/{id}/readers',              [$u, 'readersList'])->whereNumber('id');
+                Route::get('/{id}/photo',                [$u, 'photoLink'])->whereNumber('id');
+            });
             Route::get('/holidays',             [\App\Http\Controllers\Api\PeopleController::class, 'holidays']);
             Route::middleware('permission:hr.edit,sanctum')->group(function () {
                 Route::post('/holidays',        [\App\Http\Controllers\Api\PeopleController::class, 'storeHoliday']);
@@ -1379,6 +1398,7 @@ Route::prefix('v1')->group(function () {
                 // C2: automations, the kiosk tablets, punch photos
                 Route::get('/automations',        [\App\Http\Controllers\Api\AutomationsController::class, 'index']);
                 Route::put('/automations/{key}',  [\App\Http\Controllers\Api\AutomationsController::class, 'update'])->middleware('permission:settings.edit,sanctum');
+                Route::put('/recognition-points', [\App\Http\Controllers\Api\AutomationsController::class, 'recognitionPoints'])->middleware('permission:settings.edit,sanctum'); // C3
                 Route::get('/kiosks',             [\App\Http\Controllers\Api\KioskController::class, 'index'])->middleware('permission:attendance.manage,sanctum');
                 Route::post('/kiosks',            [\App\Http\Controllers\Api\KioskController::class, 'store'])->middleware(['permission:attendance.manage,sanctum', 'step.up']);
                 Route::delete('/kiosks/{id}',     [\App\Http\Controllers\Api\KioskController::class, 'destroy'])->whereNumber('id')->middleware('permission:attendance.manage,sanctum');

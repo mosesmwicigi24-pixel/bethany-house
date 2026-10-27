@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { peopleApi, type EmployeeProfileFields, type PersonFile } from "@/api/people";
 import { DocumentsCard } from "@/components/people/DocumentsCard";
 import { LeaveCard } from "@/components/people/LeaveCard";
+import { RecognitionsCard } from "@/components/people/RecognitionsCard";
 import { timesheetsApi } from "@/api/timesheets";
 import { SensitiveCard } from "@/components/people/SensitiveCard";
 import { PayStructureCard } from "@/components/people/PayStructureCard";
@@ -169,6 +170,8 @@ export default function PersonPage() {
             </div>
 
             <LeaveCard userId={personId} />
+
+            <RecognitionsCard recognitions={person.recognitions ?? []} points={person.recognition_points ?? 0} />
 
             <DocumentsCard
                 documents={person.documents}

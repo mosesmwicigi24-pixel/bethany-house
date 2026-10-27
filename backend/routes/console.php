@@ -93,6 +93,14 @@ Schedule::command(\App\Console\Commands\ApplyDueProposals::class)
     ->everyMinute()
     ->withoutOverlapping();
 
+// People C3: scheduled Updates posts go out; birthdays and anniversaries each morning.
+Schedule::command(\App\Console\Commands\UpdatesPublish::class)
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
+Schedule::command(\App\Console\Commands\PeopleCelebrations::class)
+    ->dailyAt('07:05')
+    ->withoutOverlapping();
+
 // ── Time clock: close forgotten shifts at the cut-off (config/attendance.php) ─
 Schedule::command(\App\Console\Commands\AttendanceAutoClockOut::class)
     ->everyFifteenMinutes()

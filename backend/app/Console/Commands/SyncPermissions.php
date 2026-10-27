@@ -303,6 +303,7 @@ class SyncPermissions extends Command
         // ── People (employee files, documents, holidays — People PR 2) ────
         'hr.view'              => ['View Employee Files',  'See job, department, dates, emergency contact and documents for staff in own outlets (all outlets with outlets.all_access); identifiers and pay details masked', 'People'],
         'hr.edit'              => ['Edit Employee Files',  'Update employee files, upload and remove staff documents, manage public holidays', 'People'],
+        'updates.post'         => ['Post Updates',        'Post notices, must-reads and events on the Updates feed, give recognition points, schedule posts and see who has read what (People C3). Anyone may post a recognition without points', 'People'],
         'hr.view_sensitive'    => ['View Identifiers & Pay Details', 'Read and write national ID, KRA PIN, NSSF, SHIF, M-Pesa and bank details in full (step-up each time)', 'People'],
         'roster.manage'        => ['Manage the Roster', 'Draft, publish, cancel and copy shifts for own outlets; decide swap requests (People PR 3). Viewing the roster is attendance.view_team', 'People'],
         'timesheets.lock'      => ['Lock Pay Periods', 'Lock a pay period once every timesheet is approved and export the approved hours (People PR 5); approving timesheets is attendance.manage', 'People'],
@@ -446,6 +447,8 @@ class SyncPermissions extends Command
             'users.view', 'roles.view',
             'attendance.view_team',
             'hr.view',
+            // The Updates feed: notices, must-reads, events, points (People C3).
+            'updates.post',
         ],
 
         // Runs one shop: its till, its stock, its production, its people.
@@ -454,6 +457,8 @@ class SyncPermissions extends Command
             '@walkin_customer', '@stock',
             // The shop's people: files and documents, identifiers masked (People PR 2).
             'hr.view',
+            // The shop's notices and events on the Updates feed (People C3).
+            'updates.post',
             // The shop's weekly roster and its swap requests (People PR 3).
             'roster.manage',
             // The shop's leave (People PR 4).
@@ -567,6 +572,8 @@ class SyncPermissions extends Command
         // raise_order brings products.view with it (the product picker).
         'production_manager' => [
             '@self', '@workspace',
+            // The floor's notices and events on the Updates feed (People C3).
+            'updates.post',
             'production.view',
             'production.raise_order', 'production.confirm_order',
             'production.manage_assignees',
