@@ -31,12 +31,12 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | Dashboard | N | — | — | — | — |
 | Approvals (inbox, mine, sign, reject, resubmit) | N | — | — | — | — |
 | Notifications | N | — | — | — | — |
-| Messages | B | — | — | — | — |
+| Messages (spaces, DMs, realtime, attachments, reactions, quick replies, entity chips) | N (AI assist rail: B) | — | — | — | — |
 | Me: Today | N | — | — | — | — |
 | Me: Updates, Checklists, Handbook, Training, To sign, To-dos, Colleagues | N | — | — | — | — |
 | Me: Clock in/out (geofence; trail iOS-only), shifts, leave, hours, payslips, advances | N | — | — | — | — |
-| Profile (sessions, devices, password) | N (2FA/passkey/PIN management: B) | — | — | — | — |
-| People: overview, requests, attendance, roster, timesheets, leave, files, payroll, checklists | B | — | — | — | — |
+| Profile (sessions, devices, password) | N (2FA/passkey/PIN self-management: B) | — | — | — | — |
+| People: overview, requests, attendance (trail map, kiosks), roster, timesheets, leave, employee files, payroll, checklist templates | N | — | — | — | — |
 | Catalog: products list, product form (images, pricing via proposals, variants, SEO, stages, BOM), bulk import, categories | N | — | — | — | — |
 | POS (register, sale, split tender, M-PESA/Paystack, receipt print, history, voids/returns via PIN, user EoD) | N | — | — | — | — |
 | Tills (verify/finalize, reconcile, corrections, per-currency) and EoD reports/settings | N | — | — | — | — |
@@ -45,10 +45,10 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | Inventory: stock, serials (scan on iOS), adjustments, transfers, materials, low stock | N | — | — | — | — |
 | Procurement: POs (detail, receive, return, payments), suppliers, GRN, returns | N | — | — | — | — |
 | Expenses (list, detail, approvals, attachments/receipt capture, bulk), imprest, categories and budgets, analytics | N | — | — | — | — |
-| Marketing, home front, insights, intelligence | B | — | — | — | — |
+| Marketing: seasons, campaigns, home front, product pages, insights | N | — | — | — | — |
 | Finance: payment transactions ledger (refund, void/reassign requests, export) | N | — | — | — | — |
 | Reports (11 pages with tabs, drill-down, PDF, CSV, print, schedules; signals with actions) | N | — | — | — | — |
-| Setup (all pages) | B | — | — | — | — |
+| Setup: business, outlets (geofence map), attendance rules, automations, holidays, roles matrix, users and sign-in security, countries, currencies (pricing vs reporting rate), languages, taxes, discount limits, payment methods, shipping, stages, auto-assignees, activity logs, trash, database, downloads | N (database wipe deliberately omitted) | — | — | — | — |
 | Kiosk | — | — | — | — | — |
 
 ## Backend (Step 2, merged in #514)
