@@ -41,9 +41,9 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | POS (register, sale, split tender, M-PESA/Paystack, receipt print, history, voids/returns via PIN, user EoD) | N | — | — | — | — |
 | Tills (verify/finalize, reconcile, corrections, per-currency) and EoD reports/settings | N | — | — | — | — |
 | Sales: order lists, pending queue, order detail (payments, items, proposals, shipments, comments, PDFs), quotations, invoices, interest carts, shipments, customers, balances | N (handoff: B) | — | — | — | — |
-| Production: my tasks, orders, WIP, QC, calendar, BOM | B | — | — | — | — |
-| Inventory: stock, serials, adjustments, transfers, materials, low stock | B | — | — | — | — |
-| Procurement: POs, suppliers, GRN, returns | B | — | — | — | — |
+| Production: my tasks (offline queue), orders, order detail, WIP, QC, calendar, BOM | N | — | — | — | — |
+| Inventory: stock, serials (scan on iOS), adjustments, transfers, materials, low stock | N | — | — | — | — |
+| Procurement: POs (detail, receive, return, payments), suppliers, GRN, returns | N | — | — | — | — |
 | Expenses, imprest, categories, analytics | B | — | — | — | — |
 | Marketing, home front, insights, intelligence | B | — | — | — | — |
 | Finance: payment transactions | B | — | — | — | — |

@@ -13,6 +13,9 @@ public enum Features {
         MeFeature.register()
         PosFeature.register()   // also registers Tills and EoD
         SalesFeature.register()
+        ProductionFeature.register()
+        InventoryFeature.register()
+        ProcurementFeature.register()
         // Modules added by Steps 3–5 register below; order is irrelevant.
         for register in extraRegistrars { register() }
     }
