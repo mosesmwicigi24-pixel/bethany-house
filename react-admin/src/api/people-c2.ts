@@ -14,7 +14,7 @@ export interface Automation {
     max: number;
     enabled: boolean;
     threshold: number;
-    recipients: "managers" | "hr" | "owner";
+    recipients: "managers" | "hr" | "owner" | "finance";
     extra_user_ids: number[];
     has_recipients: boolean;
     text: string;

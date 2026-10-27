@@ -98,6 +98,11 @@ Schedule::command(\App\Console\Commands\FormsRemind::class)
     ->everyFifteenMinutes()
     ->withoutOverlapping();
 
+// People C6: to-dos about to fall due remind their person; overdue ones tell the giver.
+Schedule::command(\App\Console\Commands\TodosRemind::class)
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
+
 // People C3: scheduled Updates posts go out; birthdays and anniversaries each morning.
 Schedule::command(\App\Console\Commands\UpdatesPublish::class)
     ->everyFiveMinutes()

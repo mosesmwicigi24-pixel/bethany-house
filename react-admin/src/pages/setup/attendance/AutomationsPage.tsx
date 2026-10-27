@@ -17,6 +17,7 @@ const RECIPIENTS: { value: Automation["recipients"]; label: string; hint: string
     { value: "managers", label: "The person's managers", hint: "Whoever they report to, and anyone who manages attendance in their outlets." },
     { value: "hr", label: "HR", hint: "Everyone who can edit employee files." },
     { value: "owner", label: "The owner", hint: "Super admins only." },
+    { value: "finance", label: "Finance", hint: "Everyone who can read the money reports (the owner included). Needs an email address on their profile for the CSV." },
 ];
 
 export default function AutomationsPage() {
