@@ -70,6 +70,7 @@ export const NAV: NavGroup[] = [
         label: "Me",
         items: [
             { label: "Today", href: "/me", icon: "clock" },
+            { label: "Updates", href: "/updates", icon: "notifications" },
             { label: "Clock in", href: "/me/clock", icon: "clock" },
             { label: "My shifts", href: "/me/shifts", icon: "calendar" },
             { label: "My leave", href: "/me/leave", icon: "calendar" },

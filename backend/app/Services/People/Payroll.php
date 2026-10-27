@@ -70,7 +70,21 @@ class Payroll
      * (self::advanceDeductions). They come off net only; never off gross or
      * taxable pay.
      */
-    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates, array $deductions = []): array
+    /**
+     * $extras: [{label, amount}] taxable earnings the period brought on top of
+     * the structure — recognition points at their value (People C3).
+     */
+    /** Recognition points in the period × the point value, as one taxable line; nothing when either is zero (C3). */
+    public static function recognitionExtras(User $user, PayPeriod $period): array
+    {
+        $value = \App\Support\Recognition::pointValue();
+        if ($value <= 0) return [];
+        $points = \App\Support\Recognition::pointsFor($user, $period->starts_on, $period->ends_on);
+        if ($points <= 0) return [];
+        return [['label' => sprintf('Recognition %d point%s × %s', $points, $points === 1 ? '' : 's', number_format($value, 2)), 'amount' => round($points * $value, 2)]];
+    }
+
+    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates, array $deductions = [], array $extras = []): array
     {
         $r2 = fn (float $v) => round($v, 2);
         $workingDays = self::workingDays($period);
@@ -113,6 +127,13 @@ class Payroll
             $allowTotal += $amt;
             if (empty($a['taxable'])) $allowNonTax += $amt;
             $items[] = ['label' => ($a['name'] ?? 'Allowance') . (empty($a['taxable']) ? ' (non-taxable)' : ''), 'amount' => $amt, 'kind' => 'earning'];
+        }
+
+        foreach ($extras as $x) {
+            $amt = $r2((float) ($x['amount'] ?? 0));
+            if ($amt <= 0) continue;
+            $allowTotal += $amt;
+            $items[] = ['label' => (string) ($x['label'] ?? 'Extra'), 'amount' => $amt, 'kind' => 'earning'];
         }
 
         // Unpaid leave: a monthly salary loses the daily equivalent; daily and hourly simply never earned it.
@@ -208,7 +229,7 @@ class Payroll
                 if (!$s)     { $unpayable[] = ['id' => $u->id, 'name' => trim("{$u->first_name} {$u->last_name}"), 'why' => 'No pay structure']; continue; }
                 $hours = ['regular_minutes' => (int) $sheet->regular_minutes, 'overtime_minutes' => (int) $sheet->overtime_minutes, 'rest_day_minutes' => (int) $sheet->rest_day_minutes,
                     'holiday_minutes' => (int) $sheet->holiday_minutes, 'paid_leave_days' => (float) $sheet->paid_leave_days, 'unpaid_leave_days' => (float) $sheet->unpaid_leave_days, 'days_worked' => (int) $sheet->days_worked];
-                $line = self::computeLine($u, $period, $group, $s, $hours, $rates, self::advanceDeductions($u));
+                $line = self::computeLine($u, $period, $group, $s, $hours, $rates, self::advanceDeductions($u), self::recognitionExtras($u, $period));
                 PayrollLine::create($line + ['payroll_run_id' => $run->id, 'user_id' => $u->id, 'timesheet_id' => $sheet->id]);
                 foreach (PayrollRun::MONEY as $c) $totals[$c] += (float) $line[$c];
                 $n++;

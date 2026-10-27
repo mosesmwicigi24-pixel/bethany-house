@@ -294,6 +294,9 @@ return [
             // C2: a kiosk punch photo, read by the manager on the Attendance page.
             'KioskController@photoLink',
             'SignedFileController@attendancePhoto',
+            // C3: a photo on an Updates post, for everyone who may see the post.
+            'UpdatesController@photoLink',
+            'SignedFileController@updatePhoto',
             'PeopleController@myDocumentLink',
             'SignedFileController@staffDocument',
             // A person's own payslip (People PR 6) — their document, like their file.

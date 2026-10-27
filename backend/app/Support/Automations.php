@@ -29,6 +29,8 @@ class Automations
         'outside_fence'     => ['label' => 'Outside the zone',  'unit' => null,      'min' => 0,  'max' => 0,   'text' => 'Someone clocks in from outside the outlet\'s clock-in zone.'],
         'overtime_soon'     => ['label' => 'Overtime soon',     'unit' => 'minutes', 'min' => 5,  'max' => 240, 'text' => 'Someone is %d minutes from their regular hours for the day.'],
         'document_expiring' => ['label' => 'Document expiring', 'unit' => 'days',    'min' => 1,  'max' => 365, 'text' => 'A staff document expires within %d days (checked each morning).'],
+        // C3: not an alert — a post the hub writes itself. No recipients.
+        'celebrations'      => ['label' => 'Celebrations',      'unit' => null,      'min' => 0,  'max' => 0,   'text' => 'Birthdays and work anniversaries from the employee file are posted on the Updates feed each morning.', 'recipients' => false],
     ];
 
     public const RECIPIENTS = ['managers', 'hr', 'owner'];
@@ -50,6 +52,7 @@ class Automations
                 'threshold'      => $r ? (int) $r->threshold : 0,
                 'recipients'     => $r ? (string) $r->recipients : 'managers',
                 'extra_user_ids' => $r && $r->extra_user_ids ? array_values(array_map('intval', json_decode($r->extra_user_ids, true) ?: [])) : [],
+                'has_recipients' => $meta['recipients'] ?? true,
                 'text'           => $meta['unit'] ? sprintf($meta['text'], $r ? (int) $r->threshold : 0) : $meta['text'],
             ];
         }

@@ -85,7 +85,7 @@ class AutomationsKioskTest extends TestCase
         $viewer = $this->staff(['attendance.view_team']);
         $admin = $this->staff(['attendance.view_team', 'settings.edit']);
         Sanctum::actingAs($viewer);
-        $this->getJson('/api/v1/admin/attendance/automations')->assertOk()->assertJsonCount(4, 'automations')->assertJsonPath('automations.0.key', 'missed_shift')->assertJsonPath('automations.0.enabled', true);
+        $this->getJson('/api/v1/admin/attendance/automations')->assertOk()->assertJsonCount(5, 'automations')->assertJsonPath('automations.0.key', 'missed_shift')->assertJsonPath('automations.0.enabled', true);
         $this->putJson('/api/v1/admin/attendance/automations/missed_shift', ['threshold' => 20])->assertStatus(403);
         Sanctum::actingAs($admin);
         $this->putJson('/api/v1/admin/attendance/automations/missed_shift', ['threshold' => 20, 'recipients' => 'owner', 'extra_user_ids' => [$viewer->id]])->assertOk()->assertJsonPath('automation.threshold', 20)->assertJsonPath('automation.recipients', 'owner');

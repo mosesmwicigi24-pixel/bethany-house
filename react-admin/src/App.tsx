@@ -186,6 +186,7 @@ const PeopleOverviewPage = lazy(() => import("@/pages/people/OverviewPage"));
 const PeopleRequestsPage = lazy(() => import("@/pages/people/RequestsPage"));
 const AttendanceRulesPage = lazy(() => import("@/pages/setup/attendance/AttendanceRulesPage"));
 const AutomationsPage = lazy(() => import("@/pages/setup/attendance/AutomationsPage")); // People C2
+const UpdatesPage = lazy(() => import("@/pages/updates/UpdatesPage")); // People C3
 const KioskPage = lazy(() => import("@/pages/kiosk/KioskPage")); // People C2: the tablet at the door, outside the admin layout
 const PrivacyPage = lazy(() => import("@/pages/public/PrivacyPage")); // public: the store listings need a policy URL (People PR 8)
 const PayrollPage = lazy(() => import("@/pages/payroll/PayrollPage"));
@@ -1038,6 +1039,8 @@ export default function App() {
                             }
                         />
                         <Route path="/me" element={<Suspense fallback={<PageLoader />}><MePage /></Suspense>} />
+                        <Route path="/updates" element={<Suspense fallback={<PageLoader />}><UpdatesPage /></Suspense>} />
+                        <Route path="/updates/:id" element={<Suspense fallback={<PageLoader />}><UpdatesPage /></Suspense>} />
                         <Route path="/people/overview" element={<ProtectedRoute permission="attendance.view_team"><Suspense fallback={<PageLoader />}><PeopleOverviewPage /></Suspense></ProtectedRoute>} />
                         <Route path="/people/requests" element={<ProtectedRoute permission="attendance.view_team"><Suspense fallback={<PageLoader />}><PeopleRequestsPage /></Suspense></ProtectedRoute>} />
                         <Route path="/settings/attendance-rules" element={<ProtectedRoute permission="attendance.view_team"><Suspense fallback={<PageLoader />}><AttendanceRulesPage /></Suspense></ProtectedRoute>} />

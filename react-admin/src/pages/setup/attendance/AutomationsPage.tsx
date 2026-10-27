@@ -34,6 +34,7 @@ export default function AutomationsPage() {
             <div className="space-y-3">
                 {data.automations.map(a => <Row key={a.key} a={a} people={data.people} canEdit={canEdit} />)}
             </div>
+            <PointValue value={data.recognition_point_kes} canEdit={canEdit} />
             <p className="text-xs text-surface-500">Alerts arrive as Hub notifications (and push, where it is on). Missed shift and overtime are checked every fifteen minutes; outside the zone at the punch; documents each morning at 07:15.</p>
         </div>
     );
@@ -73,12 +74,12 @@ function Row({ a, people, canEdit }: { a: Automation; people: { id: number; name
                             {r.unit}
                         </label>
                     )}
-                    <label className="inline-flex items-center gap-2">Tell
+                    {r.has_recipients && <label className="inline-flex items-center gap-2">Tell
                         <select disabled={!canEdit} value={r.recipients} onChange={e => setR({ ...r, recipients: e.target.value as Automation["recipients"] })} className="input px-2 py-1 text-sm" title={RECIPIENTS.find(x => x.value === r.recipients)?.hint}>
                             {RECIPIENTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
-                    </label>
-                    <span className="inline-flex items-center gap-2 flex-wrap">and also
+                    </label>}
+                    {r.has_recipients && <span className="inline-flex items-center gap-2 flex-wrap">and also
                         {r.extra_user_ids.map(id => (
                             <span key={id} className="inline-flex items-center gap-1 rounded-full bg-surface-100 px-2 py-0.5 text-xs">{nameOf(id)}
                                 {canEdit && <button type="button" aria-label={`Remove ${nameOf(id)}`} onClick={() => setR({ ...r, extra_user_ids: r.extra_user_ids.filter(x => x !== id) })} className="text-surface-400 hover:text-danger">✕</button>}
@@ -91,10 +92,26 @@ function Row({ a, people, canEdit }: { a: Automation; people: { id: number; name
                             </select>
                         )}
                         {!canEdit && r.extra_user_ids.length === 0 && <span className="text-surface-400">nobody else</span>}
-                    </span>
+                    </span>}
                     {canEdit && dirty && <button type="button" onClick={() => save.mutate({ threshold: r.threshold, recipients: r.recipients, extra_user_ids: r.extra_user_ids })} disabled={save.isPending} className="btn-primary btn-sm ml-auto">{save.isPending && <Spinner size="xs" className="border-white/30 border-t-white" />}Save</button>}
                 </div>
             </div>
         </div>
+    );
+}
+
+/** What a recognition point is worth on the payslip (People C3). 0 = points are just points. */
+function PointValue({ value, canEdit }: { value: number; canEdit: boolean }) {
+    const qc = useQueryClient();
+    const toast = useToastStore();
+    const [kes, setKes] = useState(String(value));
+    const save = useMutation({ mutationFn: () => automationsApi.setPointValue(Number(kes)), onSuccess: r => { toast.success(r.message); qc.invalidateQueries({ queryKey: ["automations"] }); }, onError: (e: ApiError) => toast.error(e.message) });
+    return (
+        <div className="card"><div className="card-body flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-surface-700">
+            <span><b className="text-surface-900">Recognition points.</b> A point on a shout-out is worth KES</span>
+            <input type="number" min={0} max={100000} step="0.01" disabled={!canEdit} value={kes} onChange={e => setKes(e.target.value)} className="input w-28 px-2 py-1 text-sm" />
+            <span>on the payslip of the period it was given in, as taxable pay. 0 means points are just points.</span>
+            {canEdit && Number(kes) !== value && <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-primary btn-sm ml-auto">Save</button>}
+        </div></div>
     );
 }

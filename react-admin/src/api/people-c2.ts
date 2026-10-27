@@ -16,6 +16,7 @@ export interface Automation {
     threshold: number;
     recipients: "managers" | "hr" | "owner";
     extra_user_ids: number[];
+    has_recipients: boolean;
     text: string;
 }
 
@@ -36,7 +37,8 @@ export interface Audience {
 }
 
 export const automationsApi = {
-    list: () => get<{ automations: Automation[]; people: { id: number; name: string }[] }>("/v1/admin/attendance/automations"),
+    list: () => get<{ automations: Automation[]; people: { id: number; name: string }[]; recognition_point_kes: number }>("/v1/admin/attendance/automations"),
+    setPointValue: (kes: number) => put<{ message: string; recognition_point_kes: number }>("/v1/admin/attendance/recognition-points", { kes }),
     save: (key: Automation["key"], data: Partial<Pick<Automation, "enabled" | "threshold" | "recipients" | "extra_user_ids">>) =>
         put<{ message: string; automation: Automation }>(`/v1/admin/attendance/automations/${key}`, data),
 };
