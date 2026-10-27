@@ -220,4 +220,43 @@ class TimesheetTest extends TestCase
         $p = $this->staff();
         $this->putJson("/api/v1/admin/people/{$p->id}", ['pay_group_id' => $g['id']])->assertOk()->assertJsonPath('person.profile.pay_group_id', $g['id']);
     }
+    /** C6: the `period_csv` automation emails the approved-hours CSV to finance the moment a period locks. */
+    public function test_locking_a_period_emails_the_csv_to_finance_when_the_automation_is_on(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $a = $this->staff(); $this->punch($a, '2026-03-02', 8 * 60);
+        $m = $this->staff(['attendance.view_team', 'attendance.manage']);
+        $fin = $this->staff(['attendance.view_team', 'timesheets.lock', 'reports.financial']);
+        $noMail = $this->staff(['reports.financial']); $noMail->forceFill(['email' => null])->save();
+        Sanctum::actingAs($m);
+        $periodId = $this->getJson('/api/v1/admin/timesheets?date=2026-03-10')->assertOk()->json('period.id');
+        $this->postJson("/api/v1/admin/timesheets/person/{$a->id}/approve", ['date' => '2026-03-10'])->assertOk();
+
+        // Off (the seeded default): the lock sends nothing and says nothing about mail.
+        Sanctum::actingAs($fin);
+        $this->postJson("/api/v1/admin/pay-periods/{$periodId}/lock", ['force' => true])->assertOk()->assertJsonPath('message', 'Period locked.');
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
+
+        // On: unlock, relock — finance (reports.financial holders with an address) gets the CSV; the exported file is the same bytes.
+        \App\Support\Automations::save('period_csv', ['enabled' => true]);
+        $owner = User::factory()->create(['status' => 'active', 'user_type' => 'staff']);
+        $owner->assignRole(Role::findByName('super_admin', 'sanctum'));
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($owner->fresh());
+        $this->stepUp($owner);
+        $this->postJson("/api/v1/admin/pay-periods/{$periodId}/unlock", ['reason' => 'relock for the email'])->assertOk();
+        Sanctum::actingAs($fin);
+        $r = $this->postJson("/api/v1/admin/pay-periods/{$periodId}/lock", ['force' => true])->assertOk();
+        $this->assertStringContainsString('CSV emailed to 2.', $r->json('message')); // finance + the owner (super_admin holds every permission); not the one without an address
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\PeriodLockedCsvMail::class, function ($mail) use ($fin, $a, $periodId) {
+            $att = $mail->attachments();
+            $csv = \App\Support\People\TimesheetCsv::build(\App\Models\PayPeriod::find($periodId));
+            return $mail->hasTo($fin->email) && count($att) === 1 && str_contains($csv, "{$a->first_name} {$a->last_name}") && str_contains($csv, ',8.00,0.00,')
+                && str_contains($mail->envelope()->subject, 'Timesheets locked');
+        });
+        \Illuminate\Support\Facades\Mail::assertSentCount(2);
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\PeriodLockedCsvMail::class, fn ($mail) => $mail->hasTo($owner->email));
+        $this->assertDatabaseHas('activity_log', ['event' => 'pay_period_csv_emailed']);
+    }
+
 }

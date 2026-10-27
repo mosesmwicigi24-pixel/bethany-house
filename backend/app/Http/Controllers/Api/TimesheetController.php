@@ -11,6 +11,10 @@ use App\Notifications\InAppNotification;
 use App\Services\ActivityLogService;
 use App\Services\NotificationService;
 use App\Services\People\TimesheetEngine;
+use App\Support\Automations;
+use App\Support\People\TimesheetCsv;
+use App\Mail\PeriodLockedCsvMail;
+use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -148,8 +152,30 @@ class TimesheetController extends Controller
         $period->update(['status' => 'locked', 'locked_by' => $request->user()->id, 'locked_at' => now()]);
         ActivityLogService::log('pay_period_locked', $period, ['approved' => $approved->count(), 'left_out' => $missing->pluck('id')->all()],
             "{$request->user()->first_name} locked {$period->group?->name} {$period->starts_on->format('j M')}–{$period->ends_on->format('j M')}");
+        $sent = self::emailLockedCsv($period->fresh('group'), $request->user(), $approved->count(), $missing->count());
 
-        return response()->json(['message' => 'Period locked.', 'period' => $this->period($period->fresh())]);
+        return response()->json(['message' => 'Period locked.' . ($sent === null ? '' : ($sent ? " CSV emailed to {$sent}." : ' Nobody to email the CSV to.')), 'period' => $this->period($period->fresh())]);
+    }
+
+    /**
+     * C6: the `period_csv` automation — the approved-hours CSV goes to its
+     * recipients by email the moment a period locks. null when the automation
+     * is off; otherwise the number of people it went to. A mail failure is
+     * reported (the period stays locked; the export is still there to download).
+     */
+    public static function emailLockedCsv(PayPeriod $period, User $by, int $sheets, int $leftOut): ?int
+    {
+        if (!Automations::active('period_csv')) return null;
+        $to = Automations::recipientsFor('period_csv')->filter(fn (User $u) => filter_var($u->email, FILTER_VALIDATE_EMAIL));
+        if ($to->isEmpty()) return 0;
+        $mail = new PeriodLockedCsvMail($period, trim("{$by->first_name} {$by->last_name}"), $sheets, $leftOut);
+        $n = 0;
+        foreach ($to as $u) {
+            try { Mail::to($u->email)->send($mail); $n++; }
+            catch (\Throwable $e) { report($e); }
+        }
+        ActivityLogService::log('pay_period_csv_emailed', $period, ['to' => $to->pluck('id')->all(), 'sent' => $n], "The locked period's CSV was emailed to {$n} of {$to->count()}.");
+        return $n;
     }
 
     /** POST /pay-periods/{id}/unlock {reason} — the owner only. */
@@ -169,20 +195,7 @@ class TimesheetController extends Controller
     public function export(Request $request)
     {
         $period = PayPeriod::with('group')->findOrFail($request->validate(['pay_period_id' => 'required|exists:pay_periods,id'])['pay_period_id']);
-        $sheets = Timesheet::with('user:id,first_name,last_name,email')->where('pay_period_id', $period->id)->orderBy('user_id')->get();
-        $h = fn (?int $m) => $m === null ? '' : number_format($m / 60, 2, '.', '');
-        $rows = $sheets->map(fn (Timesheet $s) => [
-            $s->user?->id, trim(($s->user?->first_name ?? '') . ' ' . ($s->user?->last_name ?? '')), $s->user?->email,
-            $period->starts_on->toDateString(), $period->ends_on->toDateString(), $s->status,
-            $h($s->regular_minutes), $h($s->overtime_minutes), $h($s->rest_day_minutes), $h($s->holiday_minutes),
-            $s->paid_leave_days, $s->unpaid_leave_days, $s->days_worked, $s->approved_at?->toDateTimeString(),
-        ]);
-        $out = fopen('php://temp', 'r+');
-        fwrite($out, "\xEF\xBB\xBF");
-        fputcsv($out, ['user_id', 'name', 'email', 'period_start', 'period_end', 'status', 'regular_hours', 'overtime_hours', 'rest_day_hours', 'holiday_hours', 'paid_leave_days', 'unpaid_leave_days', 'days_worked', 'approved_at']);
-        foreach ($rows as $r) fputcsv($out, $r);
-        rewind($out); $csv = stream_get_contents($out); fclose($out);
-        $name = 'timesheets-' . $period->starts_on->toDateString() . '.csv';
+        $csv = TimesheetCsv::build($period); $name = TimesheetCsv::filename($period);
 
         return response($csv, 200, ['Content-Type' => 'text/csv; charset=UTF-8', 'Content-Disposition' => "attachment; filename=\"{$name}\""]);
     }

@@ -18,8 +18,9 @@ use Illuminate\Support\Facades\DB;
  *   document_expiring  a staff document expires within N days
  *
  * recipients: managers (AttendanceAlerts::managersFor — the person's
- * reports_to and attendance.manage in their outlets), hr (hr.edit holders)
- * or owner (super_admin); extra_user_ids adds named people. The subject of
+ * reports_to and attendance.manage in their outlets), hr (hr.edit holders),
+ * owner (super_admin) or finance (FinancialVisibility::isFinance, C6);
+ * extra_user_ids adds named people. The subject of
  * an alert never receives it.
  */
 class Automations
@@ -32,9 +33,13 @@ class Automations
         'checklist_missed'  => ['label' => 'Checklist missed',  'unit' => 'minutes', 'min' => 5,  'max' => 240, 'text' => 'A checklist has nothing submitted %d minutes after its due time (and a report or a late or skipped checklist, at once).'],
         // C3: not an alert — a post the hub writes itself. No recipients.
         'celebrations'      => ['label' => 'Celebrations',      'unit' => null,      'min' => 0,  'max' => 0,   'text' => 'Birthdays and work anniversaries from the employee file are posted on the Updates feed each morning.', 'recipients' => false],
+        // C6: the person with the to-do is the one reminded; whoever gave it hears when it is overdue. No recipients.
+        'todo_due'          => ['label' => 'To-do due',         'unit' => 'minutes', 'min' => 5,  'max' => 1440, 'text' => 'The person is reminded %d minutes before a to-do is due; whoever gave it hears once it is overdue.', 'recipients' => false],
+        // C6: not an alert — the locked period's approved-hours CSV goes out by email.
+        'period_csv'        => ['label' => 'Locked period CSV', 'unit' => null,      'min' => 0,  'max' => 0,   'text' => 'When a pay period is locked, the approved-hours CSV (the same file as the export) is emailed.'],
     ];
 
-    public const RECIPIENTS = ['managers', 'hr', 'owner'];
+    public const RECIPIENTS = ['managers', 'hr', 'owner', 'finance'];
 
     /** Every automation, in KEYS order, with its row (defaults when the row is missing). */
     public static function all(): array
@@ -91,6 +96,7 @@ class Automations
         $users = match ($a['recipients']) {
             'hr'    => User::where('status', 'active')->where('user_type', 'staff')->get()->filter(fn (User $u) => $u->can('hr.edit')),
             'owner' => User::where('status', 'active')->get()->filter(fn (User $u) => $u->hasRole('super_admin')),
+            'finance' => User::where('status', 'active')->where('user_type', 'staff')->get()->filter(fn (User $u) => FinancialVisibility::isFinance($u)),
             default => User::whereIn('id', DB::table('outlet_user')->where('outlet_id', $outletId)->pluck('user_id'))->where('status', 'active')->get()
                 ->filter(fn (User $u) => $u->can('attendance.manage') || $u->can('forms.manage')),
         };
@@ -105,6 +111,7 @@ class Automations
         $users = match ($a['recipients']) {
             'hr'    => User::where('status', 'active')->where('user_type', 'staff')->get()->filter(fn (User $u) => $u->can('hr.edit')),
             'owner' => User::where('status', 'active')->get()->filter(fn (User $u) => $u->hasRole('super_admin')),
+            'finance' => User::where('status', 'active')->where('user_type', 'staff')->get()->filter(fn (User $u) => FinancialVisibility::isFinance($u)),
             default => $subject ? AttendanceAlerts::managersFor($subject) : collect(),
         };
         if ($a['extra_user_ids']) {

@@ -109,4 +109,46 @@ class DirectoryTodosTest extends TestCase
         Notification::assertSentTo($u, InAppNotification::class, fn ($n) => str_starts_with($n->title, 'No longer needed'));
         $this->assertSame('cancelled', Todo::find($given['id'])->status);
     }
+    public function test_todo_due_automation_reminds_the_person_once_and_tells_the_giver_once_it_is_overdue(): void
+    {
+        $boss = $this->staff(['attendance.view_team']); $u = $this->staff();
+        Sanctum::actingAs($boss);
+        $given = $this->postJson('/api/v1/admin/todos', ['title' => 'Count the float', 'due_at' => '2026-03-10 10:30:00', 'user_id' => $u->id])->assertCreated()->json('todo.id');
+        $own = Todo::create(['user_id' => $u->id, 'created_by' => $u->id, 'title' => 'Own thing', 'due_at' => '2026-03-10 10:45:00', 'status' => 'open']);
+        $later = Todo::create(['user_id' => $u->id, 'created_by' => $boss->id, 'title' => 'Much later', 'due_at' => '2026-03-10 15:00:00', 'status' => 'open']);
+        Notification::fake();
+
+        // Off by default: nothing moves.
+        Artisan::call('todos:remind');
+        Notification::assertNothingSent();
+        \App\Support\Automations::save('todo_due', ['enabled' => true, 'threshold' => 60]);
+
+        // 10:00 — both to-dos due within the hour remind their person; the 15:00 one waits.
+        Artisan::call('todos:remind');
+        Notification::assertSentTimes(InAppNotification::class, 2);
+        Notification::assertSentTo($u, InAppNotification::class, fn ($n) => str_starts_with($n->title, 'Due ') && str_contains($n->title, 'Count the float'));
+        $this->assertNotNull(Todo::find($given)->reminded_at);
+        $this->assertNull($later->fresh()->reminded_at);
+        Artisan::call('todos:remind');
+        Notification::assertSentTimes(InAppNotification::class, 2); // once
+
+        // 11:00 — the given one is overdue: the giver hears once; nobody hears about the person's own.
+        Carbon::setTestNow('2026-03-10 11:00:00');
+        Notification::fake();
+        Artisan::call('todos:remind');
+        Notification::assertSentTimes(InAppNotification::class, 1);
+        Notification::assertSentTo($boss, InAppNotification::class, fn ($n) => $n->title === 'Overdue: Count the float');
+        $this->assertNull($own->fresh()->overdue_told_at);
+        Artisan::call('todos:remind');
+        Notification::assertSentTimes(InAppNotification::class, 1);
+
+        // Done before the run: no overdue nudge.
+        Sanctum::actingAs($u);
+        $this->patchJson("/api/v1/admin/todos/{$later->id}", ['status' => 'done'])->assertOk();
+        Carbon::setTestNow('2026-03-10 16:00:00');
+        Notification::fake();
+        Artisan::call('todos:remind');
+        Notification::assertNothingSent();
+    }
+
 }
