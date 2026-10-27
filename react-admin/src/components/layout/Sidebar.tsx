@@ -75,6 +75,8 @@ export const NAV: NavGroup[] = [
             { label: "Handbook", href: "/handbook", icon: "people" },
             { label: "Training", href: "/courses", icon: "approvals" },
             { label: "To sign", href: "/me/sign", icon: "people" },
+            { label: "To-dos", href: "/todos", icon: "approvals" },
+            { label: "Colleagues", href: "/colleagues", icon: "people" },
             { label: "Clock in", href: "/me/clock", icon: "clock" },
             { label: "My shifts", href: "/me/shifts", icon: "calendar" },
             { label: "My leave", href: "/me/leave", icon: "calendar" },

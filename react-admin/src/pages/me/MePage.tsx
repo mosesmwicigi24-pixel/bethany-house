@@ -8,6 +8,7 @@ import { updatesApi } from "@/api/updates";
 import { formsApi } from "@/api/forms";
 import { signingApi } from "@/api/signing";
 import { coursesApi } from "@/api/courses";
+import { todosApi } from "@/api/todos";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { TeamNow } from "@/pages/people/OverviewPage";
@@ -25,6 +26,7 @@ export default function MePage() {
     const formsDue = (forms?.data ?? []).filter(r => r.template.kind === "checklist" && !["submitted", "late"].includes(r.state));
     const { data: signing } = useQuery({ queryKey: ["my-signing"], queryFn: () => signingApi.mine(), staleTime: 60_000 });
     const { data: courses } = useQuery({ queryKey: ["courses"], queryFn: () => coursesApi.list(), staleTime: 60_000 });
+    const { data: todos } = useQuery({ queryKey: ["todos", "mine", "open"], queryFn: () => todosApi.list("mine", "open"), staleTime: 60_000 });
     const active = status?.active_entry ?? null;
     const annual = leave?.balances.find(b => b.type.code === "annual") ?? leave?.balances.find(b => b.available !== null);
     const hm = (m: number) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
@@ -33,6 +35,8 @@ export default function MePage() {
         { to: "/me/leave", label: "My leave", hint: annual && annual.available !== null ? `${annual.available} days left` : undefined },
         { to: "/me/timesheet", label: "My hours", hint: status ? `${hm(status.week_worked_minutes)} this week` : undefined },
         { to: "/me/payslips", label: "My pay", hint: "payslips" },
+        { to: "/todos", label: "To-dos", hint: todos ? (todos.overdue ? `${todos.overdue} overdue` : todos.open ? `${todos.open} open` : "none open") : undefined },
+        { to: "/colleagues", label: "Colleagues", hint: "the directory" },
         { to: "/forms", label: "Checklists & forms", hint: formsDue.length ? `${formsDue.length} to do` : forms ? "all done" : undefined },
         { to: "/handbook", label: "Handbook", hint: "policies, how-tos" },
         { to: "/courses", label: "Training", hint: courses ? (courses.to_do ? `${courses.to_do} to complete` : "all done") : undefined },

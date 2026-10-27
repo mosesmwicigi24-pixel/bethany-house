@@ -21,6 +21,7 @@ class EmployeeProfile extends Model
 
     protected $fillable = [
         'user_id', 'job_title', 'department', 'employment_type', 'pay_group_id', 'hire_date', 'end_date', 'date_of_birth',
+        'directory_show_phone', 'directory_show_email', 'directory_show_birthday',
         'national_id_no', 'kra_pin', 'nssf_no', 'shif_no',
         'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relationship',
         'pay_method', 'mpesa_phone', 'bank_name', 'bank_branch', 'bank_account_name', 'bank_account_no',
@@ -31,6 +32,9 @@ class EmployeeProfile extends Model
         'hire_date'       => 'date:Y-m-d',
         'end_date'        => 'date:Y-m-d',
         'date_of_birth'   => 'date:Y-m-d',
+        'directory_show_phone'    => 'boolean',
+        'directory_show_email'    => 'boolean',
+        'directory_show_birthday' => 'boolean',
         'national_id_no'  => 'encrypted',
         'kra_pin'         => 'encrypted',
         'nssf_no'         => 'encrypted',

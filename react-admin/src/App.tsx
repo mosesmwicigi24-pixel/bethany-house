@@ -192,6 +192,8 @@ const FormsManagePage = lazy(() => import("@/pages/forms/FormsManagePage"));
 const HandbookPage = lazy(() => import("@/pages/handbook/HandbookPage"));
 const SignPage = lazy(() => import("@/pages/sign/SignPage")); // People C4 part 2
 const CoursesPage = lazy(() => import("@/pages/courses/CoursesPage"));
+const DirectoryPage = lazy(() => import("@/pages/directory/DirectoryPage")); // People C5
+const TodosPage = lazy(() => import("@/pages/todos/TodosPage"));
 const KioskPage = lazy(() => import("@/pages/kiosk/KioskPage")); // People C2: the tablet at the door, outside the admin layout
 const PrivacyPage = lazy(() => import("@/pages/public/PrivacyPage")); // public: the store listings need a policy URL (People PR 8)
 const PayrollPage = lazy(() => import("@/pages/payroll/PayrollPage"));
@@ -1053,6 +1055,8 @@ export default function App() {
                         <Route path="/me/sign/:id" element={<Suspense fallback={<PageLoader />}><SignPage /></Suspense>} />
                         <Route path="/courses" element={<Suspense fallback={<PageLoader />}><CoursesPage /></Suspense>} />
                         <Route path="/courses/:id" element={<Suspense fallback={<PageLoader />}><CoursesPage /></Suspense>} />
+                        <Route path="/colleagues" element={<Suspense fallback={<PageLoader />}><DirectoryPage /></Suspense>} />
+                        <Route path="/todos" element={<Suspense fallback={<PageLoader />}><TodosPage /></Suspense>} />
                         <Route path="/people/forms" element={<ProtectedRoute permission="forms.manage"><Suspense fallback={<PageLoader />}><FormsManagePage /></Suspense></ProtectedRoute>} />
                         <Route path="/people/overview" element={<ProtectedRoute permission="attendance.view_team"><Suspense fallback={<PageLoader />}><PeopleOverviewPage /></Suspense></ProtectedRoute>} />
                         <Route path="/people/requests" element={<ProtectedRoute permission="attendance.view_team"><Suspense fallback={<PageLoader />}><PeopleRequestsPage /></Suspense></ProtectedRoute>} />
