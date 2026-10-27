@@ -20,7 +20,9 @@ export function AdvancesPanel() {
     const [form, setForm] = useState<{ note: string; instalment: string; method: Method; reference: string; amount: string }>({ note: "", instalment: "", method: "mpesa", reference: "", amount: "" });
     const [adding, setAdding] = useState(false);
     const [newForm, setNewForm] = useState<{ user_id: string; kind: "advance" | "loan"; amount: string; instalment: string; reason: string }>({ user_id: "", kind: "advance", amount: "", instalment: "", reason: "" });
-    const { data: people } = useQuery({ queryKey: ["people", "all-for-advances"], queryFn: () => peopleApi.list({ per_page: "200" }), enabled: adding });
+    // The people list allows at most 100 a page (PeopleController); asking for
+    // 200 was refused and the Person dropdown stayed empty (owner, 2026-10-27).
+    const { data: people, isLoading: peopleLoading, isError: peopleFailed } = useQuery({ queryKey: ["people", "all-for-advances"], queryFn: () => peopleApi.list({ per_page: "100" }), enabled: adding });
     const refresh = () => void qc.invalidateQueries({ queryKey: ["advances"] });
     const onErr = (e: ApiError) => toast.error(e.message);
     const done = (r: { message: string }) => { toast.success(r.message); setAct(null); setAdding(false); refresh(); };
@@ -101,7 +103,7 @@ export function AdvancesPanel() {
                 <Modal open onClose={() => setAdding(false)} size="sm" title="Record an advance or loan"
                     footer={<button className="btn-primary btn-sm" disabled={create.isPending || !newForm.user_id || !newForm.amount || !newForm.reason} onClick={() => create.mutate()}>Record as approved</button>}>
                     <div className="space-y-2">
-                        <label className="text-xs text-surface-500">Person<select className="input mt-1" value={newForm.user_id} onChange={e => setNewForm(f => ({ ...f, user_id: e.target.value }))}><option value="">—</option>{(people?.data ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+                        <label className="text-xs text-surface-500">Person<select className="input mt-1" value={newForm.user_id} onChange={e => setNewForm(f => ({ ...f, user_id: e.target.value }))}><option value="">{peopleLoading ? "Loading people…" : peopleFailed ? "Couldn't load people — close and try again" : "Choose a person"}</option>{(people?.data ?? []).map(p => <option key={p.id} value={p.id}>{p.name}{p.job_title ? ` — ${p.job_title}` : ""}</option>)}</select></label>
                         <label className="text-xs text-surface-500">Kind<select className="input mt-1" value={newForm.kind} onChange={e => setNewForm(f => ({ ...f, kind: e.target.value as "advance" | "loan" }))}><option value="advance">Advance (whole amount off next pay)</option><option value="loan">Loan (instalments)</option></select></label>
                         <label className="text-xs text-surface-500">Amount (KES)<input type="number" min={1} className="input mt-1" value={newForm.amount} onChange={e => setNewForm(f => ({ ...f, amount: e.target.value }))} /></label>
                         {newForm.kind === "loan" && <label className="text-xs text-surface-500">Repay per pay run (KES)<input type="number" min={1} className="input mt-1" value={newForm.instalment} onChange={e => setNewForm(f => ({ ...f, instalment: e.target.value }))} /></label>}
