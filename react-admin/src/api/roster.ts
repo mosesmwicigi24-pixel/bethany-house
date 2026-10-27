@@ -69,7 +69,13 @@ export interface ShiftInput {
     publish?: boolean;
 }
 
+export interface ShiftTemplate { id: number; outlet_id: number | null; name: string; starts_at: string; ends_at: string; label: string | null }
+
 export const rosterApi = {
+    /** Named start/end/label pairs for the shift modal (C4). */
+    templates: (outletId?: number) => get<{ data: ShiftTemplate[] }>("/v1/admin/roster/templates", { params: { outlet_id: outletId } }),
+    addTemplate: (d: { outlet_id?: number | null; name: string; starts_at: string; ends_at: string; label?: string | null }) => post<{ message: string; template: ShiftTemplate }>("/v1/admin/roster/templates", d),
+    removeTemplate: (id: number) => del<{ message: string }>(`/v1/admin/roster/templates/${id}`),
     week: (outletId: number, week: string) =>
         get<RosterWeek>("/v1/admin/roster", { params: { outlet_id: String(outletId), week } }),
     addShift: (data: ShiftInput) => post<{ message: string; shift: Shift }>("/v1/admin/roster/shifts", data),

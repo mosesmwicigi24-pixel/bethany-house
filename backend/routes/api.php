@@ -174,6 +174,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/staff-documents/{document}',        [$files, 'staffDocument'])->whereNumber('document')->name('files.staff-document');
         Route::get('/attendance-photos/{entry}/{which}', [$files, 'attendancePhoto'])->whereNumber('entry')->whereIn('which', ['in', 'out'])->name('files.attendance-photo');
         Route::get('/update-photos/{post}',              [$files, 'updatePhoto'])->whereNumber('post')->name('files.update-photo');
+        Route::get('/form-files/{submission}/{key}',     [$files, 'formFile'])->whereNumber('submission')->where('key', '[a-z0-9_]+')->name('files.form-file');
     });
 
     // ═══ PUBLIC ORDER PAGE (no auth) ═════════════════════════════════════════
@@ -550,6 +551,33 @@ Route::prefix('v1')->group(function () {
                 Route::get('/documents/{doc}',  [\App\Http\Controllers\Api\PeopleController::class, 'myDocumentLink'])->whereNumber('doc');
             });
             // Public holidays: read by everyone (roster, leave); written by hr.edit.
+            // ── Checklists and forms (People C4) — every staff member fills; forms.manage runs them ──
+            Route::prefix('forms')->group(function () {
+                $f = \App\Http\Controllers\Api\FormsController::class;
+                Route::get('/today',                          [$f, 'today']);
+                Route::get('/mine',                           [$f, 'mine']);
+                Route::get('/templates/{id}',                 [$f, 'showTemplate'])->whereNumber('id');
+                Route::post('/submissions',                   [$f, 'submit']);
+                Route::get('/submissions/{id}',               [$f, 'show'])->whereNumber('id');
+                Route::get('/submissions/{id}/file/{key}',    [$f, 'fileLink'])->whereNumber('id')->where('key', '[a-z0-9_]+');
+                Route::middleware('permission:forms.manage,sanctum')->group(function () use ($f) {
+                    Route::get('/overview',                   [$f, 'overview']);
+                    Route::get('/submissions',                [$f, 'index']);
+                    Route::get('/templates',                  [$f, 'templates']);
+                    Route::post('/templates',                 [$f, 'storeTemplate']);
+                    Route::put('/templates/{id}',             [$f, 'updateTemplate'])->whereNumber('id');
+                    Route::delete('/templates/{id}',          [$f, 'destroyTemplate'])->whereNumber('id');
+                });
+            });
+            // ── The handbook (People C4) — every staff member reads; updates.post writes ──
+            Route::prefix('handbook')->group(function () {
+                $h = \App\Http\Controllers\Api\HandbookController::class;
+                Route::get('/',         [$h, 'index']);
+                Route::get('/{id}',     [$h, 'show'])->whereNumber('id');
+                Route::post('/',        [$h, 'store'])->middleware('permission:updates.post,sanctum');
+                Route::put('/{id}',     [$h, 'update'])->whereNumber('id')->middleware('permission:updates.post,sanctum');
+                Route::delete('/{id}',  [$h, 'destroy'])->whereNumber('id')->middleware('permission:updates.post,sanctum');
+            });
             // ── The Updates feed (People C3) — every staff member; updates.post inside the controller ──
             Route::prefix('updates')->group(function () {
                 $u = \App\Http\Controllers\Api\UpdatesController::class;
@@ -665,7 +693,10 @@ Route::prefix('v1')->group(function () {
                 $roster = \App\Http\Controllers\Api\RosterController::class;
                 Route::get('/',                         [$roster, 'week']);
                 Route::get('/swaps',                    [$roster, 'swaps']);
+                Route::get('/templates',                [$roster, 'templates']);      // C4
                 Route::middleware('permission:roster.manage,sanctum')->group(function () use ($roster) {
+                    Route::post('/templates',           [$roster, 'storeTemplate']);  // C4
+                    Route::delete('/templates/{id}',    [$roster, 'destroyTemplate'])->whereNumber('id');
                     Route::post('/shifts',              [$roster, 'store']);
                     Route::put('/shifts/{id}',          [$roster, 'update'])->whereNumber('id');
                     Route::delete('/shifts/{id}',       [$roster, 'destroy'])->whereNumber('id');

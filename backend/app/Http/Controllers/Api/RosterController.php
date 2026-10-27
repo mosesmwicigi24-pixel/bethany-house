@@ -115,6 +115,32 @@ class RosterController extends Controller
         return response()->json(['message' => 'Shift added.', 'shift' => $this->shift($shift->fresh('user'))], 201);
     }
 
+    /** GET /roster/templates?outlet_id= — named start/end/label pairs for the shift modal (C4). */
+    public function templates(Request $request): JsonResponse
+    {
+        $v = $request->validate(['outlet_id' => 'nullable|integer|exists:outlets,id']);
+        $rows = \App\Models\ShiftTemplate::where(fn ($q) => $q->whereNull('outlet_id')->when(!empty($v['outlet_id']), fn ($w) => $w->orWhere('outlet_id', $v['outlet_id'])))->orderBy('starts_at')->get();
+        return response()->json(['data' => $rows->map(fn ($t) => ['id' => $t->id, 'outlet_id' => $t->outlet_id, 'name' => $t->name, 'starts_at' => substr((string) $t->starts_at, 0, 5), 'ends_at' => substr((string) $t->ends_at, 0, 5), 'label' => $t->label])->values()]);
+    }
+
+    /** POST /roster/templates (roster.manage) */
+    public function storeTemplate(Request $request): JsonResponse
+    {
+        $v = $request->validate(['outlet_id' => 'nullable|integer|exists:outlets,id', 'name' => 'required|string|max:60', 'starts_at' => 'required|date_format:H:i', 'ends_at' => 'required|date_format:H:i|different:starts_at', 'label' => 'nullable|string|max:60']);
+        if (!empty($v['outlet_id'])) $this->authorizeOutlet($request->user(), (int) $v['outlet_id']);
+        $t = \App\Models\ShiftTemplate::create($v + ['created_by' => $request->user()->id]);
+        return response()->json(['message' => 'Template saved.', 'template' => ['id' => $t->id, 'outlet_id' => $t->outlet_id, 'name' => $t->name, 'starts_at' => $v['starts_at'], 'ends_at' => $v['ends_at'], 'label' => $t->label]], 201);
+    }
+
+    /** DELETE /roster/templates/{id} (roster.manage) */
+    public function destroyTemplate(Request $request, int $id): JsonResponse
+    {
+        $t = \App\Models\ShiftTemplate::findOrFail($id);
+        if ($t->outlet_id) $this->authorizeOutlet($request->user(), (int) $t->outlet_id);
+        $t->delete();
+        return response()->json(['message' => 'Template removed.']);
+    }
+
     /** PUT /roster/shifts/{id} */
     public function update(Request $request, int $id): JsonResponse
     {

@@ -197,6 +197,8 @@ class RoleCatalogueV2Test extends TestCase
             'hr.view',
             // People C3 (sync, 2026-11-03): posts on the Updates feed.
             'updates.post',
+            // People C4 (sync, 2026-11-04): checklists and forms.
+            'forms.manage',
         ],
         'finance_manager' => [
             // 3B (2026_10_03_520002): signs the finance band.
@@ -225,6 +227,8 @@ class RoleCatalogueV2Test extends TestCase
         'outlet_manager' => [
             // People C3 (sync, 2026-11-03): posts on the Updates feed.
             'updates.post',
+            // People C4 (sync, 2026-11-04): checklists and forms.
+            'forms.manage',
             // 4B part 1 (2026_10_03_440002): verifies a clerk's blind count.
             'pos.till_verify',
             // 4B part 2 (2026_10_03_860002): the band key for till voids and
@@ -254,6 +258,8 @@ class RoleCatalogueV2Test extends TestCase
             'attendance.view_team', 'roster.manage',
             // People C3 (sync, 2026-11-03): posts on the Updates feed.
             'updates.post',
+            // People C4 (sync, 2026-11-04): checklists and forms.
+            'forms.manage',
             // People PR 4 (sync, 2026-10-28): decides the floor's leave.
             'leave.approve',
         ],

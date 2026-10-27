@@ -29,6 +29,7 @@ class Automations
         'outside_fence'     => ['label' => 'Outside the zone',  'unit' => null,      'min' => 0,  'max' => 0,   'text' => 'Someone clocks in from outside the outlet\'s clock-in zone.'],
         'overtime_soon'     => ['label' => 'Overtime soon',     'unit' => 'minutes', 'min' => 5,  'max' => 240, 'text' => 'Someone is %d minutes from their regular hours for the day.'],
         'document_expiring' => ['label' => 'Document expiring', 'unit' => 'days',    'min' => 1,  'max' => 365, 'text' => 'A staff document expires within %d days (checked each morning).'],
+        'checklist_missed'  => ['label' => 'Checklist missed',  'unit' => 'minutes', 'min' => 5,  'max' => 240, 'text' => 'A checklist has nothing submitted %d minutes after its due time (and a report or a late or skipped checklist, at once).'],
         // C3: not an alert — a post the hub writes itself. No recipients.
         'celebrations'      => ['label' => 'Celebrations',      'unit' => null,      'min' => 0,  'max' => 0,   'text' => 'Birthdays and work anniversaries from the employee file are posted on the Updates feed each morning.', 'recipients' => false],
     ];
@@ -81,6 +82,20 @@ class Automations
         $row['updated_at'] = now();
         if (DB::table('automations')->where('key', $key)->exists()) DB::table('automations')->where('key', $key)->update($row);
         else DB::table('automations')->insert($row + ['key' => $key, 'created_at' => now()]);
+    }
+
+    /** Who hears an alert about an OUTLET (no single subject): managers = attendance.manage or forms.manage in that outlet. */
+    public static function recipientsForOutlet(string $key, int $outletId): Collection
+    {
+        $a = self::get($key);
+        $users = match ($a['recipients']) {
+            'hr'    => User::where('status', 'active')->where('user_type', 'staff')->get()->filter(fn (User $u) => $u->can('hr.edit')),
+            'owner' => User::where('status', 'active')->get()->filter(fn (User $u) => $u->hasRole('super_admin')),
+            default => User::whereIn('id', DB::table('outlet_user')->where('outlet_id', $outletId)->pluck('user_id'))->where('status', 'active')->get()
+                ->filter(fn (User $u) => $u->can('attendance.manage') || $u->can('forms.manage')),
+        };
+        if ($a['extra_user_ids']) $users = $users->concat(User::whereIn('id', $a['extra_user_ids'])->where('status', 'active')->get());
+        return $users->unique('id')->values();
     }
 
     /** Who hears this alert about $subject: active users, the subject excluded, nobody twice. */

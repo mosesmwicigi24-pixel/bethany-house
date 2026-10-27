@@ -71,6 +71,8 @@ export const NAV: NavGroup[] = [
         items: [
             { label: "Today", href: "/me", icon: "clock" },
             { label: "Updates", href: "/updates", icon: "notifications" },
+            { label: "Checklists", href: "/forms", icon: "approvals" },
+            { label: "Handbook", href: "/handbook", icon: "people" },
             { label: "Clock in", href: "/me/clock", icon: "clock" },
             { label: "My shifts", href: "/me/shifts", icon: "calendar" },
             { label: "My leave", href: "/me/leave", icon: "calendar" },
@@ -90,6 +92,7 @@ export const NAV: NavGroup[] = [
             { label: "Overview", href: "/people/overview", icon: "dashboard", permission: "attendance.view_team" },
             { label: "Requests", href: "/people/requests", icon: "approvals", permission: "attendance.view_team" },
             { label: "Attendance", href: "/settings/attendance", icon: "attendance", permission: "attendance.view_team" },
+            { label: "Checklists", href: "/people/forms", icon: "approvals", permission: "forms.manage" },
             { label: "Roster", href: "/roster", icon: "calendar", permission: "attendance.view_team" },
             { label: "Timesheets", href: "/timesheets", icon: "clock", permission: "attendance.view_team" },
             { label: "Leave", href: "/leave", icon: "calendar", permission: "attendance.view_team" },
