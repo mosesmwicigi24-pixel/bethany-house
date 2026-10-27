@@ -168,21 +168,25 @@ systemctl start box-deploy.timer
 
 ## Native apps programme, Step 2 — required operator actions
 
-These land with the Step 2 backend contract (PR "feat: native apps Step 2").
-Two of them must be done on the VPS **before** that merge deploys, or the
-laravel container will refuse to start (by design: it no longer falls back
-to a committed key).
+These land with the Step 2 backend contract (PR #514). None of them blocks
+the deploy: the containers start without them. Until step 1 is done,
+**browser push notifications are off** (the API logs one warning per skipped
+delivery and the console stops subscribing); native push and everything
+else are unaffected.
 
-1. **Rotate the Web Push (VAPID) key pair** and put it in `/opt/bethany-house/.env`.
-   The previous pair was an inline default in `docker-compose.yml`, i.e. a
-   committed private key (audit backlog 2026-08-08). Existing browser push
-   subscriptions stop working after rotation and re-register on the next
-   console sign-in.
+1. **Generate a fresh Web Push (VAPID) key pair** and put it in
+   `/opt/bethany-house/.env`. The previous pair was an inline default in
+   `docker-compose.yml`, i.e. a committed private key (audit backlog
+   2026-08-08), and is gone from the repo. Browser push subscriptions made
+   with the old pair re-register on the next console sign-in.
 
    ```bash
-   docker compose -f /opt/bethany-house/docker-compose.yml exec laravel php artisan webpush:vapid
-   # paste the two values into /opt/bethany-house/.env as
-   # VAPID_PUBLIC_KEY=...  VAPID_PRIVATE_KEY=...
+   cd /opt/bethany-house
+   docker compose exec laravel php artisan webpush:vapid
+   # paste the two printed lines into /opt/bethany-house/.env:
+   # VAPID_PUBLIC_KEY=...
+   # VAPID_PRIVATE_KEY=...
+   docker compose up -d laravel queue scheduler    # re-read the env
    ```
 
 2. **Route `/.well-known/` on the Hub host to Laravel** in the host nginx, next

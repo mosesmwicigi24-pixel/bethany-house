@@ -127,6 +127,27 @@ class NativePushTest extends TestCase
         $this->assertSame(2, PushSubscription::active()->count());
     }
 
+    public function test_browser_push_is_skipped_when_no_vapid_pair_is_configured(): void
+    {
+        config(['webpush.vapid.public_key' => '', 'webpush.vapid.private_key' => '']);
+        Http::fake();
+        $u = User::factory()->create();
+        PushSubscription::create(['user_id' => $u->id, 'endpoint' => 'https://push.example/abc', 'p256dh' => 'k', 'auth' => 'a', 'token_type' => 'web']);
+
+        WebPushService::send($u->id, 'Hi', 'there', '/me');
+
+        Http::assertNothingSent();
+        $this->assertTrue(PushSubscription::first()->is_active, 'a missing key is not a dead subscription');
+    }
+
+    public function test_webpush_vapid_command_prints_a_usable_pair(): void
+    {
+        $this->artisan('webpush:vapid')
+            ->expectsOutputToContain('VAPID_PUBLIC_KEY=')
+            ->expectsOutputToContain('VAPID_PRIVATE_KEY=')
+            ->assertSuccessful();
+    }
+
     public function test_apns_delivery_posts_to_apple_with_the_provider_jwt_and_topic(): void
     {
         $this->apnsConfigured();

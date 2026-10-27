@@ -77,12 +77,13 @@ x-laravel-env: &laravel-env
         MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Bethany House}
         # Web Push Notifications. The key pair lives only in the host .env
         # (audit backlog 2026-08-08: the previous inline default was a committed
-        # private key; it must be rotated — `php artisan webpush:vapid`).
-        # Compose refuses to start without the pair rather than fall back.
-        VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY is required (php artisan webpush:vapid)}
-        VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY is required (php artisan webpush:vapid)}
+        # private key; generate a fresh pair with `php artisan webpush:vapid`).
+        # Until the pair is set, browser push is off and the API logs one
+        # warning per skipped delivery; everything else runs.
+        VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+        VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
         VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@bethanyhouse.co.ke}
-        VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY is required (php artisan webpush:vapid)}
+        VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
         # Native push (native apps programme, Step 2) — optional until the apps ship.
         APNS_KEY_ID: ${APNS_KEY_ID:-}
         APNS_TEAM_ID: ${APNS_TEAM_ID:-}

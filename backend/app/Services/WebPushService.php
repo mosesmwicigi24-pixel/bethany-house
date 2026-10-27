@@ -97,6 +97,14 @@ class WebPushService
 
         if ($webSubscriptions->isEmpty()) return;
 
+        // No key pair → browser push is off (the console also stops subscribing
+        // when the public key is empty). Nothing else is affected.
+        if (config('webpush.vapid.public_key') === '' || config('webpush.vapid.private_key') === ''
+            || config('webpush.vapid.public_key') === null || config('webpush.vapid.private_key') === null) {
+            Log::warning('[WebPush] VAPID keys not configured; browser push skipped', ['user_id' => $userId]);
+            return;
+        }
+
         $auth = [
             'VAPID' => [
                 'subject'    => config('webpush.vapid.subject'),
