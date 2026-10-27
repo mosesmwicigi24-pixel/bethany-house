@@ -60,3 +60,21 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | App-link association files | DONE, 404 until identifiers set |
 | OpenAPI contract + CI check | DONE |
 | VAPID defaults removed | DONE; owner to add fresh pair to server .env |
+
+## Findings surfaced by the Apple port (for the backend/console backlog)
+
+| # | Finding | Where | Native handling |
+|---|---|---|---|
+| F1 | `POST production-orders/{id}/qc` validates `images[]` but never stores them: QC photos are dropped silently. | `ProductionController::qualityCheck` | QC screen directs photos to batch images, which persist. |
+| F2 | POS payment modal sends the M-PESA verification code under `code`; the server validates `transaction_code` (the order-detail path sends the right key). | `react-admin/src/pages/pos/components/PaymentModal.tsx`, `PaymentController::verifyMpesa` | App sends `transaction_code`. UNKNOWN whether the console path ever worked. |
+| F3 | `GET suppliers/export` answers JSON with a `// TODO: Generate Excel/CSV`. | `SupplierController` | Saved as `.json`. |
+| F4 | `pos/reports/eod-admin/{id}` detail totals are raw sums across currencies while the list uses `MoneyByCurrency`. | `PosController` | Shown as plain figures with a caption. Same defect family as the Step 5 currency fixes. |
+| F5 | `pos/reports/user-eod` totals carry no currency key. | `PosController` | Labelled in the outlet's currency. |
+| F6 | `GET orders/export` is gated `orders.view` + step-up only; the console's CSV button is a no-op (backlog Q-5). | `routes/api.php` | Native export works through the same route. |
+| F7 | Supplier document rows carry no download URL. | `SupplierController::documents` | Listed, not opened. |
+
+## Deliberately not ported
+
+- Kiosk mode (door device): out of scope on Mac and phone; a tablet-only mode for Step 5 / Step 7.
+- `POST database/wipe`: the most dangerous endpoint; stays console-only until a confirm-phrase + re-auth design is agreed.
+- Comms AI assist rail and per-message translate; order handoff page; mention autocomplete in comment threads; drag-and-drop reorder (move up/down buttons call the same endpoints).

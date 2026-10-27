@@ -306,6 +306,10 @@ signed-in user, purged on sign-out or token revocation.
 | B12 | Money fields returned as JSON strings from four endpoints (backlog) | Medium | Typed clients must parse decimals as strings everywhere; never as float. |
 | B13 | Mobile shell: `trail` posts copy the bearer token out of `localStorage` into SecureStore; `open-external` never sent; `trail:state` never read by the page | Low | Moot once native. |
 
+## 6c. Step 3 status (2026-10-27)
+
+Branch `feat/apple-step3`, PR #515: one Swift package (BethanyKit + BethanyUI, ~34k lines) and two app targets. Every console route except the order handoff page has a native SwiftUI screen registered; the remainder reach the signed-in console page through the in-app bridge. Per-screen status, the port's backend findings (F1–F7) and the deliberate omissions are in `docs/NATIVE_APPS_CHECKLIST.md`. Nothing has been compiled: no Xcode in the authoring environment.
+
 ## 7. Environmental blockers (stated now so nothing is over-claimed later)
 
 - No Xcode / Swift toolchain in this environment: Swift sources can be written
