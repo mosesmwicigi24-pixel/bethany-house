@@ -24,6 +24,7 @@ class EmployeeProfile extends Model
         'directory_show_phone', 'directory_show_email', 'directory_show_birthday',
         'national_id_no', 'kra_pin', 'nssf_no', 'shif_no',
         'emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relationship',
+        'emergency_contact_2_name', 'emergency_contact_2_phone', 'emergency_contact_2_relationship',
         'pay_method', 'mpesa_phone', 'bank_name', 'bank_branch', 'bank_account_name', 'bank_account_no',
         'notes', 'created_by', 'updated_by',
     ];

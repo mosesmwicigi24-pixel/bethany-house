@@ -36,8 +36,12 @@ class CustomerPhone implements ValidationRule
     /** @var string[] */
     private array $alreadyStored;
 
-    public function __construct(string|array|null $alreadyStored = null)
+    /** Whose number this is, for the messages ("the customer's", "their contact's"). */
+    private string $whose;
+
+    public function __construct(string|array|null $alreadyStored = null, string $whose = "the customer's")
     {
+        $this->whose = $whose;
         $this->alreadyStored = array_values(array_filter(array_map(
             fn ($v) => trim((string) $v), (array) $alreadyStored), fn ($v) => $v !== ''));
     }
@@ -67,7 +71,7 @@ class CustomerPhone implements ValidationRule
             return;
         }
         foreach ($parts as $part) {
-            if ($message = self::problemWith($part)) {
+            if ($message = self::problemWith($part, $this->whose)) {
                 $fail(count($parts) > 1 ? "{$part}: {$message}" : $message);
                 return;
             }
@@ -75,7 +79,7 @@ class CustomerPhone implements ValidationRule
     }
 
     /** Why one number is not a real phone, or null when it is. */
-    private static function problemWith(string $raw): ?string
+    private static function problemWith(string $raw, string $whose = "the customer's"): ?string
     {
         $e164 = Phone::e164($raw);
         $digitsTyped = preg_replace('/\D/', '', $raw);
@@ -96,7 +100,7 @@ class CustomerPhone implements ValidationRule
             return 'That is not a full phone number. Enter it with the leading 0 (0722 123 456), or with + and the country code.';
         }
         if (self::isPlaceholder($digits)) {
-            return 'That looks like a placeholder, not the customer\'s number. Leave the phone empty if they have none.';
+            return "That looks like a placeholder, not {$whose} number. Leave the phone empty if they have none.";
         }
 
         return null;

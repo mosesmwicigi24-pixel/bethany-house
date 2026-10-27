@@ -7,12 +7,15 @@ use App\Models\EmployeeProfile;
 use App\Models\PublicHoliday;
 use App\Models\StaffDocument;
 use App\Models\User;
+use App\Rules\CustomerPhone;
 use App\Services\ActivityLogService;
+use App\Support\Phone;
 use App\Support\SignedFiles;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * People (Bethany People PR 2): the employee file, staff documents and the
@@ -34,9 +37,7 @@ class PeopleController extends Controller
         'hire_date'                      => 'nullable|date',
         'end_date'                       => 'nullable|date|after_or_equal:hire_date',
         'date_of_birth'                  => 'nullable|date|before:today',
-        'emergency_contact_name'         => 'nullable|string|max:120',
-        'emergency_contact_phone'        => 'nullable|string|max:32',
-        'emergency_contact_relationship' => 'nullable|string|max:60',
+        // Emergency contacts: contactRules() — they need the values on file.
         'pay_method'                     => 'nullable|in:mpesa,bank,cash',
         'bank_name'                      => 'nullable|string|max:80',
         'bank_branch'                    => 'nullable|string|max:80',
@@ -114,14 +115,15 @@ class PeopleController extends Controller
         return response()->json(['person' => $this->file($person, $request->user())]);
     }
 
-    /** PUT /people/{user} — the non-sensitive part of the file (hr.edit). */
+    /** PUT /people/{user} — the non-sensitive part of the file (hr.edit). Partial: only the keys sent change. */
     public function update(Request $request, int $user): JsonResponse
     {
         $person    = $this->findVisible($request->user(), $user);
-        $validated = $request->validate(self::PROFILE_RULES);
+        $profile   = EmployeeProfile::firstOrNew(['user_id' => $person->id]);
+        $validated = $request->validate(self::PROFILE_RULES + $this->contactRules($profile), $this->contactMessages());
 
-        $profile = EmployeeProfile::firstOrNew(['user_id' => $person->id]);
-        $profile->fill($validated);
+        $profile->fill($this->normaliseContacts($validated, $profile));
+        $this->assertContactsNamed($profile);
         if (!$profile->exists) {
             $profile->created_by = $request->user()->id;
         }
@@ -249,14 +251,13 @@ class PeopleController extends Controller
     /** PUT /me/file — only the fields a person keeps about themselves. */
     public function updateMyFile(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'emergency_contact_name'         => 'nullable|string|max:120',
-            'emergency_contact_phone'        => 'nullable|string|max:32',
-            'emergency_contact_relationship' => 'nullable|string|max:60',
-            'date_of_birth'                  => 'nullable|date|before:today',
-        ]);
-        $profile = EmployeeProfile::firstOrNew(['user_id' => $request->user()->id]);
-        $profile->fill($validated);
+        $profile   = EmployeeProfile::firstOrNew(['user_id' => $request->user()->id]);
+        $validated = $request->validate(
+            ['date_of_birth' => 'nullable|date|before:today'] + $this->contactRules($profile),
+            $this->contactMessages(),
+        );
+        $profile->fill($this->normaliseContacts($validated, $profile));
+        $this->assertContactsNamed($profile);
         if (!$profile->exists) {
             $profile->created_by = $request->user()->id;
         }
@@ -339,6 +340,88 @@ class PeopleController extends Controller
         return response()->json(['message' => 'Holiday removed.']);
     }
 
+    // ── Emergency contacts ──────────────────────────────────────────────────
+
+    /** The two contacts on the file: the first, and the one to try when the first does not answer. */
+    private const CONTACTS = ['emergency_contact', 'emergency_contact_2'];
+
+    /**
+     * One real phone per contact, on the hub's one phone rule
+     * (App\Rules\CustomerPhone over Phone::e164, which mirrors the SQL
+     * normalize_phone the reports read). A number already on file may be sent
+     * back unchanged without passing — the same allowance the till makes —
+     * so a legacy value never blocks saving the rest of the contact.
+     */
+    private function contactRules(EmployeeProfile $current): array
+    {
+        $rules = [];
+        foreach (self::CONTACTS as $c) {
+            $stored = $current->exists ? $current->{"{$c}_phone"} : null;
+            $rules["{$c}_name"] = ['nullable', 'string', 'max:120', "required_with:{$c}_phone"];
+            $rules["{$c}_phone"] = ['bail', 'nullable', 'string', 'max:32',
+                function (string $attribute, mixed $value, \Closure $fail) use ($stored) {
+                    $raw = trim((string) $value);
+                    if ($raw === '' || $raw === trim((string) $stored)) {
+                        return;
+                    }
+                    if (preg_match('/[A-Za-z]/', $raw)) {
+                        $fail('That looks like a note, not a phone number. Enter the number only.');
+                    } elseif (preg_match('/[\/,]/', $raw)) {
+                        $fail('One number per contact. Put another number in the second contact.');
+                    }
+                },
+                new CustomerPhone($stored, "their contact's"),
+            ];
+            $rules["{$c}_relationship"] = ['nullable', 'string', 'max:60'];
+        }
+
+        return $rules;
+    }
+
+    private function contactMessages(): array
+    {
+        $named = 'Add a name for this number, so whoever calls knows who will answer.';
+
+        return collect(self::CONTACTS)->mapWithKeys(fn ($c) => ["{$c}_name.required_with" => $named])->all();
+    }
+
+    /** Phones to E.164 (+254…); a value already on file stays exactly as stored; blanks become null. */
+    private function normaliseContacts(array $validated, EmployeeProfile $current): array
+    {
+        foreach (self::CONTACTS as $c) {
+            foreach (['name', 'relationship'] as $f) {
+                if (array_key_exists("{$c}_{$f}", $validated)) {
+                    $v = trim((string) $validated["{$c}_{$f}"]);
+                    $validated["{$c}_{$f}"] = $v === '' ? null : $v;
+                }
+            }
+            $k = "{$c}_phone";
+            if (!array_key_exists($k, $validated)) {
+                continue;
+            }
+            $v = trim((string) $validated[$k]);
+            if ($v === '') {
+                $validated[$k] = null;
+            } elseif ($current->exists && $v === trim((string) $current->{$k})) {
+                $validated[$k] = $current->{$k};
+            } else {
+                $validated[$k] = Phone::e164($v) ?? $v;   // CustomerPhone has already proven it reads
+            }
+        }
+
+        return $validated;
+    }
+
+    /** A number with nobody's name on it is no use in an emergency — including after a partial update. */
+    private function assertContactsNamed(EmployeeProfile $profile): void
+    {
+        foreach (self::CONTACTS as $c) {
+            if (filled($profile->{"{$c}_phone"}) && blank($profile->{"{$c}_name"})) {
+                throw ValidationException::withMessages(["{$c}_name" => $this->contactMessages()["{$c}_name.required_with"]]);
+            }
+        }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     /** Staff this caller may see: own outlets, or everyone with outlets.all_access; always themselves. */
@@ -389,6 +472,9 @@ class PeopleController extends Controller
                 'emergency_contact_name'         => $p?->emergency_contact_name,
                 'emergency_contact_phone'        => $p?->emergency_contact_phone,
                 'emergency_contact_relationship' => $p?->emergency_contact_relationship,
+                'emergency_contact_2_name'         => $p?->emergency_contact_2_name,
+                'emergency_contact_2_phone'        => $p?->emergency_contact_2_phone,
+                'emergency_contact_2_relationship' => $p?->emergency_contact_2_relationship,
                 'pay_method'                     => $p?->pay_method,
                 'bank_name'                      => $p?->bank_name,
                 'bank_branch'                    => $p?->bank_branch,
@@ -413,6 +499,8 @@ class PeopleController extends Controller
             'masked'     => collect(EmployeeProfile::SENSITIVE)->mapWithKeys(fn ($k) => [$k => EmployeeProfile::mask($p?->{$k})])->all(),
             'can'        => [
                 'edit'           => !$self && $viewer->can('hr.edit'),
+                // The emergency contact: the file keeper, or the person themselves (PUT /me/file).
+                'edit_contact'   => $self || $viewer->id === $person->id || $viewer->can('hr.edit'),
                 'view_sensitive' => $self || $viewer->can('hr.view_sensitive'),
                 'edit_sensitive' => !$self && $viewer->can('hr.edit') && $viewer->can('hr.view_sensitive'),
             ],
