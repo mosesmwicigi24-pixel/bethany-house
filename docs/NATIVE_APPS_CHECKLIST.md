@@ -32,9 +32,9 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | Approvals (inbox, mine, sign, reject, resubmit) | N | — | — | — | — |
 | Notifications | N | — | — | — | — |
 | Messages | B | — | — | — | — |
-| Me: Today | B | — | — | — | — |
-| Me: Updates, Checklists, Handbook, Training, To sign, To-dos, Colleagues | B | — | — | — | — |
-| Me: Clock in/out, shifts, leave, hours, payslips, advances | B | — | — | — | — |
+| Me: Today | N | — | — | — | — |
+| Me: Updates, Checklists, Handbook, Training, To sign, To-dos, Colleagues | N | — | — | — | — |
+| Me: Clock in/out (geofence; trail iOS-only), shifts, leave, hours, payslips, advances | N | — | — | — | — |
 | Profile (sessions, devices, password) | N (2FA/passkey/PIN management: B) | — | — | — | — |
 | People: overview, requests, attendance, roster, timesheets, leave, files, payroll, checklists | B | — | — | — | — |
 | Catalog: products, categories | B | — | — | — | — |

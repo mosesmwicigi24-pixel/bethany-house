@@ -10,6 +10,7 @@ public enum Features {
     public static func registerAll() {
         WorkspaceFeature.register()
         ProfileFeature.register()
+        MeFeature.register()
         // Modules added by Steps 3–5 register below; order is irrelevant.
         for register in extraRegistrars { register() }
     }
