@@ -4,13 +4,14 @@ import { payrollApi, kes, KIND_LABEL, type Allowance, type StructureKind } from 
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
 import type { ApiError } from "@/types";
+import { CardHead, Icon, fmtDay } from "./fileKit";
 
 /**
  * Pay structure on the employee file (People PR 6). Loaded only when the
  * viewer asks: the server wants hr.view_sensitive and a step-up, and logs the
  * read. A change is a new dated row; the history stays.
  */
-export function PayStructureCard({ userId, canView }: { userId: number; canView: boolean }) {
+export function PayStructureCard({ userId, canView, titleId }: { userId: number; canView: boolean; titleId?: string }) {
     const qc = useQueryClient();
     const toast = useToastStore();
     const [opened, setOpened] = useState(false);
@@ -26,29 +27,30 @@ export function PayStructureCard({ userId, canView }: { userId: number; canView:
     const setA = (i: number, patch: Partial<Allowance>) => setDraft(d => ({ ...d, allowances: d.allowances.map((a, k) => (k === i ? { ...a, ...patch } : a)) }));
 
     return (
-        <div className="card">
-            <div className="card-header flex items-center justify-between">
-                <h3 className="font-semibold text-sm text-surface-900">Pay</h3>
-                {opened && data?.can_edit && !adding && <button onClick={() => setAdding(true)} className="btn-secondary btn-sm">New rate from a date</button>}
-            </div>
+        <div className="card h-full" aria-labelledby={titleId}>
+            <CardHead icon="wallet" tone="success" titleId={titleId} title="Pay"
+                subtitle={opened && data ? "Each change is a new dated rate; the history stays." : "Salary or rate, and allowances."}
+                actions={opened && data?.can_edit && !adding ? <button onClick={() => setAdding(true)} className="btn-secondary btn-sm"><Icon name="plus" className="w-3.5 h-3.5" strokeWidth={2.2} />New rate</button> : undefined} />
             <div className="card-body">
                 {!opened ? (
-                    <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm text-surface-500">Salary or rate and allowances. Opening this asks you to confirm it is you and is recorded.</p>
-                        <button onClick={() => setOpened(true)} className="btn-secondary btn-sm shrink-0">Show pay</button>
+                    <div className="flex flex-col items-center text-center gap-3 rounded-2xl border border-dashed border-surface-300 bg-surface-50/60 px-4 py-7">
+                        <span className="w-11 h-11 rounded-full bg-white text-surface-500 flex items-center justify-center shadow-inner-sm"><Icon name="lock" className="w-5 h-5" /></span>
+                        <p className="text-sm text-surface-500 max-w-xs">Pay is kept closed. Opening it asks you to confirm it is you, and is recorded.</p>
+                        <button onClick={() => setOpened(true)} className="btn-secondary btn-sm"><Icon name="eye" className="w-3.5 h-3.5" />Show pay</button>
                     </div>
-                ) : isFetching && !data ? <Spinner size="sm" /> : error ? (
+                ) : isFetching && !data ? <div className="space-y-2" aria-busy="true"><div className="skeleton h-16 w-full rounded-2xl" /><div className="skeleton h-16 w-full rounded-2xl" /></div> : error ? (
                     <p className="text-sm text-danger">{(error as ApiError).message}</p>
                 ) : (
                     <div className="space-y-3">
                         {data?.data.length === 0 && !adding && <p className="text-sm text-surface-500">No pay structure yet; payroll will list this person as unpayable until one is set.</p>}
                         {data?.data.map((s, i) => (
-                            <div key={s.id} className={i === 0 ? "rounded-xl border border-brand-200 bg-brand-50/40 p-3" : "rounded-xl border border-line p-3 opacity-70"}>
-                                <div className="flex items-baseline justify-between gap-3">
+                            <div key={s.id} className={i === 0 ? "rounded-2xl border border-success-200 bg-success-50/50 p-4" : "rounded-2xl border border-line p-4 opacity-75"}>
+                                <div className="flex items-start justify-between gap-3">
                                     <div>
-                                        <p className="text-sm font-semibold text-surface-900">{KIND_LABEL[s.kind]} · KES {kes(s.base_amount)}</p>
-                                        <p className="text-2xs text-surface-500">From {s.effective_from}{i === 0 ? " · current" : ""}</p>
+                                        <p className="text-2xs font-semibold uppercase tracking-wider text-surface-500">{KIND_LABEL[s.kind]}</p>
+                                        <p className="text-xl font-extrabold tabular-nums text-surface-900 tracking-tight">KES {kes(s.base_amount)}</p>
                                     </div>
+                                    <span className={i === 0 ? "badge-success" : "badge-neutral"}>{i === 0 ? "Current" : "Earlier"} · from {fmtDay(s.effective_from)}</span>
                                 </div>
                                 {s.allowances.length > 0 && (
                                     <ul className="mt-2 text-xs text-surface-700 space-y-0.5">

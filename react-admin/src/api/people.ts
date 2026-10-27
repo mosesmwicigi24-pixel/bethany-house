@@ -61,6 +61,10 @@ export interface EmployeeProfileFields {
     emergency_contact_name: string | null;
     emergency_contact_phone: string | null;
     emergency_contact_relationship: string | null;
+    /** The second contact — who to try when the first does not answer. */
+    emergency_contact_2_name: string | null;
+    emergency_contact_2_phone: string | null;
+    emergency_contact_2_relationship: string | null;
     pay_method: PayMethod | null;
     pay_group_id: number | null;
     bank_name: string | null;
@@ -69,6 +73,13 @@ export interface EmployeeProfileFields {
     notes: string | null;
     updated_at: string | null;
 }
+
+export type EmergencyContactKey =
+    | "emergency_contact_name" | "emergency_contact_phone" | "emergency_contact_relationship"
+    | "emergency_contact_2_name" | "emergency_contact_2_phone" | "emergency_contact_2_relationship";
+
+/** Country dialling codes for phone entry (the public reference list the storefront reads). */
+export interface DialCountry { code: string; name: string; phone_code: string | null; flag: string | null }
 
 export type SensitiveKey = "national_id_no" | "kra_pin" | "nssf_no" | "shif_no" | "mpesa_phone" | "bank_account_no";
 export type Sensitive = Record<SensitiveKey, string | null>;
@@ -87,7 +98,8 @@ export interface PersonFile {
     roles: string[];
     profile: EmployeeProfileFields;
     masked: Sensitive;
-    can: { edit: boolean; view_sensitive: boolean; edit_sensitive: boolean };
+    /** edit_contact: the file keeper, or the person themselves (saved through My file). */
+    can: { edit: boolean; view_sensitive: boolean; edit_sensitive: boolean; edit_contact?: boolean };
     documents: StaffDocument[];
     recognitions: Recognition[];
     recognition_points: number;
@@ -146,13 +158,15 @@ export const peopleApi = {
 
     // ── My own file ──
     myFile: () => get<{ person: PersonFile }>("/v1/admin/me/file"),
-    updateMyFile: (data: Partial<Pick<EmployeeProfileFields, "emergency_contact_name" | "emergency_contact_phone" | "emergency_contact_relationship" | "date_of_birth">>) =>
+    updateMyFile: (data: Partial<Pick<EmployeeProfileFields, EmergencyContactKey | "date_of_birth">>) =>
         put<{ message: string; person: PersonFile }>("/v1/admin/me/file", data),
     mySensitive: () => get<{ sensitive: Sensitive }>("/v1/admin/me/file/sensitive"),
     fetchMyDocumentBlob: async (docId: number) => {
         const file = await fetchSignedFile(`/api/v1/admin/me/file/documents/${docId}`);
         return { url: URL.createObjectURL(file.blob), mimeType: file.contentType };
     },
+
+    dialCountries: () => get<{ data: DialCountry[] }>("/v1/countries"),
 
     // ── Public holidays ──
     holidays: (year: number) => get<{ data: Holiday[]; year: number }>("/v1/admin/holidays", { params: { year: String(year) } }),
