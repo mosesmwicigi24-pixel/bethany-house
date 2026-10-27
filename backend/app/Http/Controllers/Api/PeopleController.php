@@ -400,6 +400,15 @@ class PeopleController extends Controller
             'recognitions' => \App\Models\Post::with('author:id,first_name,last_name')->where('kind', 'recognition')->where('recipient_id', $person->id)->published()->orderByDesc('published_at')->orderByDesc('id')->limit(10)->get()
                 ->map(fn ($r) => ['id' => $r->id, 'body' => $r->body, 'points' => $r->points, 'at' => $r->published_at?->toIso8601String(), 'by' => $r->author ? trim("{$r->author->first_name} {$r->author->last_name}") : null])->values(),
             'recognition_points' => (int) \App\Models\Post::where('kind', 'recognition')->where('recipient_id', $person->id)->published()->sum('points'),
+            // Training (People C4 part 2): every course for this person, passed or not.
+            'courses' => \App\Models\Course::published()->visibleTo($person)->orderByDesc('required')->orderBy('title')->get()->map(function ($c) use ($person) {
+                $p = \App\Models\CourseProgress::where('course_id', $c->id)->where('user_id', $person->id)->first();
+                return ['id' => $c->id, 'title' => $c->title, 'required' => $c->required, 'passed' => (bool) ($p?->passed), 'best_score' => $p?->best_score, 'attempts' => (int) ($p?->attempts ?? 0), 'completed_at' => $p?->completed_at?->toIso8601String()];
+            })->values(),
+            // Signing requests (C4 part 2): what waits and what was signed or declined.
+            'signing' => \App\Models\SigningRequest::with('requester:id,first_name,last_name')->where('user_id', $person->id)->orderByDesc('id')->limit(20)->get()
+                ->map(fn ($r) => ['id' => $r->id, 'kind' => $r->kind, 'title' => $r->title, 'status' => $r->status, 'due_at' => $r->due_at?->toIso8601String(), 'signed_at' => $r->signed_at?->toIso8601String(), 'note' => $r->note,
+                    'requested_by' => $r->requester ? trim("{$r->requester->first_name} {$r->requester->last_name}") : null, 'signed_document_id' => $r->signed_document_id])->values(),
             // Masked always; the full values are /sensitive behind step-up.
             'masked'     => collect(EmployeeProfile::SENSITIVE)->mapWithKeys(fn ($k) => [$k => EmployeeProfile::mask($p?->{$k})])->all(),
             'can'        => [

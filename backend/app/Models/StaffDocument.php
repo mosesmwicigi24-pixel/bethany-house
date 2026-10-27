@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class StaffDocument extends Model
 {
-    public const KINDS = ['national_id', 'kra_pin', 'nssf', 'shif', 'contract', 'certificate', 'passport_photo', 'medical', 'other'];
+    public const KINDS = ['national_id', 'kra_pin', 'nssf', 'shif', 'contract', 'certificate', 'passport_photo', 'medical', 'signed', 'other']; // signed: a signing record the hub wrote (C4)
 
     protected $fillable = [
         'user_id', 'kind', 'title', 'disk', 'path', 'mime_type', 'size_bytes', 'original_name',

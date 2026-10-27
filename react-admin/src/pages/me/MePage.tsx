@@ -6,6 +6,8 @@ import { leaveApi } from "@/api/leave";
 import { peopleC1Api } from "@/api/people-c1";
 import { updatesApi } from "@/api/updates";
 import { formsApi } from "@/api/forms";
+import { signingApi } from "@/api/signing";
+import { coursesApi } from "@/api/courses";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { TeamNow } from "@/pages/people/OverviewPage";
@@ -21,6 +23,8 @@ export default function MePage() {
     const { data: feed } = useQuery({ queryKey: ["updates", "", 1], queryFn: () => updatesApi.feed(1), staleTime: 60_000 });
     const { data: forms } = useQuery({ queryKey: ["forms-today", ""], queryFn: () => formsApi.today(), staleTime: 60_000 });
     const formsDue = (forms?.data ?? []).filter(r => r.template.kind === "checklist" && !["submitted", "late"].includes(r.state));
+    const { data: signing } = useQuery({ queryKey: ["my-signing"], queryFn: () => signingApi.mine(), staleTime: 60_000 });
+    const { data: courses } = useQuery({ queryKey: ["courses"], queryFn: () => coursesApi.list(), staleTime: 60_000 });
     const active = status?.active_entry ?? null;
     const annual = leave?.balances.find(b => b.type.code === "annual") ?? leave?.balances.find(b => b.available !== null);
     const hm = (m: number) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
@@ -31,6 +35,8 @@ export default function MePage() {
         { to: "/me/payslips", label: "My pay", hint: "payslips" },
         { to: "/forms", label: "Checklists & forms", hint: formsDue.length ? `${formsDue.length} to do` : forms ? "all done" : undefined },
         { to: "/handbook", label: "Handbook", hint: "policies, how-tos" },
+        { to: "/courses", label: "Training", hint: courses ? (courses.to_do ? `${courses.to_do} to complete` : "all done") : undefined },
+        ...(signing && signing.pending > 0 ? [{ to: "/me/sign", label: "To sign", hint: `${signing.pending} waiting` }] : []),
         { to: "/me/advances", label: "Advances & loans" },
         { to: "/profile", label: "My file", hint: "contact, documents, identifiers" },
     ];

@@ -33,7 +33,11 @@ export interface SwapRequest {
     decided_at: string | null;
 }
 
+/** Labour cost (People C4 part 2): an estimate from pay structures, present only for payroll.view. */
+export interface RosterCost { currency: string; total: number; by_day: Record<string, number>; by_person: Record<string, number>; per_shift: Record<string, number | null>; uncosted_shifts: number; basis: string }
+
 export interface RosterWeek {
+    cost: RosterCost | null;
     outlet: { id: number; name: string; operating_hours: Record<string, { open?: string; close?: string }> | null };
     week_start: string;
     week_end: string;

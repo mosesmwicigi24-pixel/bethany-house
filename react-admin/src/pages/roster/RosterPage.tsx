@@ -130,6 +130,7 @@ export default function RosterPage() {
                                         </th>
                                     ))}
                                     <th className="px-2 py-2 text-right text-2xs font-semibold uppercase tracking-wider text-surface-400 w-16">Hours</th>
+                                    {data.cost && <th className="px-2 py-2 text-right text-2xs font-semibold uppercase tracking-wider text-surface-400 w-24" title={data.cost.basis}>Cost (est.)</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-line">
@@ -165,9 +166,18 @@ export default function RosterPage() {
                                             </td>
                                         ))}
                                         <td className="px-2 py-2 text-right tabular-nums text-surface-700 align-top">{data.hours_by_user[String(m.id)] ?? 0}</td>
+                                        {data.cost && <td className="px-2 py-2 text-right tabular-nums text-surface-500 align-top text-xs">{data.cost.by_person[String(m.id)] != null ? kes(data.cost.by_person[String(m.id)]) : "—"}</td>}
                                     </tr>
                                 ))}
-                                {data.members.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-sm text-surface-400">Nobody is assigned to this outlet yet (Settings › Users).</td></tr>}
+                                {data.cost && (
+                                    <tr className="bg-surface-50 text-xs">
+                                        <td className="px-3 py-2 font-semibold text-surface-700">Labour cost (estimate)</td>
+                                        {data.days.map(d => <td key={d} className="px-1 py-2 text-center tabular-nums text-surface-600">{data.cost!.by_day[d] != null ? kes(data.cost!.by_day[d]) : ""}</td>)}
+                                        <td />
+                                        <td className="px-2 py-2 text-right tabular-nums font-semibold text-surface-800">{kes(data.cost.total)}{data.cost.uncosted_shifts ? <span className="block font-normal text-surface-400" title="Shifts for people without a pay structure">{data.cost.uncosted_shifts} uncosted</span> : null}</td>
+                                    </tr>
+                                )}
+                                {data.members.length === 0 && <tr><td colSpan={10} className="p-6 text-center text-sm text-surface-400">Nobody is assigned to this outlet yet (Settings › Users).</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -227,6 +237,8 @@ export default function RosterPage() {
         </div>
     );
 }
+
+const kes = (v: number) => "KES " + Math.round(v).toLocaleString("en-KE");
 
 /** Shift templates (People C4): named start/end/label pairs the shift modal offers as chips. roster.manage adds and removes. */
 function TemplatesModal({ outletId, onClose }: { outletId: number; onClose: () => void }) {

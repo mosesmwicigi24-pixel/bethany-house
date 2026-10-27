@@ -73,6 +73,8 @@ export const NAV: NavGroup[] = [
             { label: "Updates", href: "/updates", icon: "notifications" },
             { label: "Checklists", href: "/forms", icon: "approvals" },
             { label: "Handbook", href: "/handbook", icon: "people" },
+            { label: "Training", href: "/courses", icon: "approvals" },
+            { label: "To sign", href: "/me/sign", icon: "people" },
             { label: "Clock in", href: "/me/clock", icon: "clock" },
             { label: "My shifts", href: "/me/shifts", icon: "calendar" },
             { label: "My leave", href: "/me/leave", icon: "calendar" },
