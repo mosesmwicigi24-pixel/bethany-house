@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { advancesApi, kes, saveBlob, ADVANCE_TONE, ADVANCE_LABEL, RETURN_LABEL, type Advance, type ReturnKind } from "@/api/payroll";
-import { peopleApi } from "@/api/people";
+import PersonPicker from "@/components/people/PersonPicker";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
@@ -20,7 +20,6 @@ export function AdvancesPanel() {
     const [form, setForm] = useState<{ note: string; instalment: string; method: Method; reference: string; amount: string }>({ note: "", instalment: "", method: "mpesa", reference: "", amount: "" });
     const [adding, setAdding] = useState(false);
     const [newForm, setNewForm] = useState<{ user_id: string; kind: "advance" | "loan"; amount: string; instalment: string; reason: string }>({ user_id: "", kind: "advance", amount: "", instalment: "", reason: "" });
-    const { data: people } = useQuery({ queryKey: ["people", "all-for-advances"], queryFn: () => peopleApi.list({ per_page: "200" }), enabled: adding });
     const refresh = () => void qc.invalidateQueries({ queryKey: ["advances"] });
     const onErr = (e: ApiError) => toast.error(e.message);
     const done = (r: { message: string }) => { toast.success(r.message); setAct(null); setAdding(false); refresh(); };
@@ -101,7 +100,7 @@ export function AdvancesPanel() {
                 <Modal open onClose={() => setAdding(false)} size="sm" title="Record an advance or loan"
                     footer={<button className="btn-primary btn-sm" disabled={create.isPending || !newForm.user_id || !newForm.amount || !newForm.reason} onClick={() => create.mutate()}>Record as approved</button>}>
                     <div className="space-y-2">
-                        <label className="text-xs text-surface-500">Person<select className="input mt-1" value={newForm.user_id} onChange={e => setNewForm(f => ({ ...f, user_id: e.target.value }))}><option value="">—</option>{(people?.data ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+                        <div className="text-xs text-surface-500">Person<PersonPicker value={newForm.user_id} onChange={(id) => setNewForm(f => ({ ...f, user_id: id }))} /></div>
                         <label className="text-xs text-surface-500">Kind<select className="input mt-1" value={newForm.kind} onChange={e => setNewForm(f => ({ ...f, kind: e.target.value as "advance" | "loan" }))}><option value="advance">Advance (whole amount off next pay)</option><option value="loan">Loan (instalments)</option></select></label>
                         <label className="text-xs text-surface-500">Amount (KES)<input type="number" min={1} className="input mt-1" value={newForm.amount} onChange={e => setNewForm(f => ({ ...f, amount: e.target.value }))} /></label>
                         {newForm.kind === "loan" && <label className="text-xs text-surface-500">Repay per pay run (KES)<input type="number" min={1} className="input mt-1" value={newForm.instalment} onChange={e => setNewForm(f => ({ ...f, instalment: e.target.value }))} /></label>}
