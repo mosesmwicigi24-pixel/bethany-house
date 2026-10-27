@@ -940,6 +940,30 @@ class ChannelController extends Controller
         return response()->json(['results' => $results]);
     }
 
+    /**
+     * GET /channels/audiences (attendance.view_team, People C2) — message by
+     * work status: who is clocked in now and who is on today's published
+     * roster, in the caller's outlets (every outlet with outlets.all_access).
+     * The caller picks one and the console opens a space with those people.
+     */
+    public function audiences(Request $request)
+    {
+        $user = $request->user();
+        $outletIds = $user->can('outlets.all_access') ? null : DB::table('outlet_user')->where('user_id', $user->id)->pluck('outlet_id');
+        $present = fn ($users) => $users->filter(fn ($u) => $u->id !== $user->id && $u->status === 'active')
+            ->map(fn ($u) => ['id' => $u->id, 'name' => trim("{$u->first_name} {$u->last_name}")])->unique('id')->values();
+
+        $in = \App\Models\TimeEntry::with('user:id,first_name,last_name,status')->active()
+            ->when($outletIds !== null, fn ($q) => $q->whereIn('outlet_id', $outletIds))->get()->pluck('user')->filter();
+        $roster = \App\Models\Shift::with('user:id,first_name,last_name,status')->published()->whereNotNull('user_id')->where('date', today()->toDateString())
+            ->when($outletIds !== null, fn ($q) => $q->whereIn('outlet_id', $outletIds))->get()->pluck('user')->filter();
+
+        return response()->json(['audiences' => [
+            ['key' => 'clocked_in', 'label' => 'Everyone clocked in now', 'people' => $present($in)],
+            ['key' => 'on_roster',  'label' => "Everyone on today's roster", 'people' => $present($roster)],
+        ], 'date' => today()->toDateString()]);
+    }
+
     private function formatChannel(Channel $channel, int $currentUserId, bool $withMembers = false): array
     {
         $members = $channel->members ?? collect();

@@ -533,6 +533,13 @@ export const NAV: NavGroup[] = [
                 permission: "attendance.view_team",
             },
             {
+                label: "Automations",
+                href: "/settings/automations",
+                icon: "notifications",
+                // Read with attendance.view_team; saving needs settings.edit (People C2).
+                permission: "attendance.view_team",
+            },
+            {
                 label: "Holidays",
                 href: "/settings/holidays",
                 icon: "calendar",

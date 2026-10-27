@@ -4,6 +4,7 @@ import { useAuthStore } from "@/store/auth.store";
 import { useHomePath } from "@/hooks/useHomePath";
 import { Spinner } from "@/components/ui/Spinner";
 import { StartupProblem } from "@/components/auth/StartupProblem";
+import { kioskToken } from "@/api/people-c2";
 
 /**
  * Sends "/" and unknown addresses to the user's own home page (lib/homePath)
@@ -20,7 +21,8 @@ export function HomeRedirect() {
         if (isAuthenticated && !user) fetchMe();
     }, [isAuthenticated, user, fetchMe]);
 
-    if (!isAuthenticated) return <Navigate to="/login" replace />;
+    // A kiosk tablet (People C2) carries no sign-in; "/" is its board.
+    if (!isAuthenticated) return <Navigate to={kioskToken.get() ? "/kiosk" : "/login"} replace />;
 
     if (!user && startupError) return <StartupProblem />;
 

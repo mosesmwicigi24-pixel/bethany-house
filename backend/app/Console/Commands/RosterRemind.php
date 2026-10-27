@@ -70,7 +70,27 @@ class RosterRemind extends Command
             }
         }
 
-        $this->info($this->option('dry-run') ? 'Dry run.' : "Reminded {$sent}, nudged {$nudged}.");
+        // C2 automation: no punch N minutes after a published shift started → the manager, once per shift.
+        $missed = 0;
+        if ($auto = \App\Support\Automations::active('missed_shift')) {
+            foreach ($todays as $shift) {
+                if (!$shift->user || $shift->user->status !== 'active' || $shift->missed_alerted_at) continue;
+                $starts = $shift->startsAtCarbon();
+                if ($now->lt($starts->copy()->addMinutes((int) $auto['threshold'])) || $now->gte($shift->endsAtCarbon())) continue;
+                if (\App\Models\TimeEntry::where('user_id', $shift->user_id)->whereDate('clock_in_at', $now->toDateString())->exists()) continue;
+                $this->line("missed: #{$shift->id} {$shift->user->first_name}");
+                if ($this->option('dry-run')) continue;
+                $shift->forceFill(['missed_alerted_at' => $now])->save();
+                $name = trim("{$shift->user->first_name} {$shift->user->last_name}");
+                NotificationService::deliver(\App\Support\Automations::recipientsFor('missed_shift', $shift->user), new InAppNotification(
+                    title: "{$name} has not clocked in",
+                    body:  "Shift at {$shift->outlet?->name} started at {$starts->format('H:i')}; no punch {$auto['threshold']} minutes on.",
+                    actionUrl: '/people/overview', icon: 'clock', data: ['shift_id' => $shift->id, 'automation' => 'missed_shift']));
+                $missed++;
+            }
+        }
+
+        $this->info($this->option('dry-run') ? 'Dry run.' : "Reminded {$sent}, nudged {$nudged}, missed {$missed}.");
         return self::SUCCESS;
     }
 }

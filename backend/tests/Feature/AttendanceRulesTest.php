@@ -234,6 +234,7 @@ class AttendanceRulesTest extends TestCase
     public function test_auto_clock_out_after_a_maximum_length_and_the_daily_limit_alert(): void
     {
         AttendanceRules::save(['auto_clock_out_time' => '22:00', 'auto_clock_out_after_hours' => 12, 'daily_limit_hours' => 11]);
+        \App\Support\Automations::save('overtime_soon', ['enabled' => false]); // C2's own alert is proved in AutomationsKioskTest
         $boss = $this->staff(['attendance.view_team', 'attendance.manage']);
         $u = $this->staff([], $boss->id);
         Carbon::setTestNow('2026-03-02 19:30:00');

@@ -14,6 +14,8 @@ import { Field, FieldInput, FieldSelect, FieldTextarea } from "@/components/setu
 import type { TimeEntry } from "@/api/attendance";
 import type { ApiError } from "@/types";
 import { ClerkPinsPanel } from "@/components/security/ClerkPinsPanel";
+import { KiosksPanel } from "@/components/people/KiosksPanel";
+import { kiosksApi } from "@/api/people-c2";
 
 // ── Status display ────────────────────────────────────────────────────────────
 
@@ -185,6 +187,7 @@ export default function AttendancePage() {
     const [toDate, setToDate] = useState(search.get("date") ?? "");
     const [editing, setEditing] = useState<TimeEntry | null>(null);
     const [mapFor, setMapFor] = useState<TimeEntry | null>(null);
+    const [photoFor, setPhotoFor] = useState<TimeEntry | null>(null);
     const { data: trail } = useQuery({ queryKey: ["entry-trail", mapFor?.id], queryFn: () => peopleC1Api.trail(mapFor!.id), enabled: !!mapFor });
 
     const params: Record<string, string> = {
@@ -240,6 +243,7 @@ export default function AttendancePage() {
                 <div className="flex gap-2">
                     <Link to="/people/requests" className="btn-secondary btn-sm">Requests</Link>
                     <Link to="/settings/attendance-rules" className="btn-secondary btn-sm">Rules</Link>
+                    <Link to="/settings/automations" className="btn-secondary btn-sm">Automations</Link>
                 </div>
             </div>
 
@@ -385,6 +389,9 @@ export default function AttendancePage() {
                                                 <div><FlagChips entry={entry} /></div>
                                             </td>
                                             <td className="px-4 py-3 text-right whitespace-nowrap">
+                                                {(entry.photos?.in || entry.photos?.out) && (
+                                                    <button onClick={() => setPhotoFor(entry)} className="btn-ghost btn-sm text-xs" title="Kiosk photo">Photo</button>
+                                                )}
                                                 {(entry.trail_points || entry.clock_in_latitude != null) && (
                                                     <button onClick={() => setMapFor(entry)} className="btn-ghost btn-sm text-xs" title={entry.trail_points ? `${entry.trail_points} points on shift` : "Punch positions"}>
                                                         Map{entry.trail_points ? ` · ${entry.trail_points}` : ""}
@@ -417,15 +424,45 @@ export default function AttendancePage() {
                 )}
             </div>
 
+            {/* The tablets at the door (People C2) */}
+            <KiosksPanel />
+
             {/* Outlet manager: clear a clerk's forgotten terminal PIN (Phase 4C) */}
             <ClerkPinsPanel />
 
             {editing && <CorrectionModal entry={editing} onClose={() => setEditing(null)} />}
+            {photoFor && <PunchPhotos entry={photoFor} onClose={() => setPhotoFor(null)} />}
             {mapFor && (
                 <Modal open onClose={() => setMapFor(null)} size="lg" title={`${mapFor.user?.name ?? "Shift"} · ${formatDate(mapFor.clock_in_at)}`}>
                     {trail ? <TrailMap trail={trail} /> : <div className="flex items-center justify-center h-40"><Spinner size="lg" /></div>}
                 </Modal>
             )}
         </div>
+    );
+}
+
+/** The kiosk's pictures of a punch (People C2): fetched through short-lived signed links, in and out side by side. */
+function PunchPhotos({ entry, onClose }: { entry: TimeEntry; onClose: () => void }) {
+    const q = useQuery({
+        queryKey: ["punch-photos", entry.id],
+        queryFn: async () => ({
+            in: entry.photos?.in ? (await kiosksApi.photoLink(entry.id, "in")).url : null,
+            out: entry.photos?.out ? (await kiosksApi.photoLink(entry.id, "out")).url : null,
+        }),
+        staleTime: 60_000,
+    });
+    return (
+        <Modal open onClose={onClose} size="lg" title={`${entry.user?.name ?? "Punch"} · kiosk photos`}>
+            {q.isLoading ? <div className="flex items-center justify-center h-40"><Spinner size="lg" /></div> : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {(["in", "out"] as const).map(w => (
+                        <figure key={w} className="space-y-1">
+                            {q.data?.[w] ? <img src={q.data[w]!} alt={`Clock-${w} photo`} className="w-full rounded-xl bg-surface-100" /> : <div className="w-full aspect-[4/3] rounded-xl bg-surface-100 flex items-center justify-center text-sm text-surface-400">No photo</div>}
+                            <figcaption className="text-xs text-surface-500">{w === "in" ? `Clock in · ${formatTime(entry.clock_in_at)}` : `Clock out · ${entry.clock_out_at ? formatTime(entry.clock_out_at) : "—"}`}</figcaption>
+                        </figure>
+                    ))}
+                </div>
+            )}
+        </Modal>
     );
 }

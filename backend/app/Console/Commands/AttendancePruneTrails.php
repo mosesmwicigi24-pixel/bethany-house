@@ -18,7 +18,17 @@ class AttendancePruneTrails extends Command
         $q = LocationPing::where('recorded_at', '<', now()->subDays($days));
         $n = $q->count();
         if (!$this->option('dry-run') && $n) $q->delete();
-        $this->info(($this->option('dry-run') ? 'Would delete ' : 'Deleted ') . "{$n} point(s) older than {$days} days.");
+        // C2: kiosk punch photos live as long as the trails.
+        $photos = \App\Models\TimeEntry::where('clock_in_at', '<', now()->subDays($days))
+            ->where(fn ($q) => $q->whereNotNull('clock_in_photo_path')->orWhereNotNull('clock_out_photo_path'));
+        $p = $photos->count();
+        if (!$this->option('dry-run') && $p) {
+            foreach ($photos->cursor() as $e) {
+                foreach (array_filter([$e->clock_in_photo_path, $e->clock_out_photo_path]) as $path) \Illuminate\Support\Facades\Storage::disk('private')->delete($path);
+                $e->forceFill(['clock_in_photo_path' => null, 'clock_out_photo_path' => null])->saveQuietly();
+            }
+        }
+        $this->info(($this->option('dry-run') ? 'Would delete ' : 'Deleted ') . "{$n} point(s) and {$p} photo set(s) older than {$days} days.");
         return self::SUCCESS;
     }
 }

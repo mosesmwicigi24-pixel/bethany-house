@@ -21,7 +21,7 @@ export interface TimeEntry {
     clock_in_at: string;
     clock_out_at: string | null;
     status: "active" | "completed" | "flagged";
-    clock_in_method: "gps" | "override";
+    clock_in_method: "gps" | "override" | "device" | "kiosk";
     clock_in_distance_meters: number | null;
     total_break_minutes: number | null;
     worked_minutes: number | null;
@@ -48,6 +48,7 @@ export interface TimeEntry {
     app_version?: string | null;
     left_site_at?: string | null;
     trail_points?: number;
+    photos?: { in: boolean; out: boolean };
     overridden_by?: string | null;
     corrected_by?: string | null;
 }

@@ -39,6 +39,18 @@ class SignedFileController extends Controller
             : response()->json(['message' => 'File not found.'], 404);
     }
 
+    /** A kiosk punch photo (People C2): private disk, issued by KioskController::photoLink to attendance.view_team. */
+    public function attendancePhoto(Request $request, int $entry, string $which)
+    {
+        $row = \App\Models\TimeEntry::find($entry);
+        $path = $row ? ($which === 'in' ? $row->clock_in_photo_path : $row->clock_out_photo_path) : null;
+        if (!$path) {
+            return response()->json(['message' => 'File not found.'], 404);
+        }
+
+        return SignedFiles::stream($request, 'private', (string) $path, "punch-{$entry}-{$which}.jpg");
+    }
+
     public function channelAttachment(Request $request)
     {
         // The issuer validated the path's shape; the signature pins it.

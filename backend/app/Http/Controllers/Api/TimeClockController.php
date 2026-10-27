@@ -156,18 +156,11 @@ class TimeClockController extends Controller
         }
 
         // Rostered shift rules (C1): without a shift → allow / flag / refuse; not too early before one.
-        $shift = Shift::where('user_id', $user->id)->where('status', 'published')->where('date', today()->toDateString())->orderBy('starts_at')->first();
-        if (!$shift) {
-            if ($rules['clock_in_without_shift'] === 'refuse') {
-                return response()->json(['message' => 'You have no shift on the roster today. Ask your manager to add one before clocking in.'], 422);
-            }
-            if ($rules['clock_in_without_shift'] === 'flag') $flags[] = 'no_shift';
-        } elseif ((int) $rules['earliest_clock_in_minutes'] > 0) {
-            $earliest = $shift->startsAtCarbon()->subMinutes((int) $rules['earliest_clock_in_minutes']);
-            if (now()->lt($earliest)) {
-                return response()->json(['message' => 'Your shift starts at ' . $shift->startsAtCarbon()->format('H:i') . '. You can clock in from ' . $earliest->format('H:i') . '.', 'earliest_at' => $earliest->toIso8601String()], 422);
-            }
+        $gate = AttendanceRules::shiftGate($user);
+        if ($gate['refusal']) {
+            return response()->json(array_filter(['message' => $gate['refusal'], 'earliest_at' => $gate['earliest_at']?->toIso8601String()]), 422);
         }
+        $flags = array_merge($flags, $gate['flags']);
 
         $distance = null;
         $method   = $noPosition ? 'device' : 'gps';
@@ -244,6 +237,14 @@ class TimeClockController extends Controller
                 'distance' => round($distance, 1),
                 'reason'   => $validated['reason'] ?? null,
             ], "{$user->first_name} clocked in outside the geofence at {$outlet->name} (override)");
+        }
+        // C2 automation: the manager hears about a punch from outside the zone, at once.
+        if ($method === 'override' && \App\Support\Automations::active('outside_fence')) {
+            $name = trim("{$user->first_name} {$user->last_name}");
+            NotificationService::deliver(\App\Support\Automations::recipientsFor('outside_fence', $user), new InAppNotification(
+                title: "{$name} clocked in outside the zone",
+                body:  round($distance) . " m from {$outlet->name} at {$punchAt->format('H:i')}" . (!empty($validated['reason']) ? ": {$validated['reason']}" : '.'),
+                actionUrl: '/settings/attendance?user=' . $user->id . '&date=' . $punchAt->toDateString(), icon: 'clock', data: ['entry_id' => $entry->id, 'automation' => 'outside_fence']));
         }
 
         return response()->json([
@@ -759,6 +760,7 @@ class TimeClockController extends Controller
             'auto_closed_at'          => $entry->auto_closed_at?->toIso8601String(),
             'left_site_at'            => $entry->left_site_at?->toIso8601String(),
             'trail_points'            => (int) $entry->trail_points,
+            'photos'                  => ['in' => (bool) $entry->clock_in_photo_path, 'out' => (bool) $entry->clock_out_photo_path],
             'notes'                   => $entry->notes,
         ];
 
