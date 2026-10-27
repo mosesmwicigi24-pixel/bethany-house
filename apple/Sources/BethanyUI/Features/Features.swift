@@ -12,6 +12,7 @@ public enum Features {
         ProfileFeature.register()
         MeFeature.register()
         PosFeature.register()   // also registers Tills and EoD
+        SalesFeature.register()
         // Modules added by Steps 3–5 register below; order is irrelevant.
         for register in extraRegistrars { register() }
     }
