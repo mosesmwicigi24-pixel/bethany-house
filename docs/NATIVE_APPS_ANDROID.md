@@ -132,14 +132,49 @@ the dialog uses); see the checklist.
 Codes: **N** native screen registered; **B** console bridge; **—** not
 offered. "Verified" (run on a device) has not happened for any row.
 
-<!-- STATUS TABLE -->
+Last updated: 2026-10-28 (Step 6).
+
+| Screen | Phone | Tablet |
+|---|---|---|
+| Sign-in, 2FA, forced 2FA setup (QR), password reset | N | N |
+| Session policy mirror (idle, PIN lock, renewal), held downloads | N | N |
+| Step-up (password, TOTP) | N | N |
+| Step-up by passkey | — (server fallback used) | — |
+| Biometric re-lock | N | N |
+| Navigation by permission, home path, search palette | N (bottom bar + drawer) | N (rail / permanent sidebar) |
+| Deep links (bethanyhub://, App Links), push tap-to-route | N | N |
+| Reverb realtime (user channel → badge, toast) | N | N |
+| Offline read cache, pending queue, replay | N | N |
+| Dashboard, Approvals, Notifications | N | N |
+| Profile (sessions, devices, password) | N (2FA/passkey/PIN self-management: B) | same |
+| Me: Today, updates, checklists, handbook, training, to sign, to-dos, colleagues, clock (geofence, trail service), shifts, leave, hours, payslips, advances | B (native port in progress) | B (native port in progress) |
+| Messages (spaces, DMs, realtime, attachments, reactions, quick replies) | N (AI assist rail: B) | same |
+| People: overview, requests, attendance (trail map, kiosks), roster, timesheets, leave, employee files, payroll, checklist templates | N | N |
+| Catalog: products, product form (images, pricing via proposals, variants, SEO, stages, BOM), bulk import, categories | N | N |
+| POS (register, sale, split tender, M-PESA/Paystack, receipt print/share, history, voids/returns via PIN, cashier EoD) | N | N (catalogue and cart side by side) |
+| Tills (verify/finalize, reconcile, corrections, per currency), EoD reports and settings | N | N |
+| Sales: order lists, pending queue, order detail, quotations, invoices, interest carts, shipments, customers, balances | N (handoff: B) | same |
+| Production: my tasks (offline queue), orders, detail, WIP, QC, calendar, BOM | N | N |
+| Inventory: stock, serials (camera scan), adjustments, transfers, materials, low stock | N | N |
+| Procurement: POs (detail, receive, return, payments), suppliers, GRN, returns | N | N |
+| Expenses (list, detail, approvals, receipt capture, bulk), imprest, categories and budgets, analytics | N | N |
+| Finance: payment transactions (refund, void/reassign requests, export) | N | N |
+| Reports (11 pages, tabs, drill-down, PDF, CSV, schedules, signals) | N (print: open PDF in the system viewer) | same |
+| Setup: business, outlets (geofence map), attendance rules, automations, holidays, roles matrix, users and sign-in security, countries, currencies (pricing vs reporting rate), languages, taxes, discount limits, payment methods, shipping, stages, auto-assignees, activity logs, trash, database, downloads | N (database wipe deliberately omitted) | same |
+| Marketing: seasons, campaigns, home front, product pages, insights | N | N |
+| Kiosk | — | — (later step) |
 
 ## Findings surfaced by the Android port
 
 The Apple findings F1–F7 (docs/NATIVE_APPS_APPLE.md) apply unchanged; the
 Android screens take the same handling. Android-specific:
 
-<!-- FINDINGS -->
+| # | Finding | Handling |
+|---|---|---|
+| A1 | Passkey step-up is not wired on Android (Credential Manager integration needs the Digital Asset Links passkey association and a device to test). | The step-up dialog uses the server's fallback (TOTP or password). |
+| A2 | Android has no direct print for a remote PDF. | Report and document PDFs are saved and opened in the system viewer, which offers print and share; POS receipts print through `PrintManager`. |
+| A3 | The serial scanner reads one code per camera session (ML Kit single result). | Reconcile reopens the scanner per code and keeps a typed-entry row. |
+| A4 | Maps (trail map, outlet geofence) need `mapsApiKey`. | Without it tiles are blank and the screen says so; positions and radius still save. |
 
 ## Deliberately not ported
 
