@@ -28,11 +28,18 @@ public struct Me: Codable, Hashable, Sendable, Identifiable {
     public var roleNames: [String] { roles.map(\.name) }
 
     public init(json: JSONValue) throws {
-        guard let id = json["id"]?.int, let name = json["name"]?.string, let email = json["email"]?.string else {
+        guard let id = json["id"]?.int, let email = json["email"]?.string else {
             throw APIError(status: 0, message: "The sign-in response did not describe a person.")
         }
         self.id = id
-        self.name = name
+        // `/auth/me` sends first_name and last_name, not `name` (verified
+        // against a running backend, 2026-10-28); the console builds the
+        // display name the same way (Sidebar.tsx). `name` stays a fallback.
+        let full = [json["first_name"]?.string, json["last_name"]?.string]
+            .compactMap { $0 }
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .joined(separator: " ")
+        self.name = full.isEmpty ? (json["name"]?.string ?? "") : full
         self.email = email
         userType = json["user_type"]?.string
         permissions = json["permissions"]?.array?.compactMap(\.string) ?? []

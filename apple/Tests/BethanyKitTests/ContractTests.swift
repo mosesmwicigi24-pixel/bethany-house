@@ -32,6 +32,15 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(PermissionSet(me: me).can("payroll.run"))
     }
 
+    /// The live `/auth/me`: first_name/last_name and no `name`. Before the fix this threw and sign-in failed.
+    func testDisplayNameComesFromFirstAndLastNameAsTheBackendSendsIt() throws {
+        let me = try Me(json: json(#"{"id":1,"first_name":"Super","last_name":"Admin","email":"o@b.c","permissions":[],"roles":[{"id":1,"name":"super_admin"}]}"#))
+        XCTAssertEqual(me.name, "Super Admin")
+        XCTAssertTrue(me.isSuperAdmin)
+        XCTAssertEqual(try Me(json: json(#"{"id":2,"first_name":"Only","email":"x@y.z"}"#)).name, "Only")
+        XCTAssertEqual(try Me(json: json(#"{"id":3,"name":"Legacy Name","email":"x@y.z"}"#)).name, "Legacy Name")
+    }
+
     func testMeRoundTripsThroughTheKeychainCache() throws {
         let original = try Me(json: json(#"{"id":1,"name":"Owner","email":"o@b.c","permissions":["a"],"roles":[],"extra_field":{"kept":true}}"#))
         let data = try HubJSON.encoder.encode(original)
