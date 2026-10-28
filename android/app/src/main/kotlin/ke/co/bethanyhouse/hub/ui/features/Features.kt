@@ -12,5 +12,13 @@ object Features {
         ke.co.bethanyhouse.hub.ui.features.expenses.ExpensesFeature.register()
         ke.co.bethanyhouse.hub.ui.features.expenses.FinanceFeature.register()
         ke.co.bethanyhouse.hub.ui.features.production.ProductionFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.pos.PosFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.sales.SalesFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.procurement.ProcurementFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.procurement.CatalogFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.people.PeopleFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.people.CommsFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.setup.SetupFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.setup.MarketingFeature.register()
     }
 }
