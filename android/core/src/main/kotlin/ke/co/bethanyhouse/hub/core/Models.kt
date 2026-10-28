@@ -11,7 +11,12 @@ import java.time.Instant
  */
 data class Me(val raw: JsonElement) {
     val id: Int = raw["id"].int ?: throw ApiError(0, "The sign-in response did not describe a person.")
-    val name: String = raw["name"].str ?: ""
+    /**
+     * `/auth/me` sends `first_name` and `last_name`, not `name` (verified
+     * against the live controller); the console builds the display name the
+     * same way (Sidebar.tsx). `name` is kept as a fallback for older payloads.
+     */
+    val name: String = listOfNotNull(raw["first_name"].str, raw["last_name"].str).filter { it.isNotBlank() }.joinToString(" ").ifBlank { raw["name"].str ?: "" }
     val email: String = raw["email"].str ?: ""
     val userType: String? = raw["user_type"].str
     val permissions: List<String> = raw["permissions"].records.mapNotNull { it.str }

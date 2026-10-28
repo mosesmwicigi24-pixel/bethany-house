@@ -126,10 +126,45 @@ the dialog uses); see the checklist.
 | Every route has a native screen except the documented bridged ones | DONE — `RegistryTest` |
 | Every native route renders as a signed-in super admin against empty Hub responses, draws, and calls the Hub | DONE — `RouteRenderTest`, 121 routes, Robolectric (JVM Android runtime) |
 | Phone bottom bar, tablet rail, tablet permanent sidebar render at their widths; deep link opens a detail with a back stack | DONE — `ShellRenderTest` |
-| Screens with real (non-empty) data | UNVERIFIED — render tests use empty pages only |
+| Every native route against a running backend with seeded records renders without an error state | DONE — `LiveRenderTest`, 108 routes, local Laravel + Postgres scratch database (2026-10-28); not in CI |
+| Money on screen matches an independent computation from the seeded records | DONE for the dashboard and payment transactions (see "Live render check") |
 | Run on a device or emulator | UNVERIFIED — the authoring container has no KVM, so no emulator |
 | Signed release build, Play Console | NOT POSSIBLE here — owner's keystore and Play account |
 | App Links verification | DONE server side; 404 until `ANDROID_SHA256_FINGERPRINTS` set |
+
+## Live render check
+
+`LiveRenderTest` renders every native route against a real backend instead
+of the mock, and fails any screen that shows an error state. It is skipped
+unless `-PhubE2eUrl` and `-PhubE2eToken` are given, so CI does not run it.
+
+```sh
+cd backend
+export DB_CONNECTION=pgsql DB_DATABASE=bh_e2e DB_USERNAME=... DB_PASSWORD=...
+php artisan migrate:fresh --force && php artisan permission:sync
+php artisan db:seed --class=CountriesSeeder --force
+php ../android/tools/live-hub-fixture.php       # refuses any database not ending in _e2e
+php artisan serve --port=8077 &
+cd ../android
+./gradlew :app:testDebugUnitTest --tests '*LiveRenderTest*' \
+  -PhubE2eUrl=http://127.0.0.1:8077 -PhubE2eToken="$(cat /tmp/hub-e2e-token.txt)"
+```
+
+The fixture seeds one outlet, three products priced in KES and USD with
+stock in, low and out, a customer, a paid KES till sale (4,500), a
+confirmed USD web order (120) with a USD 50 card payment, a pending KES
+order (2,500), and a staff member with leave, a shift and a time entry.
+On the 2026-10-28 run the screens showed, and an independent computation
+from those records agrees:
+
+| Figure | Screen | Independent computation |
+|---|---|---|
+| Today's sales KES 19,860 | Dashboard | 4,500 + 120 × 128 (reporting rate); the pending order excluded |
+| Collected today KES 10,900 | Dashboard, Payment transactions | 4,500 + 50 × 128 |
+| Outstanding KES 8,960 | (difference) | USD 70 owed × 128 |
+| USD 120.00 total, USD 50 paid | Order detail | the order's own currency, unconverted |
+
+The USD figures convert at 128 KES/USD (reporting), not 100 (pricing).
 
 ## Per-screen status (Android phone / tablet)
 
@@ -179,6 +214,7 @@ Android screens take the same handling. Android-specific:
 | A2 | Android has no direct print for a remote PDF. | Report and document PDFs are saved and opened in the system viewer, which offers print and share; POS receipts print through `PrintManager`. |
 | A3 | The serial scanner reads one code per camera session (ML Kit single result). | Reconcile reopens the scanner per code and keeps a typed-entry row. |
 | A4 | Maps (trail map, outlet geofence) need `mapsApiKey`. | Without it tiles are blank and the screen says so; positions and radius still save. |
+| A5 | `/auth/me` sends `first_name` and `last_name`, not `name`; the clients read `name`. Found by the live render check. Android showed a blank name everywhere; the Apple `Me` parser rejects the payload, which fails sign-in. | Fixed in both: display name built from first and last name as the console does, `name` kept as a fallback; a contract test now uses the real shape. |
 
 ## Deliberately not ported
 

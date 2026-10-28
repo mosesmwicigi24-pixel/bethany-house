@@ -38,6 +38,16 @@ class ContractTest {
         assertTrue(PermissionSet.of(me).can("payroll.run"))
     }
 
+    /** The live `/auth/me` (verified against a running backend): first_name/last_name, no `name`. */
+    @Test fun displayNameComesFromFirstAndLastNameAsTheBackendSendsIt() {
+        val me = Me(j("""{"id":1,"first_name":"Super","last_name":"Admin","email":"o@b.c","permissions":[],"roles":[{"id":1,"name":"super_admin"}],"session_policy":{"idle_minutes":15,"absolute_minutes":480,"on_idle":"sign_out"}}"""))
+        assertEquals("Super Admin", me.name)
+        assertEquals("Super", me.firstName)
+        assertEquals(true, me.isSuperAdmin)
+        assertEquals("Only first", Me(j("""{"id":2,"first_name":"Only first","email":"x@y.z"}""")).name)
+        assertEquals("Legacy Name", Me(j("""{"id":3,"name":"Legacy Name","email":"x@y.z"}""")).name)
+    }
+
     @Test fun meRoundTripsThroughTheSecureStoreCache() {
         val original = Me(j("""{"id":1,"name":"Owner","email":"o@b.c","permissions":["a"],"roles":[],"extra_field":{"kept":true}}"""))
         val back = Me.decode(original.encode())!!

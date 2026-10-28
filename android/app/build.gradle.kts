@@ -90,6 +90,9 @@ android {
             // Robolectric fetches its Android runtime jars; use the same Maven mirror as the build.
             it.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2/")
             it.maxHeapSize = "3g"
+            // Optional live-backend render check (LiveRenderTest); see docs/NATIVE_APPS_ANDROID.md.
+            (project.findProperty("hubE2eUrl") as String?)?.let { url -> it.systemProperty("hub.e2e.url", url) }
+            (project.findProperty("hubE2eToken") as String?)?.let { t -> it.systemProperty("hub.e2e.token", t) }
         }
     }
     packaging {

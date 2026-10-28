@@ -17,9 +17,19 @@ import okhttp3.mockwebserver.RecordedRequest
 class TestHubApp : HubApplication() {
     override fun createEnvironment(): AppEnvironment {
         val prefs = getSharedPreferences("bh_secure_test", Context.MODE_PRIVATE)
-        prefs.edit().clear().putString("bh_admin_token", "test-token").commit()
-        return AppEnvironment(this, hubUrl = MockHub.url, secureStore = SecureStore.unencryptedForTests(prefs))
+        prefs.edit().clear().putString("bh_admin_token", LiveHub.token ?: "test-token").commit()
+        return AppEnvironment(this, hubUrl = LiveHub.url ?: MockHub.url, secureStore = SecureStore.unencryptedForTests(prefs))
     }
+}
+
+/**
+ * A real backend for [LiveRenderTest], set with
+ * `-PhubE2eUrl=http://127.0.0.1:8077 -PhubE2eToken=<sanctum token>`.
+ * Unset (CI, normal runs) means the mock Hub below.
+ */
+object LiveHub {
+    val url: String? = System.getProperty("hub.e2e.url")?.takeIf { it.isNotBlank() }
+    val token: String? = System.getProperty("hub.e2e.token")?.takeIf { it.isNotBlank() }
 }
 
 /** A Hub that answers every list endpoint with an empty page: the empty-and-zero case for every screen. */
@@ -48,7 +58,7 @@ object MockHub {
     private const val EMPTY_PAGE = """{"data":[],"meta":{"current_page":1,"last_page":1,"per_page":25,"total":0},"current_page":1,"last_page":1,"total":0}"""
 
     private const val ME = """{"user":{
-        "id":1,"name":"Test Owner","email":"owner@example.com","user_type":"staff",
+        "id":1,"first_name":"Test","last_name":"Owner","email":"owner@example.com","user_type":"system",
         "permissions":[],"roles":[{"id":1,"name":"super_admin","data_scope":"business"}],
         "is_owner":true,"money_view":"all","outlet":{"id":1,"name":"Westlands"},
         "terminal_pin_set":true,"two_factor_required":false,"two_factor_enabled":true,"recovery_codes_left":8
