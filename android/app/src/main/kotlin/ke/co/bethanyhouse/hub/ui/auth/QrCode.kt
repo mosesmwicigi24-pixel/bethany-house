@@ -143,7 +143,7 @@ object QrEncoder {
             // Around top-left finder.
             if (i < 6) c[8][i] = bit else if (i < 8) c[8][i + 1] = bit else if (i == 8) c[7][8] = bit else c[14 - i][8] = bit
             // Split copy.
-            if (i < 8) c[n - 1 - i][8] = bit else c[8][n - 15 + i] = bit
+            if (i < 7) c[n - 1 - i][8] = bit else c[8][n - 15 + i] = bit
         }
         if (version >= 7) {
             var v = version shl 12
