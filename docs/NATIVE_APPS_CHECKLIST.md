@@ -72,6 +72,7 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | F5 | `pos/reports/user-eod` totals carry no currency key. | `PosController` | Labelled in the outlet's currency. |
 | F6 | `GET orders/export` is gated `orders.view` + step-up only; the console's CSV button is a no-op (backlog Q-5). | `routes/api.php` | Native export works through the same route. |
 | F7 | Supplier document rows carry no download URL. | `SupplierController::documents` | Listed, not opened. |
+| F8 | `/auth/me` sends `first_name` and `last_name`, not `name`; `Me(json:)` required `name` and threw, so sign-in would fail against the real backend. Found by the Android live render check (2026-10-28). | `AuthController::me` payload | Fixed: display name built from first and last name as the console does, `name` kept as a fallback; contract test added. Swift unverified until an Xcode build. |
 
 ## Deliberately not ported
 
