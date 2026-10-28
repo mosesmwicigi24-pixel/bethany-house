@@ -11,5 +11,6 @@ object Features {
         ke.co.bethanyhouse.hub.ui.features.reports.ReportsFeature.register()
         ke.co.bethanyhouse.hub.ui.features.expenses.ExpensesFeature.register()
         ke.co.bethanyhouse.hub.ui.features.expenses.FinanceFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.production.ProductionFeature.register()
     }
 }
