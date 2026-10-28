@@ -147,7 +147,7 @@ Last updated: 2026-10-28 (Step 6).
 | Offline read cache, pending queue, replay | N | N |
 | Dashboard, Approvals, Notifications | N | N |
 | Profile (sessions, devices, password) | N (2FA/passkey/PIN self-management: B) | same |
-| Me: Today, updates, checklists, handbook, training, to sign, to-dos, colleagues, clock (geofence, trail service), shifts, leave, hours, payslips, advances | B (native port in progress) | B (native port in progress) |
+| Me: Today, updates, checklists, handbook, training, to sign, to-dos, colleagues, clock (geofence, trail service), shifts, leave, hours, payslips, advances | N | N |
 | Messages (spaces, DMs, realtime, attachments, reactions, quick replies) | N (AI assist rail: B) | same |
 | People: overview, requests, attendance (trail map, kiosks), roster, timesheets, leave, employee files, payroll, checklist templates | N | N |
 | Catalog: products, product form (images, pricing via proposals, variants, SEO, stages, BOM), bulk import, categories | N | N |

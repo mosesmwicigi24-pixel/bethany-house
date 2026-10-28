@@ -8,6 +8,7 @@ object Features {
     fun registerAll() {
         WorkspaceFeature.register()
         ProfileFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.me.MeFeature.register()
         ke.co.bethanyhouse.hub.ui.features.reports.ReportsFeature.register()
         ke.co.bethanyhouse.hub.ui.features.expenses.ExpensesFeature.register()
         ke.co.bethanyhouse.hub.ui.features.expenses.FinanceFeature.register()
