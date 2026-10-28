@@ -8,5 +8,6 @@ object Features {
     fun registerAll() {
         WorkspaceFeature.register()
         ProfileFeature.register()
+        ke.co.bethanyhouse.hub.ui.features.reports.ReportsFeature.register()
     }
 }
