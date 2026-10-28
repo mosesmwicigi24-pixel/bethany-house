@@ -9,17 +9,20 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.launch
 
 /** Bethany House Hub for Android (native apps programme, Steps 6–7). */
-class HubApplication : Application() {
+open class HubApplication : Application() {
     lateinit var env: AppEnvironment
         private set
 
     override fun onCreate() {
         super.onCreate()
-        env = AppEnvironment(this)
+        env = createEnvironment()
         createChannels()
         initFirebase()
         env.observeLifecycle()
     }
+
+    /** Tests substitute an environment pointed at a local server with a plain store. */
+    protected open fun createEnvironment(): AppEnvironment = AppEnvironment(this)
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java)

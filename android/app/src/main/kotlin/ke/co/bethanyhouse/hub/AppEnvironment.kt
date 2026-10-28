@@ -37,11 +37,14 @@ import kotlinx.coroutines.launch
  * store, location, biometrics and the navigator. Constructor injection
  * throughout; this is the one place that news objects up.
  */
-class AppEnvironment(val app: Application) {
+class AppEnvironment(
+    val app: Application,
+    hubUrl: String = BuildConfig.HUB_URL,
+    val secureStore: SecureStore = SecureStore(app),
+) {
     data class Config(val hubUrl: String, val reverbKey: String?, val reverbHost: String?, val reverbPort: Int, val reverbScheme: String)
 
-    val config = Config(BuildConfig.HUB_URL, BuildConfig.REVERB_KEY.ifBlank { null }, BuildConfig.REVERB_HOST.ifBlank { null }, BuildConfig.REVERB_PORT, BuildConfig.REVERB_SCHEME)
-    val secureStore = SecureStore(app)
+    val config = Config(hubUrl, BuildConfig.REVERB_KEY.ifBlank { null }, BuildConfig.REVERB_HOST.ifBlank { null }, BuildConfig.REVERB_PORT, BuildConfig.REVERB_SCHEME)
     val device = DeviceIdentity.current(secureStore, BuildConfig.VERSION_NAME + "+" + BuildConfig.VERSION_CODE)
     val client = ApiClient(config.hubUrl.toHubBaseUrl(), device)
     val session = SessionStore(client, secureStore)

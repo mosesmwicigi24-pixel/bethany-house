@@ -8,7 +8,7 @@ and tablet (the shell adapts by window width class).
 | `core` | `android/core` | Android library, no UI: `ApiClient` (OkHttp, the Step 2 contract), `SessionStore` (sign-in, 2FA, renewal, idle policy, PIN lock, step-up, held downloads), `SecureStore` (Keystore-encrypted prefs), device identity, permissions and the navigation catalogue (`NavCatalogue`, ported from the console sidebar and pinned by tests to the same slugs as the Apple kit), offline cache and pending queue, FCM registration, Reverb realtime over OkHttp WebSocket, fused location with mock detection and the geofence maths. |
 | `app` | `android/app` | The application: `HubApplication`, `MainActivity` (single activity, deep links, push taps), theme (`ui/Theme.kt`), components, sign-in flow, security prompts, the phone shell (bottom bar + drawer), the tablet shells (rail at medium width, permanent sidebar at expanded width), `RouteScreen` + `FeatureRegistry`, the console bridge, and the feature screens under `ui/features/`. |
 | Services | `app/.../push/HubMessagingService.kt`, `app/.../location/TrailService.kt` | FCM entry point (token → `push/subscribe-device`, message → notification → route) and the on-shift location trail as a foreground service. |
-| Tests | `core/src/test`, `app/src/test` | Gates, home path, sidebar parity, contract shapes, money, dates, deep links, renewal timing (core); QR encoder, form kit, table cells (app). |
+| Tests | `core/src/test`, `app/src/test` | Gates, home path, sidebar parity, contract shapes, money, dates, deep links, renewal timing (core); QR encoder, form kit, table cells, route registry, and Robolectric render tests of every route and of the three shells (app). |
 
 ## Build
 
@@ -123,7 +123,11 @@ the dialog uses); see the checklist.
 | `:core` compiled and unit tests green | DONE (in the authoring container) |
 | `:app` compiled and unit tests green | DONE (in the authoring container) |
 | `assembleDebug` APK | see PR CI (`Android` workflow) |
-| Run on a device or emulator | UNVERIFIED — no emulator in the authoring environment |
+| Every route has a native screen except the documented bridged ones | DONE — `RegistryTest` |
+| Every native route renders as a signed-in super admin against empty Hub responses, draws, and calls the Hub | DONE — `RouteRenderTest`, 121 routes, Robolectric (JVM Android runtime) |
+| Phone bottom bar, tablet rail, tablet permanent sidebar render at their widths; deep link opens a detail with a back stack | DONE — `ShellRenderTest` |
+| Screens with real (non-empty) data | UNVERIFIED — render tests use empty pages only |
+| Run on a device or emulator | UNVERIFIED — the authoring container has no KVM, so no emulator |
 | Signed release build, Play Console | NOT POSSIBLE here — owner's keystore and Play account |
 | App Links verification | DONE server side; 404 until `ANDROID_SHA256_FINGERPRINTS` set |
 

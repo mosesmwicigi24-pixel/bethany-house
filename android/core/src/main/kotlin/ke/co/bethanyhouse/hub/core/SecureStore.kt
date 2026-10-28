@@ -12,23 +12,35 @@ import java.util.UUID
  * `me`, the device id and the FCM token never touch plain SharedPreferences
  * or files. The master key lives in the Android Keystore; values are AES-GCM.
  */
-class SecureStore(context: Context, name: String = "bh_secure") {
-    private val prefs: SharedPreferences = run {
-        val key = MasterKey.Builder(context.applicationContext)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context.applicationContext,
-            name,
-            key,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }
+class SecureStore private constructor(private val prefs: SharedPreferences) {
+    constructor(context: Context, name: String = "bh_secure") : this(encrypted(context, name))
 
     fun get(account: String): String? = prefs.getString(account, null)
     fun set(account: String, value: String) { prefs.edit().putString(account, value).apply() }
     fun remove(account: String) { prefs.edit().remove(account).apply() }
+
+    companion object {
+        private fun encrypted(context: Context, name: String): SharedPreferences {
+            val key = MasterKey.Builder(context.applicationContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            return EncryptedSharedPreferences.create(
+                context.applicationContext,
+                name,
+                key,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }
+
+        /**
+         * Plain SharedPreferences, for JVM tests only (Robolectric has no
+         * Android Keystore). Never used by the app: the only production
+         * constructor is the Keystore-backed one above.
+         */
+        @androidx.annotation.VisibleForTesting
+        fun unencryptedForTests(prefs: SharedPreferences): SecureStore = SecureStore(prefs)
+    }
 }
 
 /**
