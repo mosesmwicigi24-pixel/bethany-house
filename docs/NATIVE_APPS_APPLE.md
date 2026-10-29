@@ -64,11 +64,23 @@ key in its env (docs/DEPLOY.md). A tap opens `PushPayload.route`.
 - Offline: read cache per person; queued writes only for what the console
   already queues (punch, task progress, to-dos, course progress, form drafts).
 
+## Kiosk (iPad)
+
+People › Attendance › Kiosks › "Make this tablet a kiosk" (iPad only, with
+step-up) mints the kiosk token and keeps it under its own Keychain account
+(`bh_kiosk_token`), then signs the manager out; the token is never shown.
+`KioskView` shows the board, takes the person's terminal PIN and a front
+camera photo, and asks for Guided Access with the idle timer off. Every
+punch is checked on the server; a 401 returns the tablet to sign-in with a
+note. The kiosk lifetime is the server's (`security.sessions.kiosk_days`, #519).
+
 ## Verification status
 
 | Check | Status |
 |---|---|
 | Swift sources written against the merged contract | DONE |
+| `swiftc -parse`, all sources (Swift 6.0.3, Linux) | DONE, 2026-10-29 |
+| BethanyKit `swiftc -typecheck` on Linux with stubs for Keychain, DeviceIdentity, CoreLocation and URLSession extras | DONE, clean, 2026-10-29 (UI and app targets need SwiftUI: not checked) |
 | Compiled on macOS / iOS | UNVERIFIED — no Xcode in the authoring environment |
 | `swift test` | UNVERIFIED — same |
 | Signed build, TestFlight | NOT POSSIBLE here — owner's Mac and Apple Developer account |

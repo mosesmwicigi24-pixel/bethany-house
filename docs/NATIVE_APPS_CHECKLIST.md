@@ -49,7 +49,7 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | Finance: payment transactions ledger (refund, void/reassign requests, export) | N | — | — | — | — |
 | Reports (11 pages with tabs, drill-down, PDF, CSV, print, schedules; signals with actions) | N | — | — | — | — |
 | Setup: business, outlets (geofence map), attendance rules, automations, holidays, roles matrix, users and sign-in security, countries, currencies (pricing vs reporting rate), languages, taxes, discount limits, payment methods, shipping, stages, auto-assignees, activity logs, trash, database, downloads | N (database wipe deliberately omitted) | — | — | — | — |
-| Kiosk | — | — | — | — | — |
+| Kiosk (door tablet: board, PIN pad, photo, Guided Access / screen pinning; token never shown) | — | — | N | N (#520) | N (#520) |
 
 ## Backend (Step 2, merged in #514)
 
@@ -76,6 +76,6 @@ Last updated: 2026-10-27 (Step 3, first increment).
 
 ## Deliberately not ported
 
-- Kiosk mode (door device): out of scope on Mac and phone; a tablet-only mode for Step 5 / Step 7.
+- Kiosk mode on Mac and phone: a door device is a tablet. The iPad and Android tablet kiosks (Step 7) need the backend's own kiosk lifetime (#519, `KIOSK_TOKEN_DAYS`, default 90); before it a kiosk token died under the manager's 30-minute idle limit.
 - `POST database/wipe`: the most dangerous endpoint; stays console-only until a confirm-phrase + re-auth design is agreed.
 - Comms AI assist rail and per-message translate; order handoff page; mention autocomplete in comment threads; drag-and-drop reorder (move up/down buttons call the same endpoints).

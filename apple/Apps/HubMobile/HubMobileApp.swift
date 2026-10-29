@@ -28,9 +28,10 @@ struct HubMobileApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
-                    case .background: env.biometrics.didEnterBackground()
+                    case .background: if !env.kiosk.isKiosk { env.biometrics.didEnterBackground() }
                     case .active:
-                        env.biometrics.willEnterForeground()
+                        // A kiosk is a shared tablet: no one's biometric re-lock applies to it.
+                        if !env.kiosk.isKiosk { env.biometrics.willEnterForeground() }
                         Task { await env.session.didBecomeActive(); await env.replayPending() }
                     default: break
                     }
@@ -43,6 +44,15 @@ struct RootView: View {
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
+        // A kiosk tablet shows only the clock-in board, whatever session exists.
+        if env.kiosk.isKiosk {
+            KioskView()
+        } else {
+            sessionRoot
+        }
+    }
+
+    @ViewBuilder private var sessionRoot: some View {
         switch env.session.state {
         case .starting:
             ProgressView("Opening the Hub…").frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.canvas)
