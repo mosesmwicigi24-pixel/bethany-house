@@ -7,49 +7,52 @@ offered on this target (reason in the audit's parity matrix). "Verified"
 means run on a device or simulator, which has not happened for any row yet
 (no Xcode or Android SDK in the authoring environment).
 
-Last updated: 2026-10-27 (Step 3, first increment).
+Last updated: 2026-10-29. Android phone and tablet columns follow
+`docs/NATIVE_APPS_ANDROID.md` (Step 6, merged in #516; kiosk #520). The iPhone
+and iPad columns have not been reconciled with the HubMobile target since
+Step 3: UNKNOWN — NEEDS VERIFICATION against an Xcode build.
 
 ## Shell and cross-cutting
 
 | Capability | macOS | iPhone | iPad | Android | Tablet |
 |---|---|---|---|---|---|
-| Sign-in, 2FA, forced 2FA setup, password reset | N | — | — | — | — |
-| Session policy mirror (idle, PIN lock, renewal) | N | — | — | — | — |
-| Step-up (password, TOTP, passkey) | N | — | — | — | — |
-| Biometric re-lock | N (Touch ID) | — | — | — | — |
-| Sidebar by permission, home path, ⌘K palette, ⌘1–9 | N | — | — | — | — |
-| Deep links (bethanyhub://, universal links) | N | — | — | — | — |
-| APNs registration and tap-to-route | N | — | — | — | — |
-| Reverb realtime (user channel → badge, toast) | N | — | — | — | — |
-| Offline read cache, pending queue, replay | N (kit) | — | — | — | — |
-| Download gate (approval hold) | N | — | — | — | — |
+| Sign-in, 2FA, forced 2FA setup, password reset | N | — | — | N | N |
+| Session policy mirror (idle, PIN lock, renewal) | N | — | — | N | N |
+| Step-up (password, TOTP, passkey) | N | — | — | N (passkey: server fallback, A1) | N (passkey: server fallback, A1) |
+| Biometric re-lock | N (Touch ID) | — | — | N | N |
+| Sidebar by permission, home path, ⌘K palette, ⌘1–9 | N | — | — | N | N |
+| Deep links (bethanyhub://, universal links) | N | — | — | N | N |
+| APNs registration and tap-to-route | N | — | — | N (FCM) | N (FCM) |
+| Reverb realtime (user channel → badge, toast) | N | — | — | N | N |
+| Offline read cache, pending queue, replay | N (kit) | — | — | N | N |
+| Download gate (approval hold) | N | — | — | N | N |
 
 ## Screens
 
 | Screen | macOS | iPhone | iPad | Android | Tablet |
 |---|---|---|---|---|---|
-| Dashboard | N | — | — | — | — |
-| Approvals (inbox, mine, sign, reject, resubmit) | N | — | — | — | — |
-| Notifications | N | — | — | — | — |
-| Messages (spaces, DMs, realtime, attachments, reactions, quick replies, entity chips) | N (AI assist rail: B) | — | — | — | — |
-| Me: Today | N | — | — | — | — |
-| Me: Updates, Checklists, Handbook, Training, To sign, To-dos, Colleagues | N | — | — | — | — |
-| Me: Clock in/out (geofence; trail iOS-only), shifts, leave, hours, payslips, advances | N | — | — | — | — |
-| Profile (sessions, devices, password) | N (2FA/passkey/PIN self-management: B) | — | — | — | — |
-| People: overview, requests, attendance (trail map, kiosks), roster, timesheets, leave, employee files, payroll, checklist templates | N | — | — | — | — |
-| Catalog: products list, product form (images, pricing via proposals, variants, SEO, stages, BOM), bulk import, categories | N | — | — | — | — |
-| POS (register, sale, split tender, M-PESA/Paystack, receipt print, history, voids/returns via PIN, user EoD) | N | — | — | — | — |
-| Tills (verify/finalize, reconcile, corrections, per-currency) and EoD reports/settings | N | — | — | — | — |
-| Sales: order lists, pending queue, order detail (payments, items, proposals, shipments, comments, PDFs), quotations, invoices, interest carts, shipments, customers, balances | N (handoff: B) | — | — | — | — |
-| Production: my tasks (offline queue), orders, order detail, WIP, QC, calendar, BOM | N | — | — | — | — |
-| Inventory: stock, serials (scan on iOS), adjustments, transfers, materials, low stock | N | — | — | — | — |
-| Procurement: POs (detail, receive, return, payments), suppliers, GRN, returns | N | — | — | — | — |
-| Expenses (list, detail, approvals, attachments/receipt capture, bulk), imprest, categories and budgets, analytics | N | — | — | — | — |
-| Marketing: seasons, campaigns, home front, product pages, insights | N | — | — | — | — |
-| Finance: payment transactions ledger (refund, void/reassign requests, export) | N | — | — | — | — |
-| Reports (11 pages with tabs, drill-down, PDF, CSV, print, schedules; signals with actions) | N | — | — | — | — |
-| Setup: business, outlets (geofence map), attendance rules, automations, holidays, roles matrix, users and sign-in security, countries, currencies (pricing vs reporting rate), languages, taxes, discount limits, payment methods, shipping, stages, auto-assignees, activity logs, trash, database, downloads | N (database wipe deliberately omitted) | — | — | — | — |
-| Kiosk (door tablet: board, PIN pad, photo, Guided Access / screen pinning; token never shown) | — | — | N | N (#520) | N (#520) |
+| Dashboard | N | — | — | N | N |
+| Approvals (inbox, mine, sign, reject, resubmit) | N | — | — | N | N |
+| Notifications | N | — | — | N | N |
+| Messages (spaces, DMs, realtime, attachments, reactions, quick replies, entity chips) | N (AI assist rail: B) | — | — | N (AI assist rail: B) | N (AI assist rail: B) |
+| Me: Today | N | — | — | N | N |
+| Me: Updates, Checklists, Handbook, Training, To sign, To-dos, Colleagues | N | — | — | N | N |
+| Me: Clock in/out (geofence; trail iOS-only), shifts, leave, hours, payslips, advances | N | — | — | N | N |
+| Profile (sessions, devices, password) | N (2FA/passkey/PIN self-management: B) | — | — | N (same: B) | N (same: B) |
+| People: overview, requests, attendance (trail map, kiosks), roster, timesheets, leave, employee files, payroll, checklist templates | N | — | — | N | N |
+| Catalog: products list, product form (images, pricing via proposals, variants, SEO, stages, BOM), bulk import, categories | N | — | — | N | N |
+| POS (register, sale, split tender, M-PESA/Paystack, receipt print, history, voids/returns via PIN, user EoD) | N | — | — | N | N |
+| Tills (verify/finalize, reconcile, corrections, per-currency) and EoD reports/settings | N | — | — | N | N |
+| Sales: order lists, pending queue, order detail (payments, items, proposals, shipments, comments, PDFs), quotations, invoices, interest carts, shipments, customers, balances | N (handoff: B) | — | — | N (handoff: B) | N (handoff: B) |
+| Production: my tasks (offline queue), orders, order detail, WIP, QC, calendar, BOM | N | — | — | N | N |
+| Inventory: stock, serials (scan on iOS), adjustments, transfers, materials, low stock | N | — | — | N | N |
+| Procurement: POs (detail, receive, return, payments), suppliers, GRN, returns | N | — | — | N | N |
+| Expenses (list, detail, approvals, attachments/receipt capture, bulk), imprest, categories and budgets, analytics | N | — | — | N | N |
+| Marketing: seasons, campaigns, home front, product pages, insights | N | — | — | N | N |
+| Finance: payment transactions ledger (refund, void/reassign requests, export) | N | — | — | N | N |
+| Reports (11 pages with tabs, drill-down, PDF, CSV, print, schedules; signals with actions) | N | — | — | N (print: system PDF viewer, A2) | N (print: system PDF viewer, A2) |
+| Setup: business, outlets (geofence map), attendance rules, automations, holidays, roles matrix, users and sign-in security, countries, currencies (pricing vs reporting rate), languages, taxes, discount limits, payment methods, shipping, stages, auto-assignees, activity logs, trash, database, downloads | N (database wipe deliberately omitted) | — | — | N (database wipe deliberately omitted) | N (database wipe deliberately omitted) |
+| Kiosk (door tablet: board, PIN pad, photo, Guided Access / screen pinning; token never shown) | — | — | N | N | N |
 
 ## Backend (Step 2, merged in #514)
 
@@ -66,7 +69,7 @@ Last updated: 2026-10-27 (Step 3, first increment).
 | # | Finding | Where | Native handling |
 |---|---|---|---|
 | F1 | `POST production-orders/{id}/qc` validates `images[]` but never stores them: QC photos are dropped silently. | `ProductionController::qualityCheck` | QC screen directs photos to batch images, which persist. |
-| F2 | POS payment modal sends the M-PESA verification code under `code`; the server validates `transaction_code` (the order-detail path sends the right key). | `react-admin/src/pages/pos/components/PaymentModal.tsx`, `PaymentController::verifyMpesa` | App sends `transaction_code`. UNKNOWN whether the console path ever worked. |
+| F2 | POS payment modal sends the M-PESA verification code under `code`; the server validates `transaction_code` (the order-detail path sends the right key). | `react-admin/src/pages/pos/components/PaymentModal.tsx`, `PaymentController::verifyMpesa` | Apps send `transaction_code`. Confirmed 2026-10-29: the receipt was never checked from the till or the order page, and a failed check recorded the payment unasked. Fixed in the console: the receipt goes through `ordersApi.verifyMpesa`, "asked Safaricom" shows as waiting, and an unconfirmed code is recorded only on the cashier's explicit choice (then the M-Pesa method's approval rule applies). Pinned by `MpesaVerifyOnResultTest`. |
 | F3 | `GET suppliers/export` answers JSON with a `// TODO: Generate Excel/CSV`. | `SupplierController` | Saved as `.json`. |
 | F4 | `pos/reports/eod-admin/{id}` detail totals are raw sums across currencies while the list uses `MoneyByCurrency`. | `PosController` | Shown as plain figures with a caption. Same defect family as the Step 5 currency fixes. |
 | F5 | `pos/reports/user-eod` totals carry no currency key. | `PosController` | Labelled in the outlet's currency. |

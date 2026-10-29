@@ -228,6 +228,29 @@ class MpesaVerifyOnResultTest extends TestCase
         $this->assertSame(1, $this->events('mpesa_verification_requested'));
     }
 
+    /**
+     * The contract the console's till and order page broke until 2026-10-29:
+     * the receipt goes under `transaction_code`. Sent as `code` it is never
+     * asked about, the check fails, and nothing is recorded.
+     */
+    public function test_a_receipt_sent_under_any_other_key_is_never_asked_about(): void
+    {
+        $this->fakeDaraja();
+        $order   = $this->order();
+        $payment = $this->pendingMpesa($order, reference: 'ws_CO_291020261200');
+
+        Sanctum::actingAs($this->staff);
+        $this->postJson(
+            "/api/v1/admin/orders/{$order->id}/payments/{$payment->id}/verify-mpesa",
+            ['code' => self::RECEIPT],
+        )->assertStatus(422);
+
+        Http::assertNotSent(fn (HttpRequest $r) => str_contains($r->url(), '/mpesa/transactionstatus/v1/query'));
+        $this->assertSame('pending', $payment->fresh()->status);
+        $this->assertSame('pending', $order->fresh()->payment_status);
+        $this->assertSame(0, $this->events('mpesa_verification_requested'));
+    }
+
     public function test_a_receipt_already_recorded_on_another_payment_is_refused_before_asking(): void
     {
         $this->fakeDaraja();
