@@ -93,7 +93,7 @@ targets:
         NSLocationWhenInUseUsageDescription: Bethany House Hub checks that you are at the shop when you clock in or out, and records your position while you are on shift.
         NSLocationAlwaysAndWhenInUseUsageDescription: While you are clocked in, Bethany House Hub records your position every few minutes so your manager can see you are on site. It stops when you clock out and never runs off shift.
         NSFaceIDUsageDescription: Unlock the Hub with Face ID instead of typing your password.
-        NSCameraUsageDescription: Attach receipts, QC photos and scan serial numbers.
+        NSCameraUsageDescription: Attach receipts, QC photos, scan serial numbers, and take the clock-in kiosk punch photo.
         NSPhotoLibraryUsageDescription: Attach photos to expenses, products and messages.
         ITSAppUsesNonExemptEncryption: false
         CFBundleURLTypes:

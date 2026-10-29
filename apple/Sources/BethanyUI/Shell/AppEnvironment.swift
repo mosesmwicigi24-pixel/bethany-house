@@ -12,6 +12,9 @@ public final class AppEnvironment {
     public let connection = ConnectionMonitor()
     public let navigator = Navigator()
     public let biometrics = BiometricLock()
+    /// Clock-in kiosk mode (People C2): its own token and client, apart from any person's session.
+    public let kiosk: KioskStore
+    public let kioskAPI: KioskAPI
     public private(set) var realtime: RealtimeClient?
     public private(set) var offline: OfflineStore?
 
@@ -38,6 +41,9 @@ public final class AppEnvironment {
     public init(config: Config = Config()) {
         self.config = config
         self.session = SessionStore(baseURL: config.hubURL.appendingPathComponent("api"))
+        let kioskStore = KioskStore()
+        self.kiosk = kioskStore
+        self.kioskAPI = KioskAPI(baseURL: config.hubURL.appendingPathComponent("api"), store: kioskStore, device: session.device)
         let push = PushRegistration(client: session.client, device: session.device)
         session.pushRegistrar = push
     }

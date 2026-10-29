@@ -5,6 +5,7 @@ import BethanyKit
 /// `SessionStore.state`, the same three shapes the console handles.
 public struct SignInFlow: View {
     @Environment(SessionStore.self) private var session
+    @Environment(AppEnvironment.self) private var env
 
     public init() {}
 
@@ -14,6 +15,15 @@ public struct SignInFlow: View {
             ScrollView {
                 VStack(spacing: Theme.Space.xl) {
                     Brand()
+                    if let reason = env.kiosk.ended {
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            Text(reason).font(Theme.Font.secondary).foregroundStyle(Theme.Palette.warning)
+                            Button("OK") { env.kiosk.acknowledgeEnded() }.font(Theme.Font.secondary)
+                        }
+                        .padding(Theme.Space.l)
+                        .frame(maxWidth: 420, alignment: .leading)
+                        .background(Theme.Palette.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.field))
+                    }
                     Group {
                         switch session.state {
                         case .twoFactor:

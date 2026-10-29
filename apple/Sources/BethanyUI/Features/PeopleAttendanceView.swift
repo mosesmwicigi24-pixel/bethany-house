@@ -322,53 +322,53 @@ struct TrailMapView: View {
 
 struct KiosksPanel: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var version = 0
     @State private var adding = false
-    @State private var issuedToken: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack {
                 Text("Clock-in kiosks").font(Theme.Font.sectionTitle)
                 Spacer()
-                Button { adding = true } label: { Label("Set up a tablet", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                #if os(iOS)
+                Button { adding = true } label: { Label("Make this tablet a kiosk", systemImage: "ipad.landscape") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                #endif
             }
-            Text("A kiosk token signs a tablet into the clock-in board only. The token is shown once, when it is created; the tablet keeps it.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
-            if let issuedToken {
-                SectionCard("Kiosk token (copy it now)") {
-                    Text(issuedToken).font(Theme.Font.mono).textSelection(.enabled)
-                    Button("Dismiss") { self.issuedToken = nil }
-                }
-            }
-            RemoteJSON("/v1/admin/attendance/kiosks", version: version, emptyTitle: "No kiosks set up", isEmpty: { ($0["data"]?.array ?? []).isEmpty }) { j, reload in
+            Text("A kiosk is a tablet at the door: staff tap their name and type their terminal PIN to clock in or out. It reaches only the clock-in board, and lasts until it is removed here or reaches its time limit.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            RemoteJSON("/v1/admin/attendance/kiosks", emptyTitle: "No kiosks set up", isEmpty: { ($0["data"]?.array ?? []).isEmpty }) { j, reload in
                 ForEach(j["data"]?.records ?? []) { k in
-                    SupportListRow(k.string("name") ?? "Kiosk", subtitle: "\(k.string("outlet") ?? "—") · set up by \(k.string("set_up_by") ?? "—") · last used \(k.string("last_used_at").map(Day.dateTime) ?? "never")") {
-                        ConfirmButton("Remove kiosk", message: "The tablet shows the sign-in screen next time.", destructive: true, action: {
+                    let expires = k.string("expires_at").map { " · works until \(Day.format($0, "d MMM yyyy"))" } ?? ""
+                    SupportListRow(k.string("name") ?? "Kiosk", subtitle: "\(k.string("outlet") ?? "—") · set up by \(k.string("set_up_by") ?? "—") · last used \(k.string("last_used_at").map(Day.dateTime) ?? "never")\(expires)") {
+                        ConfirmButton("Remove kiosk", message: "The tablet goes back to the sign-in screen next time it checks in.", destructive: true, action: {
                             do { let r = try await env.session.client.delete("/v1/admin/attendance/kiosks/\(k.id)"); toastResult(env, r); reload() } catch { env.toasts.error(error) }
                         }) { Image(systemName: "trash") }
                     }
                 }
             }
         }
-        .sheet(isPresented: $adding) { KioskSetupSheet { token in issuedToken = token; version += 1 } }
+        .sheet(isPresented: $adding) { KioskSetupSheet() }
     }
 }
 
+/// Makes THIS device the kiosk, as the console does: the Hub mints the
+/// kiosk-only token (step-up), the app keeps it under its own Keychain
+/// account, the manager is signed out and the clock-in board opens. The
+/// token is never shown or shared.
 struct KioskSetupSheet: View {
     @Environment(AppEnvironment.self) private var env
-    let created: (String) -> Void
     @State private var outlet: Int?
     @State private var name = ""
 
     var body: some View {
-        EditSheet("Set up a kiosk", saveLabel: "Create token", canSave: outlet != nil && !name.isEmpty, save: {
-            let r = try await env.session.client.post("/v1/admin/attendance/kiosks", json: J.obj([("outlet_id", J.i(outlet)), ("name", .string(name))]))
-            toastResult(env, r)
-            if let t = r.json?["token"]?.string { created(t) }
+        EditSheet("Make this tablet a kiosk", saveLabel: "Make this tablet a kiosk", canSave: outlet != nil && !name.trimmingCharacters(in: .whitespaces).isEmpty, save: {
+            let r = try await env.session.client.post("/v1/admin/attendance/kiosks", json: J.obj([("outlet_id", J.i(outlet)), ("name", .string(name.trimmingCharacters(in: .whitespaces)))]))
+            guard let token = r.json?["token"]?.string else { throw APIError(status: 0, message: "The Hub did not return a kiosk token.") }
+            env.kiosk.enter(token)
+            await env.session.signOut()
+            await env.sessionDidChange()
         }) { e in
             OutletChoice("Outlet", $outlet)
-            Field("Tablet name", $name, placeholder: "Front counter iPad", error: e?.errors["name"]?.first)
-            Text("Creating a kiosk asks you to confirm it is you.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            Field("Tablet name", $name, placeholder: "Front door", error: e?.errors["name"]?.first)
+            Text("You will be signed out of this device and the clock-in board opens. Staff need a terminal PIN (Profile › Security) to punch. You will be asked to confirm it is you.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
         }
     }
 }
