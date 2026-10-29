@@ -332,46 +332,46 @@ private fun TrailMap(entryId: Int) {
 @Composable
 private fun KiosksPanel() {
     val env = LocalEnv.current
-    var version by remember { mutableIntStateOf(0) }
     var adding by remember { mutableStateOf(false) }
-    var issuedToken by remember { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Clock-in kiosks", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Button(onClick = { adding = true }) { Text("Set up a tablet") }
+            Button(onClick = { adding = true }) { Text("Make this tablet a kiosk") }
         }
-        Text("A kiosk token signs a tablet into the clock-in board only. The token is shown once, when it is created; the tablet keeps it.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
-        issuedToken?.let { token ->
-            SectionCard("Kiosk token (copy it now)") {
-                androidx.compose.foundation.text.selection.SelectionContainer { Text(token, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)) }
-                Row { ke.co.bethanyhouse.hub.ui.components.ShareTextButton("Share token", token); Spacer(Modifier.weight(1f)); TextButton(onClick = { issuedToken = null }) { Text("Dismiss") } }
-            }
-        }
-        RemoteJson("/v1/admin/attendance/kiosks", version = version, emptyTitle = "No kiosks set up", isEmpty = { it["data"].records.isEmpty() }) { j, reload ->
+        Text("A kiosk is a tablet at the door: staff tap their name and type their terminal PIN to clock in or out. It reaches only the clock-in board, and lasts until it is removed here or reaches its time limit.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
+        RemoteJson("/v1/admin/attendance/kiosks", emptyTitle = "No kiosks set up", isEmpty = { it["data"].records.isEmpty() }) { j, reload ->
             j["data"].toRecords().forEach { k ->
-                SupportListRow(k.string("name") ?: "Kiosk", "${k.string("outlet") ?: "—"} · set up by ${k.string("set_up_by") ?: "—"} · last used ${k.string("last_used_at")?.let { Day.dateTime(it) } ?: "never"}") {
-                    ConfirmButton("Remove kiosk", "The tablet shows the sign-in screen next time.", destructive = true, action = {
+                val expires = k.string("expires_at")?.let { " · works until ${Day.format(it, "d MMM yyyy")}" } ?: ""
+                SupportListRow(k.string("name") ?: "Kiosk", "${k.string("outlet") ?: "—"} · set up by ${k.string("set_up_by") ?: "—"} · last used ${k.string("last_used_at")?.let { Day.dateTime(it) } ?: "never"}$expires") {
+                    ConfirmButton("Remove kiosk", "The tablet goes back to the sign-in screen next time it checks in.", destructive = true, action = {
                         try { val r = env.client.delete("/v1/admin/attendance/kiosks/${k.id}"); toastResult(env, r); reload() } catch (e: Exception) { env.toasts.error(e) }
                     }) { Icon(Icons.Default.Delete, contentDescription = "Remove") }
                 }
             }
         }
     }
-    if (adding) KioskSetupSheet(onDismiss = { adding = false }) { token -> issuedToken = token; version += 1 }
+    if (adding) KioskSetupSheet(onDismiss = { adding = false })
 }
 
+/**
+ * Makes THIS device the kiosk, as the console does: the Hub mints the
+ * kiosk-only token (step-up), the app keeps it under its own key, the
+ * manager is signed out of this device and the clock-in board opens. The
+ * token is never shown or shared.
+ */
 @Composable
-private fun KioskSetupSheet(onDismiss: () -> Unit, created: (String) -> Unit) {
+private fun KioskSetupSheet(onDismiss: () -> Unit) {
     val env = LocalEnv.current
     var outlet by remember { mutableStateOf<Int?>(null) }
     var name by remember { mutableStateOf("") }
-    FormSheet("Set up a kiosk", onDismiss, saveLabel = "Create token", canSave = outlet != null && name.isNotEmpty(), save = {
-        val r = env.client.post("/v1/admin/attendance/kiosks", J.obj("outlet_id" to J.i(outlet), "name" to J.s(name)))
-        toastResult(env, r)
-        r.json["token"].str?.let(created)
+    FormSheet("Make this tablet a kiosk", onDismiss, saveLabel = "Make this tablet a kiosk", canSave = outlet != null && name.isNotBlank(), save = {
+        val r = env.client.post("/v1/admin/attendance/kiosks", J.obj("outlet_id" to J.i(outlet), "name" to J.s(name.trim())))
+        val token = r.json["token"].str ?: throw ke.co.bethanyhouse.hub.core.ApiError(0, "The Hub did not return a kiosk token.")
+        env.kiosk.enter(token)
+        env.session.signOut()
     }) { e ->
         OutletChoice("Outlet", outlet, { outlet = it })
-        Field("Tablet name", name, { name = it }, placeholder = "Front counter tablet", error = e?.field("name"))
-        Text("Creating a kiosk asks you to confirm it is you.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
+        Field("Tablet name", name, { name = it }, placeholder = "Front door", error = e?.field("name"))
+        Text("You will be signed out of this device and the clock-in board opens. Staff need a terminal PIN (Profile › Security) to punch. You will be asked to confirm it is you.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
     }
 }

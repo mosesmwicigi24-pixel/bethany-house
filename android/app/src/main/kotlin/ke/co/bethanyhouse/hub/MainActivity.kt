@@ -71,6 +71,9 @@ class MainActivity : FragmentActivity() {
 
     @Composable
     private fun Root() {
+        // A kiosk tablet shows only the clock-in board, whatever session exists.
+        val kioskToken by env.kiosk.token.collectAsStateWithLifecycle()
+        if (kioskToken != null) { ke.co.bethanyhouse.hub.ui.kiosk.KioskScreen(); return }
         val snapshot by env.session.snapshot.collectAsStateWithLifecycle()
         LaunchedEffect(Unit) { env.start() }
         LaunchedEffect(snapshot.state) {

@@ -73,6 +73,15 @@ fun SignInScreen() {
             verticalArrangement = Arrangement.spacedBy(Space.xl),
         ) {
             Brand()
+            val kioskEnded by env.kiosk.ended.collectAsStateWithLifecycle()
+            kioskEnded?.let { reason ->
+                Surface(shape = MaterialTheme.shapes.medium, color = Palette.warningSoft, modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()) {
+                    Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        Text(reason, style = MaterialTheme.typography.bodySmall, color = Palette.warning)
+                        TextButton(onClick = { env.kiosk.acknowledgeEnded() }) { Text("OK") }
+                    }
+                }
+            }
             Surface(
                 shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.hub.card,

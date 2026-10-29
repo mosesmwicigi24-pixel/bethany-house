@@ -53,6 +53,9 @@ class AppEnvironment(
     val connection = ConnectionMonitor(app)
     val location = LocationService(app)
     val navigator = Navigator()
+    /** Clock-in kiosk mode (People C2): its own token and client, apart from any person's session. */
+    val kiosk = ke.co.bethanyhouse.hub.core.KioskStore(secureStore)
+    val kioskApi = ke.co.bethanyhouse.hub.core.KioskApi(config.hubUrl.toHubBaseUrl(), device, kiosk)
     val biometrics = BiometricLock()
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -111,7 +114,8 @@ class AppEnvironment(
     fun observeLifecycle() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
-                biometrics.willEnterForeground()
+                // A kiosk is a shared tablet: no one's biometric re-lock applies to it.
+                if (!kiosk.isKiosk) biometrics.willEnterForeground()
                 scope.launch { session.didBecomeActive(); replayPending() }
             }
             override fun onStop(owner: LifecycleOwner) { biometrics.didEnterBackground() }

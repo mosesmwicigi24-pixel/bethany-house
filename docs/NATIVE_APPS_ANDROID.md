@@ -132,6 +132,27 @@ the dialog uses); see the checklist.
 | Signed release build, Play Console | NOT POSSIBLE here — owner's keystore and Play account |
 | App Links verification | DONE server side; 404 until `ANDROID_SHA256_FINGERPRINTS` set |
 
+## Clock-in kiosk
+
+A manager with `attendance.manage` opens People › Attendance › Kiosks on
+the tablet and chooses **Make this tablet a kiosk** (with step-up). The Hub
+mints a kiosk-only token. The app keeps it in its own secure-store key
+(`bh_kiosk_token`), signs the manager out and opens the board. The token
+is never shown or shared.
+
+- **Board:** the outlet's team, in or out, refreshed every 30 s, in large
+  tiles for a 10–12" screen.
+- **Punch:** tap your name, type your terminal PIN, and the front camera
+  takes one 480 px JPEG. The server checks the PIN with its lock-out,
+  applies the shift gate and keeps the photo.
+- **Device:** the activity is pinned with screen pinning and the screen
+  stays on. Android asks once to confirm the pin when the kiosk starts; a
+  tablet enrolled as a managed (device-owner) device pins without asking.
+- **Ending:** "Leave kiosk mode" removes the token on the Hub. A kiosk
+  removed on the Hub, or past its lifetime (`KIOSK_TOKEN_DAYS`, default 90,
+  from #519), returns the tablet to the sign-in screen with a note saying
+  why.
+
 ## Live render check
 
 `LiveRenderTest` renders every native route against a real backend instead
@@ -201,7 +222,7 @@ Last updated: 2026-10-28 (Step 6).
 | Reports (11 pages, tabs, drill-down, PDF, CSV, schedules, signals) | N (print: open PDF in the system viewer) | same |
 | Setup: business, outlets (geofence map), attendance rules, automations, holidays, roles matrix, users and sign-in security, countries, currencies (pricing vs reporting rate), languages, taxes, discount limits, payment methods, shipping, stages, auto-assignees, activity logs, trash, database, downloads | N (database wipe deliberately omitted) | same |
 | Marketing: seasons, campaigns, home front, product pages, insights | N | N |
-| Kiosk | — | — (later step) |
+| Clock-in kiosk (team board, terminal PIN, front-camera photo, screen pinning; set up from Attendance › Kiosks) | N (works, but meant for a tablet) | N |
 
 ## Findings surfaced by the Android port
 
@@ -218,6 +239,6 @@ Android screens take the same handling. Android-specific:
 
 ## Deliberately not ported
 
-Same as the Apple list: kiosk mode (a tablet-only mode for a later step),
+Same as the Apple list, except kiosk mode, which is native on Android (see "Clock-in kiosk"):
 `POST database/wipe`, the Comms AI assist rail and per-message translate,
 the order handoff page, mention autocomplete, drag-and-drop reorder.
