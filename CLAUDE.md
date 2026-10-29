@@ -274,7 +274,12 @@ re-verify, then fix the appendix.
 ### Currency plan (Steps 1–7, 2026-10-18) → the helpers to reuse
 
 - `App\Support\SellableCurrency` — may a sale, quote or PO be in this currency
-  (active **and** a reporting rate). `App\Support\ShippingFee` — a KES flat fee
+  (active **and** a reporting rate). `SellableCurrency::forCustomer($country)`
+  is the ONE answer to "what is this customer billed in" (owner, 2026-10-29):
+  Kenya → KES; a sellable own currency → that (ZMW, ZAR); anyone else → USD.
+  Every billing path and the countries lists (`sale_currency`) use it;
+  `App\Services\OrderCurrencySwitch` is the one way an unpaid order changes
+  currency (Set Country button, payment-link check, `orders:foreign-currency`). `App\Support\ShippingFee` — a KES flat fee
   in the order's currency at the pricing rate. `App\Support\SettledPayment` —
   the one "money arrived" predicate. `Order::recognised()` / `pipeline()` — a
   sale vs a cart. `Order::SALES_BUCKETS` + `Order::salesBucketSql()`.

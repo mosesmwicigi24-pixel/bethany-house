@@ -838,23 +838,14 @@ class PosController extends Controller
         $outlet       = Outlet::findOrFail($outletId);
 
         // ── Currency / international resolution ────────────────────────────────
-        $homeCountry         = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
+        // The one rule for a customer's country (SellableCurrency::forCustomer,
+        // owner 2026-10-29): Kenya → KES, a sellable own currency → that, else
+        // USD. Without a country the sale is the outlet's.
         $customerCountryCode = strtoupper($validated['customer_country_code'] ?? '');
-        $isInternational     = $customerCountryCode !== '' && $customerCountryCode !== strtoupper($homeCountry);
-
-        if ($customerCountryCode !== '') {
-            $countryCurrency  = DB::table('countries')
-                ->where('code', $customerCountryCode)
-                ->value('default_currency_code');
-            $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-            if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
-                $currencyCode = $countryCurrency;
-            } else {
-                $currencyCode = $this->resolveCurrency($outlet);
-            }
-        } else {
-            $currencyCode = $this->resolveCurrency($outlet);
-        }
+        $isInternational     = \App\Support\SellableCurrency::isForeign($customerCountryCode);
+        $currencyCode = $customerCountryCode !== ''
+            ? \App\Support\SellableCurrency::forCustomer($customerCountryCode)
+            : $this->resolveCurrency($outlet);
 
         // Phase 2 — tax mode from global setting; per-item rates resolved by TaxCalculationService
         $taxInclusive = TaxCalculationService::isTaxInclusive();
@@ -3090,24 +3081,14 @@ class PosController extends Controller
         $taxInclusive = TaxCalculationService::isTaxInclusive();
 
         // ── Currency / international resolution ────────────────────────────────
-        $homeCountry         = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
+        // The one rule for a customer's country (SellableCurrency::forCustomer,
+        // owner 2026-10-29): Kenya → KES, a sellable own currency → that, else
+        // USD. Without a country the sale is the outlet's — or, on an edit, stays as it is.
         $customerCountryCode = strtoupper($validated['customer_country_code'] ?? '');
-        $isInternational     = $customerCountryCode !== '' && $customerCountryCode !== strtoupper($homeCountry);
-
-        if ($customerCountryCode !== '') {
-            $countryCurrency  = DB::table('countries')
-                ->where('code', $customerCountryCode)
-                ->value('default_currency_code');
-            $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-            if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
-                $resolvedCurrency = $countryCurrency;
-            } else {
-                $outlet = Outlet::find($outletId);
-                $resolvedCurrency = $this->resolveCurrency($outlet);
-            }
-        } else {
-            $resolvedCurrency = $order->currency_code; // keep existing
-        }
+        $isInternational     = \App\Support\SellableCurrency::isForeign($customerCountryCode);
+        $resolvedCurrency = $customerCountryCode !== ''
+            ? \App\Support\SellableCurrency::forCustomer($customerCountryCode)
+            : $order->currency_code;
 
         DB::beginTransaction();
         try {
@@ -3557,26 +3538,14 @@ class PosController extends Controller
         // If the cashier specified a customer country, derive the currency from
         // that country's default (validated against active currencies).  Otherwise
         // fall back to the outlet-level currency.
-        $homeCountry         = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
+        // The one rule for a customer's country (SellableCurrency::forCustomer,
+        // owner 2026-10-29): Kenya → KES, a sellable own currency → that, else
+        // USD. Without a country the sale is the outlet's.
         $customerCountryCode = strtoupper($validated['customer_country_code'] ?? '');
-        $isInternational     = $customerCountryCode !== '' && $customerCountryCode !== strtoupper($homeCountry);
-
-        if ($customerCountryCode !== '') {
-            // Look up the country's default currency
-            $countryCurrency = DB::table('countries')
-                ->where('code', $customerCountryCode)
-                ->value('default_currency_code');
-
-            // Validate against active currencies; fall back to outlet currency on mismatch
-            $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-            if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
-                $currencyCode = $countryCurrency;
-            } else {
-                $currencyCode = $this->resolveCurrency($outlet);
-            }
-        } else {
-            $currencyCode = $this->resolveCurrency($outlet);
-        }
+        $isInternational     = \App\Support\SellableCurrency::isForeign($customerCountryCode);
+        $currencyCode = $customerCountryCode !== ''
+            ? \App\Support\SellableCurrency::forCustomer($customerCountryCode)
+            : $this->resolveCurrency($outlet);
 
         // Who is taking this order decides who gets to price it. A cashier's
         // POS quotes in the order's currency already (see transformProduct), so

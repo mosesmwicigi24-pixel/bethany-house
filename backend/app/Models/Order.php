@@ -597,12 +597,14 @@ class Order extends Model
     }
 
     /**
-     * Resolve the correct currency for an order based on destination country.
-     * Kenya (KE) → KES, everywhere else → USD.
+     * Resolve the correct currency for an order based on the customer's country:
+     * Kenya → KES; a country whose own currency can be sold → that currency;
+     * anywhere else → USD (SellableCurrency::forCustomer).
      */
     public static function resolveCurrency(string $countryCode): string
     {
-        return strtoupper($countryCode) === 'KE' ? 'KES' : 'USD';
+        // One rule for every path (SellableCurrency::forCustomer, owner 2026-10-29).
+        return \App\Support\SellableCurrency::forCustomer($countryCode);
     }
 
     /**

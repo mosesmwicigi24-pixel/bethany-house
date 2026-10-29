@@ -556,9 +556,11 @@ export const ordersApi = {
      * Phase 4 - Generate (or refresh) the public payment link for an order.
      * The server mints an HMAC token valid for 72 hours and returns the full URL.
      */
-    getPaymentLink: (id: number) =>
+    /** keep: a reason to keep a foreign customer's order in KES on purpose (logged). */
+    getPaymentLink: (id: number, keep?: string) =>
         get<{ payment_url: string; url: string; expires_at: string }>(
             `/v1/admin/orders/${id}/payment-link`,
+            keep ? { params: { keep_currency: 1, reason: keep } } : undefined,
         ),
 
     /**

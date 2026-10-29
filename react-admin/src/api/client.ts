@@ -251,6 +251,7 @@ function createApiClient(): AxiosInstance {
                 message: data?.message ?? "An unexpected error occurred.",
                 errors: data?.errors ?? {},
                 reason: data?.reason ?? data?.code,
+                detail: data && typeof data === "object" ? data : undefined,
             } satisfies ApiError);
         },
     );

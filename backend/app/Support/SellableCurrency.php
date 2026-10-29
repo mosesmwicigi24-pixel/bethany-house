@@ -18,10 +18,23 @@ use Illuminate\Validation\ValidationException;
  * Two ways in:
  *   - a currency named explicitly (a quotation's currency_code): refused
  *     with a validation error, so the person sees why;
- *   - a currency DERIVED from a customer's country or an outlet (POS,
- *     checkout, admin orders): falls back to the shop's own currency, so the
- *     sale still goes through — in shillings — rather than in a currency
- *     the books can't carry.
+ *   - a currency DERIVED from a customer's country (forCustomer): the ONE
+ *     rule every path that bills a customer asks — the till, chat and
+ *     WhatsApp orders, order edits, Set Country / Currency, the website
+ *     checkout and admin orders (owner, 2026-10-29):
+ *
+ *         Kenya (the home country), or no country    → KES
+ *         a country whose own currency can be sold    → that currency
+ *                                                       (ZMW for Zambia, ZAR
+ *                                                       for South Africa once
+ *                                                       it has a reporting rate)
+ *         any other country                           → USD
+ *
+ *     Before 29 Oct the till fell back to KES here while Set Country fell
+ *     back to USD, so a Botswana customer was billed in shillings. A foreign
+ *     customer is never given the shop's own currency by default; a person
+ *     who really is paying in KES (a relative paying by M-Pesa) is kept in
+ *     KES deliberately, with a reason, at the payment link.
  */
 final class SellableCurrency
 {
@@ -47,6 +60,79 @@ final class SellableCurrency
         $base = DB::table('currencies')->where('is_base', true)->value('code');
 
         return strtoupper((string) ($base ?: 'KES'));
+    }
+
+    /** The currency the rest of the world is billed in when its own can't be. */
+    public const INTERNATIONAL = 'USD';
+
+    /** The shop's own country (settings app_country), upper-case; KE when unset. */
+    public static function homeCountry(): string
+    {
+        return strtoupper((string) (DB::table('settings')->where('key', 'app_country')->value('value') ?: 'KE'));
+    }
+
+    /** Is this customer country outside the shop's own? Empty is not foreign. */
+    public static function isForeign(?string $countryCode): bool
+    {
+        $countryCode = strtoupper(trim((string) $countryCode));
+
+        return $countryCode !== '' && $countryCode !== self::homeCountry();
+    }
+
+    /**
+     * The currency a customer in this country is billed in — the one rule
+     * (see the class note). Every path that prices a customer's order asks
+     * this; the console reads the same answer as `sale_currency` on the
+     * countries list, so what staff see is what is charged.
+     */
+    public static function forCustomer(?string $countryCode): string
+    {
+        $countryCode = strtoupper(trim((string) $countryCode));
+        if (!self::isForeign($countryCode)) {
+            return self::home();
+        }
+        $own = DB::table('countries')->where('code', $countryCode)->value('default_currency_code');
+
+        return self::decide($own, self::sellableCodes(), self::home());
+    }
+
+    /**
+     * The same answer for a whole list of country rows at once (the countries
+     * endpoints), without a query per row.
+     *
+     * @param  iterable<object|array>  $countries  rows with code and default_currency_code
+     * @return array<string, string>  country code → currency
+     */
+    public static function forCountries(iterable $countries): array
+    {
+        $home = self::home(); $homeCountry = self::homeCountry(); $sellable = self::sellableCodes();
+        $out = [];
+        foreach ($countries as $c) {
+            $code = strtoupper((string) data_get($c, 'code'));
+            $out[$code] = $code === '' || $code === $homeCountry ? $home : self::decide(data_get($c, 'default_currency_code'), $sellable, $home);
+        }
+
+        return $out;
+    }
+
+    /** Currencies a sale may be in right now: active with a reporting rate, and KES. */
+    public static function sellableCodes(): array
+    {
+        $rates  = ReportingCurrency::rates();
+        $active = DB::table('currencies')->where('is_active', true)->pluck('code')->map(fn ($c) => strtoupper((string) $c))->all();
+
+        return array_values(array_unique(array_merge(['KES'], array_filter($active, fn ($c) => isset($rates[$c])))));
+    }
+
+    /** A foreign customer: their own currency when sellable (never the shop's own), else USD, else the shop's. */
+    private static function decide(?string $own, array $sellable, string $home): string
+    {
+        $own = strtoupper(trim((string) $own));
+        if ($own !== '' && $own !== $home && in_array($own, $sellable, true)) {
+            return $own;
+        }
+
+        return in_array(self::INTERNATIONAL, $sellable, true) ? self::INTERNATIONAL : $home;
     }
 
     /** A country's default currency when it is sellable, else the fallback. */

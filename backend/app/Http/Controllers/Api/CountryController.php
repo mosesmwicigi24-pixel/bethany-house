@@ -51,6 +51,11 @@ class CountryController extends Controller
             'is_active', 'is_shipping_enabled',
         ]);
 
+        // What a customer here is billed in — the one rule (SellableCurrency::
+        // forCustomer), so the till and the order page show what is charged.
+        $sale = \App\Support\SellableCurrency::forCountries($countries);
+        $countries->each(fn ($c) => $c->setAttribute('sale_currency', $sale[strtoupper((string) $c->code)] ?? null));
+
         return response()->json(['data' => $countries]);
     }
 
@@ -157,6 +162,8 @@ class CountryController extends Controller
         }
 
         $countries = $query->orderBy('name')->get();
+        $sale = \App\Support\SellableCurrency::forCountries($countries);
+        $countries->each(fn ($c) => $c->setAttribute('sale_currency', $sale[strtoupper((string) $c->code)] ?? null));
 
         // Group by region for admin UI accordion/tabs
         $grouped = $countries
