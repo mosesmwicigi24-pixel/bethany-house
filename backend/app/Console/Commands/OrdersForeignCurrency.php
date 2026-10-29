@@ -84,7 +84,13 @@ class OrdersForeignCurrency extends Command
             if (!OrderController::foreignInHomeCurrency($o)) { $tally['kept']++; $this->line("{$head} → kept in {$home} on purpose, left as is"); continue; }
 
             $tally['switch']++;
-            if (!$apply) { $this->line("{$head} → would switch to {$target}"); continue; }
+            if (!$apply) {
+                $p = OrderCurrencySwitch::preview($o, $country);
+                $this->line($p
+                    ? "{$head} → would switch to {$p['currency_code']} " . number_format($p['total'], 2)
+                    : "{$head} → would switch to {$target}, but cannot be priced in {$target} (needs a price or rate)");
+                continue;
+            }
 
             try {
                 $r = OrderCurrencySwitch::toCountry($o, $country, $actor, 'repair');

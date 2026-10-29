@@ -1946,7 +1946,7 @@ export default function PosPage() {
     const { data: countriesData } = useQuery({
         queryKey: ["countries-all"],
         queryFn: () =>
-            get<{ data: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null; sale_currency?: string | null; is_active: boolean }> }>(
+            get<{ data: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null; sale_currency?: string | null; phone_code?: string | null; is_active: boolean }> }>(
                 "/v1/countries",
             ),
         staleTime: 300_000,
@@ -2175,6 +2175,23 @@ export default function PosPage() {
         customerCountryCode !== "" && countryObj?.sale_currency
             ? countryObj.sale_currency
             : outletCurrency;
+
+    // A customer whose number dials in from abroad (+27…) with no country set:
+    // suggest that country — the person confirms, nothing is set silently,
+    // because the country decides the currency (owner, 2026-10-29). Matched
+    // on the countries list's own dialling codes, longest code first.
+    const phoneCountry = useMemo(() => {
+        if (customerCountryCode) return null;
+        const raw  = String(attachedCustomer?.phone ?? "").replace(/[\s\-()]/g, "");
+        const intl = raw.startsWith("+") ? raw.slice(1) : raw.startsWith("00") ? raw.slice(2) : "";
+        if (!intl) return null;
+        let best: any = null; let bestLen = 0;
+        for (const c of allCountries as any[]) {
+            const code = String(c.phone_code ?? "").replace(/\D/g, "");
+            if (code && intl.startsWith(code) && code.length > bestLen) { best = c; bestLen = code.length; }
+        }
+        return best && best.code !== HOME_COUNTRY ? best : null;
+    }, [customerCountryCode, attachedCustomer?.phone, allCountries, HOME_COUNTRY]);
 
     const { data: shippingMethodsData } = useQuery({
         queryKey: ["pos-shipping-methods", effectiveCurrency],
@@ -3494,6 +3511,25 @@ export default function PosPage() {
                                 activeCurrencies={activeCurrencies}
                                 homeCountry={HOME_COUNTRY}
                             />
+                            {phoneCountry && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setCustomerCountryCode(phoneCountry.code);
+                                        // Same as the picker: a cart order already raised is re-raised in the new currency.
+                                        if (pendingOrderId) {
+                                            setPendingOrderId(null);
+                                            setPendingOrderData(null);
+                                            setPendingOrderCartSig("");
+                                            setIsResumedOrder(false);
+                                        }
+                                    }}
+                                    className="mt-1.5 w-full text-left text-2xs rounded-lg border border-info-200 bg-info-50 text-info-800 px-2.5 py-1.5"
+                                >
+                                    {phoneCountry.flag ?? "🌍"} Their number is {phoneCountry.name} (+{String(phoneCountry.phone_code).replace(/\D/g, "")}). Set the country
+                                    {phoneCountry.sale_currency ? ` — bills in ${phoneCountry.sale_currency}` : ""}?
+                                </button>
+                            )}
                         </div>
                     </div>
 

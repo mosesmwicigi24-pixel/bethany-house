@@ -2280,8 +2280,17 @@ class OrderController extends Controller
     public function updateCurrency(Request $request, $id)
     {
         $validated = $request->validate([
-            'country_code' => 'required|string|size:2',
+            'country_code'  => 'required|string|size:2',
+            // A currency the customer asked for instead of their country's
+            // (a Botswana customer who wants rand), with the reason (owner,
+            // 2026-10-29). Only a currency the books can carry.
+            'currency_code' => 'nullable|string|size:3',
+            'reason'        => 'nullable|string|min:5|max:300',
         ]);
+        $requested = !empty($validated['currency_code']) ? \App\Support\SellableCurrency::assert($validated['currency_code']) : null;
+        if ($requested && $requested !== \App\Support\SellableCurrency::forCustomer($validated['country_code']) && empty($validated['reason'])) {
+            return response()->json(['message' => 'Say why the customer is billed in a currency other than their country\'s.', 'errors' => ['reason' => ['A reason is needed.']]], 422);
+        }
 
         $order = Order::with(['items'])->findOrFail($id);
 
@@ -2289,7 +2298,7 @@ class OrderController extends Controller
         // (OrderCurrencySwitch) — shared with the payment-link check and the
         // orders:foreign-currency repair.
         try {
-            $r = \App\Services\OrderCurrencySwitch::toCountry($order, $validated['country_code'], $request->user(), 'set_country');
+            $r = \App\Services\OrderCurrencySwitch::toCountry($order, $validated['country_code'], $request->user(), 'set_country', $requested, $validated['reason'] ?? null);
         } catch (\Throwable $e) {
             return ServerError::respond($e, 'Failed to update currency.');
         }

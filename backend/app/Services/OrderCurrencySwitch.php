@@ -30,12 +30,20 @@ class OrderCurrencySwitch
     /**
      * @return array{ok: bool, changed: bool, currency_code: string, is_international: bool, new_total?: float, old_currency?: string, old_total?: float, message?: string, unpriceable_items?: string[], code?: string}
      */
-    public static function toCountry(Order $order, string $countryCode, ?User $actor = null, string $source = 'set_country'): array
+    /**
+     * $requested: a currency the customer asked to be billed in instead of
+     * their country's (a Botswana customer who wants rand), with $reason. The
+     * caller has already checked it is sellable and that a reason was given.
+     */
+    public static function toCountry(Order $order, string $countryCode, ?User $actor = null, string $source = 'set_country', ?string $requested = null, ?string $reason = null): array
     {
         $order->loadMissing('items');
         $countryCode     = strtoupper(trim($countryCode));
         $isInternational = SellableCurrency::isForeign($countryCode);
-        $newCurrency     = SellableCurrency::forCustomer($countryCode);
+        $ruled           = SellableCurrency::forCustomer($countryCode);
+        $requested       = $requested ? strtoupper(trim($requested)) : null;
+        $newCurrency     = $requested ?: $ruled;
+        $onRequest       = $requested !== null && $requested !== $ruled;
         $oldCurrency     = strtoupper((string) $order->currency_code);
         $oldCountryCode  = $order->customer_country_code;
 
@@ -54,16 +62,7 @@ class OrderCurrencySwitch
         // Where none of the three can be done the change is refused outright,
         // because keeping the old figure under a new label is exactly what
         // turned a KES 4,500 tray into a USD 4,500 order.
-        $repriced = []; $unpriceable = [];
-        if ($oldCurrency !== $newCurrency) {
-            foreach ($order->items as $item) {
-                $priced = CurrencyPricing::catalogue($item->product_id, $item->product_variant_id, $newCurrency);
-                if ($priced) { $repriced[$item->id] = $priced['regular_price']; continue; }
-                $converted = CurrencyPricing::convert((float) $item->unit_price, $oldCurrency, $newCurrency);
-                if ($converted === null) { $unpriceable[] = $item->product_name ?: "Item #{$item->id}"; continue; }
-                $repriced[$item->id] = $converted;
-            }
-        }
+        [$repriced, $unpriceable] = self::reprice($order, $oldCurrency, $newCurrency);
 
         if ($unpriceable) {
             $names = implode(', ', array_unique($unpriceable));
@@ -112,10 +111,61 @@ class OrderCurrencySwitch
             'new_total'        => $plan['total'],
             'source'           => $source,
             'actor_id'         => $actor?->id,
-        ], ($actor ? "{$actor->first_name} moved" : 'Moved') . " {$order->order_number} from {$oldCurrency} to {$newCurrency} ({$countryCode})", $actor);
+            'on_request'       => $onRequest,
+            'reason'           => $onRequest ? $reason : null,
+        ], ($actor ? "{$actor->first_name} moved" : 'Moved') . " {$order->order_number} from {$oldCurrency} to {$newCurrency} ({$countryCode})"
+            . ($onRequest ? " at the customer's request: {$reason}" : ''), $actor);
+        // Billed in shillings on purpose: the payment-link check and the
+        // repair leave it alone, as they do an order kept in KES at the link.
+        if ($onRequest && $isInternational && $newCurrency === SellableCurrency::home()) {
+            ActivityLogService::log('currency_kept', $order, ['currency_code' => $newCurrency, 'country_code' => $countryCode, 'suggested_currency' => $ruled, 'reason' => $reason],
+                "{$order->order_number} billed in {$newCurrency} at the customer's request: {$reason}", $actor);
+        }
 
         return ['ok' => true, 'changed' => true, 'currency_code' => $newCurrency, 'is_international' => $isInternational,
             'new_total' => $plan['total'], 'old_currency' => $oldCurrency, 'old_total' => $oldTotal];
+    }
+
+    /**
+     * What switching would make the order's total, without writing anything
+     * (the repair's dry run shows it beside each order). Null when it can't
+     * be priced in the customer's currency.
+     *
+     * @return array{currency_code: string, total: float}|null
+     */
+    public static function preview(Order $order, string $countryCode): ?array
+    {
+        $order->loadMissing('items');
+        $old = strtoupper((string) $order->currency_code);
+        $new = SellableCurrency::forCustomer($countryCode);
+        [$repriced, $unpriceable] = self::reprice($order, $old, $new);
+        $plan = $unpriceable ? null : OrderRepricer::plan($order, $repriced, $old, $new);
+
+        return $plan ? ['currency_code' => $new, 'total' => (float) $plan['total']] : null;
+    }
+
+    /**
+     * New unit prices in $new: the hub's price for that currency (its own row,
+     * else converted from the list the currency is priced from), else the
+     * line's own price converted. Lines that can do neither are named.
+     *
+     * @return array{0: array<int, float>, 1: string[]}
+     */
+    private static function reprice(Order $order, string $old, string $new): array
+    {
+        $repriced = []; $unpriceable = [];
+        if ($old === $new) {
+            return [$repriced, $unpriceable];
+        }
+        foreach ($order->items as $item) {
+            $priced = CurrencyPricing::catalogue($item->product_id, $item->product_variant_id, $new);
+            if ($priced) { $repriced[$item->id] = $priced['regular_price']; continue; }
+            $converted = CurrencyPricing::convert((float) $item->unit_price, $old, $new);
+            if ($converted === null) { $unpriceable[] = $item->product_name ?: "Item #{$item->id}"; continue; }
+            $repriced[$item->id] = $converted;
+        }
+
+        return [$repriced, $unpriceable];
     }
 
     /** Why this order's currency may no longer change, or null when it may. */

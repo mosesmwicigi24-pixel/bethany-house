@@ -264,6 +264,22 @@ class ProposalSettingsTest extends TestCase
         $this->assertSame(128.0, ReportingCurrency::rates()['USD'], 'the reporting rate is a different column');
     }
 
+    public function test_where_customer_prices_convert_from_is_proposed_with_the_rate_and_signed_by_finance(): void
+    {
+        $zar = DB::table('currencies')->insertGetId(['code' => 'ZAR', 'name' => 'Rand', 'symbol' => 'R', 'exchange_rate' => 0.18,
+            'reporting_rate_to_kes' => 7.1, 'is_base' => false, 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+
+        Sanctum::actingAs($this->admin);
+        $this->putJson("/api/v1/admin/currencies-management/{$zar}", ['priced_from' => 'ZAR'])->assertStatus(422);   // not from itself
+        $this->putJson("/api/v1/admin/currencies-management/{$zar}", ['priced_from' => 'USD'])
+            ->assertStatus(202)->assertJsonPath('proposals.0.request.needs', ['Finance']);
+        $this->assertNull(DB::table('currencies')->where('id', $zar)->value('priced_from'));
+
+        $this->sign($this->fm, $this->requestOf($this->latest('customer_pricing_fx_change')))->assertOk();
+        $this->assertSame('USD', DB::table('currencies')->where('id', $zar)->value('priced_from'));
+        $this->assertSame(0.18, (float) DB::table('currencies')->where('id', $zar)->value('exchange_rate'), 'the rate is untouched');
+    }
+
     public function test_each_rate_has_its_own_maker(): void
     {
         $id = $this->usd();

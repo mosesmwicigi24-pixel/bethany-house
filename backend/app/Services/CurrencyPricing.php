@@ -21,8 +21,10 @@ use Illuminate\Support\Facades\DB;
  *      absent: the answer becomes a converted price or a refusal, and both of
  *      those are recoverable in a way that an invoice for nothing is not.
  *
- *   2. With no such row we convert from the base-currency row at the
- *      configured rate — and when no configured rate exists we return NULL
+ *   2. With no such row we convert — from the price list the currency is
+ *      priced from (currencies.priced_from: the rand from USD, owner
+ *      2026-10-29), else from the base-currency row — at the configured rate,
+ *      exactly, never rounded — and when no configured rate exists we return NULL
  *      rather than a number. currencies.exchange_rate DEFAULTs to 1.0, so a
  *      non-base row still sitting at exactly 1.0 is an unconfigured row, not
  *      a peg (the same rule MetricEngine::internationalCorridor applies to
@@ -46,11 +48,15 @@ class CurrencyPricing
     /** UPPER code of the base currency, or null when no row claims the flag. */
     private static ?string $base = null;
 
+    /** currency → the currency its prices are converted from (currencies.priced_from). */
+    private static array $pricedFrom = [];
+
     /** Drop the memoised rate table — after a currency is edited, and in tests. */
     public static function forget(): void
     {
-        self::$rates = null;
-        self::$base  = null;
+        self::$rates      = null;
+        self::$base       = null;
+        self::$pricedFrom = [];
     }
 
     /**
@@ -70,10 +76,15 @@ class CurrencyPricing
 
         $rates = [];
         $base  = null;
+        $from  = [];
+        $hasPricedFrom = \Illuminate\Support\Facades\Schema::hasColumn('currencies', 'priced_from');
 
-        foreach (DB::table('currencies')->get(['code', 'exchange_rate', 'is_base']) as $row) {
+        foreach (DB::table('currencies')->get($hasPricedFrom ? ['code', 'exchange_rate', 'is_base', 'priced_from'] : ['code', 'exchange_rate', 'is_base']) as $row) {
             $code = strtoupper($row->code);
             $rate = (float) $row->exchange_rate;
+            if ($hasPricedFrom && !empty($row->priced_from)) {
+                $from[$code] = strtoupper((string) $row->priced_from);
+            }
 
             if ($rate <= 0) {
                 continue;
@@ -94,9 +105,19 @@ class CurrencyPricing
             $rates['KES'] ??= 1.0;
         }
 
-        self::$base = $base;
+        self::$base       = $base;
+        self::$pricedFrom = $from;
 
         return self::$rates = $rates;
+    }
+
+    /** The currency $currency's prices are converted from, or null for the base. */
+    public static function pricedFrom(string $currency): ?string
+    {
+        self::rates();
+        $from = self::$pricedFrom[strtoupper($currency)] ?? null;
+
+        return $from && $from !== self::baseCode() ? $from : null;
     }
 
     /** UPPER code of the base currency (KES by convention). */
@@ -159,13 +180,17 @@ class CurrencyPricing
             return self::shape($direct, $currency, null);
         }
 
-        // 2. Otherwise convert — from the base row where there is one, else
-        //    from any row whose currency carries a configured rate.
+        // 2. Otherwise convert — from the price list this currency is priced
+        //    from (the rand from USD) when the product has a price there, else
+        //    from the base row, else from any row whose currency carries a
+        //    configured rate. Exact: no rounding beyond the cent.
         $rates       = self::rates();
         $base        = self::baseCode();
+        $anchor      = self::pricedFrom($currency);
         $convertible = $rows->filter(fn ($r) => isset($rates[strtoupper((string) $r->currency_code)]));
 
-        $source = $convertible->first(fn ($r) => strtoupper((string) $r->currency_code) === $base)
+        $source = ($anchor ? $convertible->first(fn ($r) => strtoupper((string) $r->currency_code) === $anchor) : null)
+            ?? $convertible->first(fn ($r) => strtoupper((string) $r->currency_code) === $base)
             ?? $convertible->first();
 
         if (!$source) {

@@ -1061,8 +1061,17 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
           )
         : countries;
 
+    // The customer asked for another currency (a Botswana customer who wants
+    // rand): bill in it, with the reason in the audit trail (owner, 2026-10-29).
+    const [onRequest,    setOnRequest]    = useState(false);
+    const [requestedCcy, setRequestedCcy] = useState("");
+    const [requestWhy,   setRequestWhy]   = useState("");
+    const requestReady = !onRequest || (requestedCcy !== "" && (requestedCcy === previewCurrency || requestWhy.trim().length >= 5));
+    const billIn = onRequest && requestedCcy ? requestedCcy : previewCurrency;
+
     const mutation = useMutation({
-        mutationFn: () => ordersApi.updateCurrency(order.id, countryCode),
+        mutationFn: () => ordersApi.updateCurrency(order.id, countryCode,
+            onRequest && requestedCcy && requestedCcy !== previewCurrency ? { currency_code: requestedCcy, reason: requestWhy.trim() } : undefined),
         onSuccess: (res: any) => {
             if (res.changed) {
                 const intlNote = res.is_international ? " - marked as international" : "";
@@ -1080,8 +1089,8 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
     });
 
     // Same country, wrong currency (a Botswana order left in KES) is a change too.
-    const canSave = countryCode.trim().length === 2
-        && (countryCode !== currentCountry || previewCurrency !== order.currency_code);
+    const canSave = countryCode.trim().length === 2 && requestReady
+        && (countryCode !== currentCountry || billIn !== order.currency_code);
 
     return (
         <Modal open title="Change Country / Currency" onClose={onClose}>
@@ -1188,6 +1197,26 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
                     </p>
                 )}
 
+                <div className="rounded-xl border border-line px-3 py-2.5 space-y-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-surface-700">
+                        <input type="checkbox" checked={onRequest} onChange={e => setOnRequest(e.target.checked)} />
+                        The customer asked to pay in another currency
+                    </label>
+                    {onRequest && (
+                        <>
+                            <select className="input w-full text-sm" value={requestedCcy} onChange={e => setRequestedCcy(e.target.value)}>
+                                <option value="">Choose the currency…</option>
+                                {activeCurrencies.map((c: any) => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+                            </select>
+                            {requestedCcy && requestedCcy !== previewCurrency && (
+                                <textarea rows={2} className="input w-full text-sm" maxLength={300} value={requestWhy} onChange={e => setRequestWhy(e.target.value)}
+                                    placeholder={`Why? For example: "asked for the price in ${requestedCcy}".`} />
+                            )}
+                            <p className="text-2xs text-surface-500">Prices are re-worked in that currency from the price list. The reason goes in the order's audit trail.</p>
+                        </>
+                    )}
+                </div>
+
                 <div className="flex gap-3">
                     <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
                     <button
@@ -1195,7 +1224,7 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
                         disabled={mutation.isPending || !canSave}
                         className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {mutation.isPending ? "Saving…" : `Apply - ${previewCurrency}`}
+                        {mutation.isPending ? "Saving…" : `Apply - ${billIn}`}
                     </button>
                 </div>
             </div>

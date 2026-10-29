@@ -36,6 +36,8 @@ export interface Currency {
     exchange_rate: number;
     /** KES per 1 unit, for reports (128 = 1 USD). Null: the currency's sales are left out of reports. */
     reporting_rate_to_kes: number | null;
+    /** The price list customer prices convert from when a product has none in this currency; null = shillings. */
+    priced_from?: string | null;
     decimal_places: number;
     thousand_separator: string;
     decimal_separator: string;
@@ -53,6 +55,7 @@ export interface CurrencyFormData {
     symbol: string;
     exchange_rate: number;
     reporting_rate_to_kes: number | null;
+    priced_from?: string | null;
     decimal_places: number;
     thousand_separator: string;
     decimal_separator: string;
