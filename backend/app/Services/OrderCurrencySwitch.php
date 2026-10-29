@@ -83,18 +83,24 @@ class OrderCurrencySwitch
         }
 
         $oldTotal = (float) $order->total_amount;
-        DB::transaction(function () use ($order, $plan, $newCurrency, $countryCode, $isInternational) {
-            // Re-check under a row lock: a payment that arrived while we priced wins.
+        // Re-check under a row lock: a payment that arrived while we priced wins,
+        // and the refusal comes back as a result, never as an exception's text.
+        $lateRefusal = DB::transaction(function () use ($order, $plan, $newCurrency, $countryCode, $isInternational) {
             $locked = Order::whereKey($order->id)->lockForUpdate()->first();
             if ($locked && ($why = self::moneyHasMoved($locked))) {
-                throw new \RuntimeException($why);
+                return $why;
             }
             OrderRepricer::apply($order, $plan, [
                 'currency_code'         => $newCurrency,
                 'customer_country_code' => $countryCode,
                 'is_international'      => $isInternational,
             ]);
+
+            return null;
         });
+        if ($lateRefusal !== null) {
+            return ['ok' => false, 'changed' => false, 'code' => 'payment_started', 'currency_code' => $oldCurrency, 'is_international' => (bool) $order->is_international, 'message' => $lateRefusal];
+        }
 
         ActivityLogService::log('currency_changed', $order, [
             'old_currency'     => $oldCurrency,

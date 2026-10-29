@@ -2290,8 +2290,6 @@ class OrderController extends Controller
         // orders:foreign-currency repair.
         try {
             $r = \App\Services\OrderCurrencySwitch::toCountry($order, $validated['country_code'], $request->user(), 'set_country');
-        } catch (\RuntimeException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Throwable $e) {
             return ServerError::respond($e, 'Failed to update currency.');
         }

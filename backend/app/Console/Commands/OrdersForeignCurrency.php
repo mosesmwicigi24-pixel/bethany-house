@@ -89,7 +89,8 @@ class OrdersForeignCurrency extends Command
             try {
                 $r = OrderCurrencySwitch::toCountry($o, $country, $actor, 'repair');
             } catch (\Throwable $e) {
-                $r = ['ok' => false, 'message' => $e->getMessage()];
+                report($e);
+                $r = ['ok' => false, 'message' => 'failed: ' . class_basename($e) . ' (see the application log)'];
             }
             if ($r['ok'] && $r['changed']) {
                 $tally['switched']++;
