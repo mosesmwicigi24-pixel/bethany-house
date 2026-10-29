@@ -205,6 +205,104 @@ class AutomationsKioskTest extends TestCase
         $this->withHeader('Authorization', "Bearer {$token}")->getJson('/api/v1/admin/kiosk/board')->assertStatus(401);
     }
 
+    /**
+     * A kiosk token is a shared door tablet, not the manager's session: the
+     * manager's idle and absolute limits must not sign it out (they did —
+     * the tablet went back to the set-up screen overnight). It lives
+     * security.sessions.kiosk_days from set-up instead. Real bearer requests
+     * throughout, so the Sanctum token check (and SessionPolicy) runs.
+     */
+    private function kioskBoard(string $token)
+    {
+        $this->flushHeaders(); app('auth')->forgetGuards();
+
+        return $this->withHeader('Authorization', "Bearer {$token}")->getJson('/api/v1/admin/kiosk/board');
+    }
+
+    public function test_kiosk_token_outlives_the_managers_idle_and_absolute_limits(): void
+    {
+        Carbon::setTestNow('2026-03-02 08:00:00');
+        $boss = $this->staff(['attendance.view_team', 'attendance.manage']);
+        $limits = app(\App\Services\Auth\SessionPolicy::class)->limitsFor($boss);
+        $this->assertNotNull($limits, 'the manager has staff session limits');
+        $kiosk = $boss->createToken("kiosk:{$this->outlet->id}:Door", ['kiosk'])->plainTextToken;
+        $own = $boss->createToken('console')->plainTextToken;
+
+        // Overnight: well past the idle limit, nobody at the door.
+        Carbon::setTestNow(now()->addMinutes($limits['sign_out_idle'] + 60));
+        $this->kioskBoard($kiosk)->assertOk();
+        // The manager's own session idled out exactly as before.
+        $this->flushHeaders(); app('auth')->forgetGuards();
+        $this->withHeader('Authorization', "Bearer {$own}")->getJson('/api/v1/admin/auth/me')->assertStatus(401);
+
+        // Past the absolute limit too (and a week on).
+        Carbon::setTestNow(now()->addMinutes($limits['absolute'])->addDays(7));
+        $this->kioskBoard($kiosk)->assertOk();
+    }
+
+    public function test_kiosk_token_stops_after_kiosk_days_and_the_end_is_logged(): void
+    {
+        config(['security.sessions.kiosk_days' => 90]);
+        Carbon::setTestNow('2026-03-02 08:00:00');
+        $boss = $this->staff(['attendance.view_team', 'attendance.manage']);
+        $row = $boss->createToken("kiosk:{$this->outlet->id}:Door", ['kiosk']);
+        $kiosk = $row->plainTextToken;
+
+        Carbon::setTestNow(Carbon::parse('2026-03-02 08:00:00')->addDays(90)->subMinute());
+        $this->kioskBoard($kiosk)->assertOk();
+
+        Carbon::setTestNow(Carbon::parse('2026-03-02 08:00:00')->addDays(90)->addMinute());
+        $this->kioskBoard($kiosk)->assertStatus(401);
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $row->accessToken->id]);
+        $this->assertTrue(DB::table('activity_log')->where('event', 'session_expired')->where('properties', 'like', '%kiosk_expired%')->exists(), 'the end of the kiosk is logged');
+    }
+
+    public function test_long_lived_kiosk_token_still_reaches_only_the_kiosk(): void
+    {
+        Carbon::setTestNow('2026-03-02 08:00:00');
+        $boss = $this->staff(['attendance.view_team', 'attendance.manage']);
+        $kiosk = $boss->createToken("kiosk:{$this->outlet->id}:Door", ['kiosk'])->plainTextToken;
+        Carbon::setTestNow(now()->addDays(30));
+        $this->kioskBoard($kiosk)->assertOk();
+        foreach (['/api/v1/admin/auth/me', '/api/v1/admin/attendance/entries', '/api/v1/admin/orders'] as $path) {
+            $this->flushHeaders(); app('auth')->forgetGuards();
+            $this->withHeader('Authorization', "Bearer {$kiosk}")->getJson($path)->assertStatus(403);
+        }
+    }
+
+    public function test_kiosk_stops_when_the_manager_who_set_it_up_is_deactivated(): void
+    {
+        $boss = $this->staff(['attendance.view_team', 'attendance.manage']);
+        $kiosk = $boss->createToken("kiosk:{$this->outlet->id}:Door", ['kiosk'])->plainTextToken;
+        $this->kioskBoard($kiosk)->assertOk();
+        $boss->forceFill(['status' => 'inactive'])->save();
+        $this->kioskBoard($kiosk)->assertStatus(401);
+    }
+
+    public function test_kiosk_set_up_by_a_pin_lock_role_is_not_pin_locked(): void
+    {
+        Carbon::setTestNow('2026-03-02 08:00:00');
+        $boss = $this->staff(['attendance.view_team', 'attendance.manage']);
+        $boss->assignRole(Role::findOrCreate('pos_clerk', 'sanctum'));
+        app(TerminalPin::class)->set($boss, '4821');
+        $limits = app(\App\Services\Auth\SessionPolicy::class)->limitsFor($boss->fresh());
+        $this->assertNotNull($limits['pin_idle'], 'the role PIN-locks an idle session');
+        $kiosk = $boss->createToken("kiosk:{$this->outlet->id}:Door", ['kiosk'])->plainTextToken;
+        Carbon::setTestNow(now()->addMinutes($limits['pin_idle'] + 10));
+        $this->kioskBoard($kiosk)->assertOk();
+    }
+
+    public function test_kiosks_list_shows_when_each_kiosk_expires(): void
+    {
+        config(['security.sessions.kiosk_days' => 90]);
+        Carbon::setTestNow('2026-03-02 08:00:00');
+        $boss = $this->staff(['attendance.view_team', 'attendance.manage']);
+        $boss->createToken("kiosk:{$this->outlet->id}:Door", ['kiosk']);
+        Sanctum::actingAs($boss);
+        $r = $this->getJson('/api/v1/admin/attendance/kiosks')->assertOk();
+        $this->assertSame('2026-05-31', substr((string) $r->json('data.0.expires_at'), 0, 10));
+    }
+
     public function test_kiosk_punch_needs_the_persons_pin_keeps_a_photo_and_applies_the_shift_rules(): void
     {
         $boss = $this->staff(['attendance.view_team', 'attendance.manage']);

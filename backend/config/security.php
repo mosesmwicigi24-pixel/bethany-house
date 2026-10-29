@@ -78,6 +78,12 @@ return [
         // touched the screen recently (polling) with this header; it does not
         // count as activity for the idle limit.
         'background_header' => 'X-Background-Request',
+
+        // A clock-in kiosk token (People C2) is exempt from the role limits
+        // above — it is a shared door tablet, not a person's session — and
+        // instead works for this many days from when a manager set it up.
+        // Then the manager sets the tablet up again (Attendance › Kiosks).
+        'kiosk_days' => (int) env('KIOSK_TOKEN_DAYS', 90),
     ],
 
     /*

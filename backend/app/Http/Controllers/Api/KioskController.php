@@ -217,6 +217,7 @@ class KioskController extends Controller
             'id' => $t->id, 'name' => $label ?: 'Kiosk', 'outlet_id' => (int) $outletId, 'outlet' => $outlet?->name,
             'set_up_by' => $by ? trim("{$by->first_name} {$by->last_name}") : null, 'created_at' => $t->created_at?->toIso8601String(),
             'last_used_at' => $t->last_used_at?->toIso8601String(),
+            'expires_at' => app(\App\Services\Auth\SessionPolicy::class)->kioskExpiresAt($t)?->toIso8601String(),
         ];
     }
 

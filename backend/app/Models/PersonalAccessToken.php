@@ -23,6 +23,19 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
         'stepped_up_at'  => 'datetime',
     ];
 
+    /**
+     * A clock-in kiosk token (People C2): a manager's token with the single
+     * ability `kiosk`. KioskTokensStayAtTheKiosk fences it to /kiosk/*; the
+     * session policy gives it its own lifetime instead of the manager's
+     * idle and absolute limits. One definition for both.
+     */
+    public static function isKioskOnly(?SanctumPersonalAccessToken $token): bool
+    {
+        $abilities = $token ? (array) ($token->abilities ?? []) : [];
+
+        return $abilities !== [] && !in_array('*', $abilities, true) && in_array('kiosk', $abilities, true);
+    }
+
     protected static function booted(): void
     {
         // The sessions list shows where each session was signed in from.
