@@ -721,6 +721,9 @@ class PosController extends Controller
             'new_customer.company'             => 'nullable|string|max:255',
             // Country drives currency for international POS orders
             'customer_country_code'            => 'nullable|string|size:2',
+            // The customer's choice of currency abroad (USD, rand, …) and, for KES abroad, why.
+            'currency_code'                        => 'nullable|string|size:3',
+            'currency_reason'                      => 'nullable|string|max:300',
             'items'                  => 'required|array|min:1',
             'items.*.variant_id'     => 'nullable|exists:product_variants,id',
             'items.*.product_id'     => 'nullable|exists:products,id',
@@ -846,6 +849,13 @@ class PosController extends Controller
         $currencyCode = $customerCountryCode !== ''
             ? \App\Support\SellableCurrency::forCustomer($customerCountryCode)
             : $this->resolveCurrency($outlet);
+
+        // The customer's own choice (owner, 2026-10-29): "when someone says USD
+        // we quote in USD; when someone says rands, in rands".
+        $currencyAsked = \App\Support\SellableCurrency::chosen($validated['currency_code'] ?? null, $customerCountryCode, $validated['currency_reason'] ?? null, 'currency_reason');
+        if ($currencyAsked !== null) {
+            $currencyCode = $currencyAsked;
+        }
 
         // Phase 2 — tax mode from global setting; per-item rates resolved by TaxCalculationService
         $taxInclusive = TaxCalculationService::isTaxInclusive();
@@ -1104,6 +1114,11 @@ class PosController extends Controller
                 'completed_at'         => null,  // set explicitly by staff, not by payment
                 'created_by'           => $user->id,
             ]);
+
+            if ($currencyAsked !== null) {
+                \App\Services\OrderCurrencySwitch::recordChoice($order, $currencyAsked, $customerCountryCode,
+                    \App\Support\SellableCurrency::forCustomer($customerCountryCode), $validated['currency_reason'] ?? null, $user ?? $request->user());
+            }
 
             // -- 5. Order items + inventory deductions -------------------------
             foreach ($itemsData as $item) {
@@ -3055,6 +3070,9 @@ class PosController extends Controller
             'new_customer.company'                 => 'nullable|string|max:255',
             // Country drives currency for international POS orders
             'customer_country_code'                => 'nullable|string|size:2',
+            // The customer's choice of currency abroad (USD, rand, …) and, for KES abroad, why.
+            'currency_code'                        => 'nullable|string|size:3',
+            'currency_reason'                      => 'nullable|string|max:300',
             'items'                                => 'nullable|array',
             'items.*.variant_id'                   => 'nullable|exists:product_variants,id',
             'items.*.product_id'                   => 'nullable|exists:products,id',
@@ -3089,6 +3107,13 @@ class PosController extends Controller
         $resolvedCurrency = $customerCountryCode !== ''
             ? \App\Support\SellableCurrency::forCustomer($customerCountryCode)
             : $order->currency_code;
+
+        // The customer's own choice (owner, 2026-10-29): "when someone says USD
+        // we quote in USD; when someone says rands, in rands".
+        $currencyAsked = \App\Support\SellableCurrency::chosen($validated['currency_code'] ?? null, $customerCountryCode, $validated['currency_reason'] ?? null, 'currency_reason');
+        if ($currencyAsked !== null) {
+            $resolvedCurrency = $currencyAsked;
+        }
 
         DB::beginTransaction();
         try {
@@ -3367,6 +3392,11 @@ class PosController extends Controller
                 'notes'               => $validated['notes']                ?? $order->notes,
             ]);
 
+            if ($currencyAsked !== null) {
+                \App\Services\OrderCurrencySwitch::recordChoice($order, $currencyAsked, $customerCountryCode,
+                    \App\Support\SellableCurrency::forCustomer($customerCountryCode), $validated['currency_reason'] ?? null, $user ?? $request->user());
+            }
+
             // ── 7. Create new order items + deduct updated stock ──────────────
             foreach ($itemsData as $item) {
                 OrderItem::create([
@@ -3461,6 +3491,9 @@ class PosController extends Controller
             'new_customer.company'                 => 'nullable|string|max:255',
             // Country drives currency for international POS orders
             'customer_country_code'                => 'nullable|string|size:2',
+            // The customer's choice of currency abroad (USD, rand, …) and, for KES abroad, why.
+            'currency_code'                        => 'nullable|string|size:3',
+            'currency_reason'                      => 'nullable|string|max:300',
             // Sales channel this order came through. Defaults to 'pos' so the POS
             // UI is unchanged; the WhatsApp agent (Neema) passes 'whatsapp' so the
             // order groups under "WhatsApp Orders". Fulfilment still draws stock
@@ -3546,6 +3579,13 @@ class PosController extends Controller
         $currencyCode = $customerCountryCode !== ''
             ? \App\Support\SellableCurrency::forCustomer($customerCountryCode)
             : $this->resolveCurrency($outlet);
+
+        // The customer's own choice (owner, 2026-10-29): "when someone says USD
+        // we quote in USD; when someone says rands, in rands".
+        $currencyAsked = \App\Support\SellableCurrency::chosen($validated['currency_code'] ?? null, $customerCountryCode, $validated['currency_reason'] ?? null, 'currency_reason');
+        if ($currencyAsked !== null) {
+            $currencyCode = $currencyAsked;
+        }
 
         // Who is taking this order decides who gets to price it. A cashier's
         // POS quotes in the order's currency already (see transformProduct), so
@@ -3881,6 +3921,11 @@ class PosController extends Controller
                 'notes'               => $validated['notes'] ?? null,
                 'created_by'          => $user->id,
             ]);
+
+            if ($currencyAsked !== null) {
+                \App\Services\OrderCurrencySwitch::recordChoice($order, $currencyAsked, $customerCountryCode,
+                    \App\Support\SellableCurrency::forCustomer($customerCountryCode), $validated['currency_reason'] ?? null, $user ?? $request->user());
+            }
 
             $mtoLines = [];
             foreach ($itemsData as $item) {

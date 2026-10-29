@@ -1762,9 +1762,7 @@ class OrderController extends Controller
         if (strtoupper((string) $order->currency_code) !== $home || $suggested === $home) {
             return null;
         }
-        $kept = DB::table('activity_log')->where('event', 'currency_kept')
-            ->where('subject_type', Order::class)->where('subject_id', $order->id)->exists();
-        if ($kept) {
+        if (\App\Services\OrderCurrencySwitch::chosenOnPurpose($order)) {
             return null;
         }
 
@@ -2287,10 +2285,8 @@ class OrderController extends Controller
             'currency_code' => 'nullable|string|size:3',
             'reason'        => 'nullable|string|min:5|max:300',
         ]);
-        $requested = !empty($validated['currency_code']) ? \App\Support\SellableCurrency::assert($validated['currency_code']) : null;
-        if ($requested && $requested !== \App\Support\SellableCurrency::forCustomer($validated['country_code']) && empty($validated['reason'])) {
-            return response()->json(['message' => 'Say why the customer is billed in a currency other than their country\'s.', 'errors' => ['reason' => ['A reason is needed.']]], 422);
-        }
+        // Any currency the books carry; a customer abroad in KES needs a reason.
+        $requested = \App\Support\SellableCurrency::chosen($validated['currency_code'] ?? null, $validated['country_code'], $validated['reason'] ?? null);
 
         $order = Order::with(['items'])->findOrFail($id);
 

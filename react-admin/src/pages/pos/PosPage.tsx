@@ -1971,7 +1971,12 @@ export default function PosPage() {
     // KES, a sellable own currency → that, else USD); "" with no country, so
     // the backend prices in the outlet's currency.
     const earlyCountryObj  = allCountries.find((c: any) => c.code === customerCountryCode);
-    const currencyForQuery = customerCountryCode !== "" ? (earlyCountryObj?.sale_currency ?? "") : "";
+    // The customer's own choice abroad — "when someone says USD we quote in
+    // USD; rands, in rands" (owner, 2026-10-29). "" = the country's default.
+    // Cleared whenever the country changes.
+    const [billCurrency, setBillCurrency] = useState<string>("");
+    useEffect(() => { setBillCurrency(""); }, [customerCountryCode]);
+    const currencyForQuery = customerCountryCode !== "" ? (billCurrency || earlyCountryObj?.sale_currency || "") : "";
 
     const [shippingAmount, setShippingAmount] = useState(_draft?.shippingAmount ?? 0);
     const [showShippingInput, setShowShippingInput] = useState(false);
@@ -2172,8 +2177,8 @@ export default function PosPage() {
     const isInternationalPosOrder = customerCountryCode !== "" && customerCountryCode !== HOME_COUNTRY;
     const countryObj      = allCountries.find((c: any) => c.code === customerCountryCode);
     const effectiveCurrency =
-        customerCountryCode !== "" && countryObj?.sale_currency
-            ? countryObj.sale_currency
+        customerCountryCode !== "" && (billCurrency || countryObj?.sale_currency)
+            ? (billCurrency || countryObj!.sale_currency!)
             : outletCurrency;
 
     // A customer whose number dials in from abroad (+27…) with no country set:
@@ -2705,6 +2710,8 @@ export default function PosPage() {
             ...(attachedCustomer?.id === -1 && attachedCustomer.new_customer_data ? { new_customer: attachedCustomer.new_customer_data } : {}),
             // Country drives currency resolution on the backend
             ...(customerCountryCode ? { customer_country_code: customerCountryCode } : {}),
+            // The customer's choice of currency, when it isn't the country's default.
+            ...(customerCountryCode && billCurrency && billCurrency !== countryObj?.sale_currency ? { currency_code: billCurrency } : {}),
             ...(orderNote.trim() ? { notes: orderNote.trim() } : {}),
             // MTO items must NOT appear in items[] — the backend stock check
             // would reject them immediately (they have zero stock by definition).
@@ -3511,6 +3518,29 @@ export default function PosPage() {
                                 activeCurrencies={activeCurrencies}
                                 homeCountry={HOME_COUNTRY}
                             />
+                            {isInternationalPosOrder && countryObj?.sale_currency && (
+                                <label className="mt-1.5 flex items-center gap-2 text-2xs text-surface-600">
+                                    Bills in
+                                    <select
+                                        className="input py-1 px-2 text-xs w-auto"
+                                        value={billCurrency || countryObj.sale_currency}
+                                        onChange={e => {
+                                            setBillCurrency(e.target.value === countryObj.sale_currency ? "" : e.target.value);
+                                            // A cart order already raised is re-raised in the chosen currency.
+                                            if (pendingOrderId) {
+                                                setPendingOrderId(null);
+                                                setPendingOrderData(null);
+                                                setPendingOrderCartSig("");
+                                                setIsResumedOrder(false);
+                                            }
+                                        }}
+                                    >
+                                        {Array.from(new Set([countryObj.sale_currency, "USD", ...activeCurrencies.filter(c => c !== "KES")]))
+                                            .map(c => <option key={c} value={c}>{c}{c === countryObj.sale_currency ? " (their country's)" : ""}</option>)}
+                                    </select>
+                                    <span className="text-surface-400">as the customer asks</span>
+                                </label>
+                            )}
                             {phoneCountry && (
                                 <button
                                     type="button"

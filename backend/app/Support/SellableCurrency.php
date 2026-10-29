@@ -135,6 +135,30 @@ final class SellableCurrency
         return in_array(self::INTERNATIONAL, $sellable, true) ? self::INTERNATIONAL : $home;
     }
 
+    /**
+     * A currency the customer chose (owner, 2026-10-29: "when someone says
+     * USD we quote in USD; when someone says rands, in rands" — every country
+     * but Kenya). Null when none was chosen. Any currency the books can carry;
+     * a customer abroad billed in KES needs a reason, because that was the
+     * mistake. Only for a customer abroad: in Kenya the sale is in shillings.
+     */
+    public static function chosen(?string $asked, ?string $countryCode, ?string $reason, string $reasonField = 'reason'): ?string
+    {
+        $asked = strtoupper(trim((string) $asked));
+        if ($asked === '') {
+            return null;
+        }
+        if (!self::isForeign($countryCode)) {
+            throw ValidationException::withMessages(['currency_code' => ['A customer in Kenya pays in shillings. Set the customer\'s country first to bill in another currency.']]);
+        }
+        $asked = self::assert($asked);
+        if ($asked === self::home() && trim((string) $reason) === '') {
+            throw ValidationException::withMessages([$reasonField => ['Say why a customer abroad is billed in ' . $asked . '.']]);
+        }
+
+        return $asked;
+    }
+
     /** A country's default currency when it is sellable, else the fallback. */
     public static function forCountry(?string $countryCode, ?string $fallback = null): string
     {

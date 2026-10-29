@@ -43,7 +43,10 @@ class OrderCurrencySwitch
         $ruled           = SellableCurrency::forCustomer($countryCode);
         $requested       = $requested ? strtoupper(trim($requested)) : null;
         $newCurrency     = $requested ?: $ruled;
-        $onRequest       = $requested !== null && $requested !== $ruled;
+        // Any explicit choice is the customer's, even when it matches today's
+        // rule: if South Africa later moves to the rand, a customer who asked
+        // for dollars stays in dollars.
+        $onRequest       = $requested !== null;
         $oldCurrency     = strtoupper((string) $order->currency_code);
         $oldCountryCode  = $order->customer_country_code;
 
@@ -52,6 +55,10 @@ class OrderCurrencySwitch
         }
 
         if ($oldCurrency === $newCurrency && $oldCountryCode === $countryCode) {
+            if ($onRequest) {
+                self::recordChoice($order, $newCurrency, $countryCode, $ruled, $reason, $actor);
+            }
+
             return ['ok' => true, 'changed' => false, 'currency_code' => $newCurrency, 'is_international' => $isInternational];
         }
 
@@ -115,12 +122,6 @@ class OrderCurrencySwitch
             'reason'           => $onRequest ? $reason : null,
         ], ($actor ? "{$actor->first_name} moved" : 'Moved') . " {$order->order_number} from {$oldCurrency} to {$newCurrency} ({$countryCode})"
             . ($onRequest ? " at the customer's request: {$reason}" : ''), $actor);
-        // Billed in shillings on purpose: the payment-link check and the
-        // repair leave it alone, as they do an order kept in KES at the link.
-        if ($onRequest && $isInternational && $newCurrency === SellableCurrency::home()) {
-            ActivityLogService::log('currency_kept', $order, ['currency_code' => $newCurrency, 'country_code' => $countryCode, 'suggested_currency' => $ruled, 'reason' => $reason],
-                "{$order->order_number} billed in {$newCurrency} at the customer's request: {$reason}", $actor);
-        }
 
         return ['ok' => true, 'changed' => true, 'currency_code' => $newCurrency, 'is_international' => $isInternational,
             'new_total' => $plan['total'], 'old_currency' => $oldCurrency, 'old_total' => $oldTotal];
@@ -166,6 +167,42 @@ class OrderCurrencySwitch
         }
 
         return [$repriced, $unpriceable];
+    }
+
+    /**
+     * Record that the customer chose this order's currency, so the link check
+     * and the repair leave it (chosenOnPurpose). Used by the Set Country
+     * dialog and the till when a currency is picked explicitly.
+     */
+    public static function recordChoice(Order $order, string $currency, ?string $countryCode, ?string $ruled, ?string $reason, ?User $actor = null): void
+    {
+        ActivityLogService::log('currency_kept', $order, [
+            'currency_code' => $currency, 'country_code' => $countryCode, 'suggested_currency' => $ruled,
+            'reason' => $reason, 'on_request' => true,
+        ], "{$order->order_number} billed in {$currency} at the customer's choice" . ($reason ? ": {$reason}" : ''), $actor);
+    }
+
+    /**
+     * Was this order's currency chosen on purpose — kept in KES with a reason
+     * at the link, or billed in a currency the customer asked for? Only the
+     * latest currency decision counts: a later switch by the rule undoes it.
+     * The link check and the repair leave such an order alone.
+     */
+    public static function chosenOnPurpose(Order $order): bool
+    {
+        $last = DB::table('activity_log')
+            ->where('subject_type', Order::class)->where('subject_id', $order->id)
+            ->whereIn('event', ['currency_changed', 'currency_kept'])
+            ->orderByDesc('id')->first(['event', 'properties']);
+        if (!$last) {
+            return false;
+        }
+        if ($last->event === 'currency_kept') {
+            return true;
+        }
+        $props = json_decode((string) $last->properties, true) ?: [];
+
+        return !empty($props['on_request']);
     }
 
     /** Why this order's currency may no longer change, or null when it may. */

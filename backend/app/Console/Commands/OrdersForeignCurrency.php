@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Http\Controllers\Api\OrderController;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\OrderCurrencySwitch;
@@ -29,6 +28,11 @@ use Illuminate\Console\Command;
  *   kept      someone kept it in KES on purpose, with a reason, at the link
  *   closed    cancelled, voided or refunded — skipped
  *
+ * `--country=ZA` narrows to one country and ALSO moves that country's
+ * unpaid orders in any other currency (South Africa's USD orders to rand once
+ * the country is billed in ZAR, owner 2026-10-29). An order whose currency
+ * the customer asked for, or that was kept in KES on purpose, is left alone.
+ *
  * Dry run by default; `--apply --actor=<id or email>` switches the "switch"
  * rows, one transaction each, logged in the actor's name with source
  * "repair". Safe to run again: a switched order is no longer in KES. Links
@@ -42,7 +46,8 @@ class OrdersForeignCurrency extends Command
     protected $signature = 'orders:foreign-currency
         {--apply : Switch the unpaid orders (default is a dry run that changes nothing)}
         {--actor= : The user the switches are made in the name of (id or email); required with --apply}
-        {--order= : Only this order id}';
+        {--order= : Only this order id}
+        {--country= : Only customers in this country (ISO code); also moves its orders in any currency other than the one it is billed in}';
 
     protected $description = 'List foreign customers\' orders billed in KES and switch the unpaid ones to the currency their country is billed in';
 
@@ -62,26 +67,36 @@ class OrdersForeignCurrency extends Command
 
         $home        = SellableCurrency::home();
         $homeCountry = SellableCurrency::homeCountry();
+        $only        = strtoupper(trim((string) $this->option('country')));
+        if ($only !== '' && !SellableCurrency::isForeign($only)) {
+            $this->error("--country={$only} is the shop's own country; nothing to move.");
+
+            return self::FAILURE;
+        }
+        $billedIn = $only !== '' ? SellableCurrency::forCustomer($only) : null;
         $orders = Order::query()
             ->whereNotNull('customer_country_code')
             ->whereRaw('UPPER(customer_country_code) <> ?', [$homeCountry])
-            ->whereRaw('UPPER(currency_code) = ?', [$home])
+            ->when($only !== '',
+                fn ($q) => $q->whereRaw('UPPER(customer_country_code) = ?', [$only])->whereRaw('UPPER(currency_code) <> ?', [$billedIn]),
+                fn ($q) => $q->whereRaw('UPPER(currency_code) = ?', [$home]))
             ->when($this->option('order'), fn ($q, $id) => $q->whereKey((int) $id))
             ->orderBy('id')
             ->get();
 
         $tally = ['switch' => 0, 'switched' => 0, 'refused' => 0, 'paid' => 0, 'kept' => 0, 'closed' => 0, 'fine' => 0];
-        $this->line(($apply ? 'APPLY' : 'DRY RUN') . " — {$orders->count()} order(s) for customers outside {$homeCountry} in {$home}.");
+        $this->line(($apply ? 'APPLY' : 'DRY RUN') . ' — ' . $orders->count() . ' order(s) '
+            . ($only !== '' ? "for customers in {$only} not in {$billedIn}." : "for customers outside {$homeCountry} in {$home}."));
 
         foreach ($orders as $o) {
             $country   = strtoupper((string) $o->customer_country_code);
             $target    = SellableCurrency::forCustomer($country);
             $head      = "Order #{$o->id} {$o->order_number} {$country} {$o->currency_code} " . number_format((float) $o->total_amount, 2);
 
-            if ($target === $home) { $tally['fine']++; continue; }                         // nothing better to bill in
+            if ($target === strtoupper((string) $o->currency_code)) { $tally['fine']++; continue; }   // already right
             if (!$o->isPayable()) { $tally['closed']++; $this->line("{$head} → closed ({$o->status}), skipped"); continue; }
             if (OrderCurrencySwitch::moneyHasMoved($o)) { $tally['paid']++; $this->line("{$head} → paid or part-paid ({$o->payment_status}), left as is"); continue; }
-            if (!OrderController::foreignInHomeCurrency($o)) { $tally['kept']++; $this->line("{$head} → kept in {$home} on purpose, left as is"); continue; }
+            if (OrderCurrencySwitch::chosenOnPurpose($o)) { $tally['kept']++; $this->line("{$head} → {$o->currency_code} chosen on purpose, left as is"); continue; }
 
             $tally['switch']++;
             if (!$apply) {
