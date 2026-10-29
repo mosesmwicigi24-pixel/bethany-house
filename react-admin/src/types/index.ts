@@ -152,6 +152,8 @@ export interface ApiError {
    * never going to be allowed" without string-matching the message.
    */
   reason?: string
+  /** The refusal's own fields (e.g. suggested_currency on a 409), when it sent any. */
+  detail?: Record<string, unknown>
 }
 
 export interface PaginatedResponse<T> {

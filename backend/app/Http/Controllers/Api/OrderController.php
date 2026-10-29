@@ -641,17 +641,10 @@ class OrderController extends Controller
             }
         }
 
-        // ── Resolve currency from country ─────────────────────────────────────
-        $homeCountry     = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
-        $countryCode     = strtoupper($validated['country_code'] ?? $homeCountry);
-        $currency        = Order::resolveCurrency($countryCode);
-        $isInternational = $countryCode !== strtoupper($homeCountry);
-
-        // Validate currency is active in the platform
-        // Only a currency the books can state in shillings; else the shop's own.
-        if (!\App\Support\SellableCurrency::isSellable($currency)) {
-            $currency = \App\Support\SellableCurrency::home();
-        }
+        // ── Resolve currency from country — the one rule (SellableCurrency::forCustomer)
+        $countryCode     = strtoupper($validated['country_code'] ?? \App\Support\SellableCurrency::homeCountry());
+        $currency        = \App\Support\SellableCurrency::forCustomer($countryCode);
+        $isInternational = \App\Support\SellableCurrency::isForeign($countryCode);
 
         DB::beginTransaction();
         try {
@@ -1705,6 +1698,34 @@ class OrderController extends Controller
             return response()->json(['message' => 'This order is already fully paid.'], 422);
         }
 
+        // A foreign customer billed in shillings is the mistake that sent a
+        // Botswana customer a KES link (owner, 2026-10-29). Stop at the moment
+        // the link is asked for: switch the order to the customer's currency
+        // (POST update-currency, then ask again), or keep shillings on purpose
+        // with a reason — a relative in Kenya paying by M-Pesa — which is
+        // logged and not asked again for this order.
+        $mismatch = self::foreignInHomeCurrency($order);
+        if ($mismatch) {
+            if (!$request->boolean('keep_currency')) {
+                return response()->json([
+                    'code'               => 'foreign_customer_in_home_currency',
+                    'message'            => "This customer is in {$mismatch['country_name']} but the order is in {$order->currency_code}. "
+                        . "Switch it to {$mismatch['suggested_currency']} before sending the link, or keep {$order->currency_code} with a reason.",
+                    'country_code'       => $order->customer_country_code,
+                    'country_name'       => $mismatch['country_name'],
+                    'currency_code'      => $order->currency_code,
+                    'suggested_currency' => $mismatch['suggested_currency'],
+                ], 409);
+            }
+            $reason = trim((string) $request->validate(['reason' => 'required|string|min:5|max:300'])['reason']);
+            ActivityLogService::log('currency_kept', $order, [
+                'currency_code'      => $order->currency_code,
+                'country_code'       => $order->customer_country_code,
+                'suggested_currency' => $mismatch['suggested_currency'],
+                'reason'             => $reason,
+            ], "{$request->user()->first_name} kept {$order->order_number} in {$order->currency_code} for a customer in {$mismatch['country_name']}: {$reason}");
+        }
+
         // ONE copy of the minting rule — the public order page re-arms its own
         // checkout through the same service (App\Services\PaymentLinkService).
         $session = \App\Services\PaymentLinkService::mint($order);
@@ -1721,6 +1742,36 @@ class OrderController extends Controller
             'token'       => $order->payment_token,
             'expires_at'  => $order->payment_token_expires_at?->toISOString(),
         ]);
+    }
+
+    /**
+     * A foreign customer whose order sits in the shop's own currency when the
+     * rule bills them in another, and nobody has kept it there on purpose.
+     * Null when the order is fine. Shared with orders:foreign-currency.
+     *
+     * @return array{country_name: string, suggested_currency: string}|null
+     */
+    public static function foreignInHomeCurrency(Order $order): ?array
+    {
+        $country = (string) $order->customer_country_code;
+        if (!\App\Support\SellableCurrency::isForeign($country)) {
+            return null;
+        }
+        $home      = \App\Support\SellableCurrency::home();
+        $suggested = \App\Support\SellableCurrency::forCustomer($country);
+        if (strtoupper((string) $order->currency_code) !== $home || $suggested === $home) {
+            return null;
+        }
+        $kept = DB::table('activity_log')->where('event', 'currency_kept')
+            ->where('subject_type', Order::class)->where('subject_id', $order->id)->exists();
+        if ($kept) {
+            return null;
+        }
+
+        return [
+            'country_name'       => (string) (DB::table('countries')->where('code', strtoupper($country))->value('name') ?: strtoupper($country)),
+            'suggested_currency' => $suggested,
+        ];
     }
 
     // =========================================================================
@@ -2234,119 +2285,27 @@ class OrderController extends Controller
 
         $order = Order::with(['items'])->findOrFail($id);
 
-        if ($order->payment_status !== 'pending') {
-            return response()->json(['message' => 'Cannot change currency after payment has started.'], 422);
-        }
-
-        $countryCode     = strtoupper($validated['country_code']);
-        $homeCountry     = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
-        $isInternational = $countryCode !== strtoupper($homeCountry);
-
-        // Resolve new currency from the country's default_currency_code,
-        // validated against active currencies - same logic as PosController.
-        $countryCurrency  = DB::table('countries')->where('code', $countryCode)->value('default_currency_code');
-        $activeCurrencies = DB::table('currencies')->where('is_active', true)->pluck('code')->toArray();
-        if ($countryCurrency && \App\Support\SellableCurrency::isSellable($countryCurrency)) {
-            $newCurrency = $countryCurrency;
-        } else {
-            // The orders rule for the rest of the world (USD) when that can be
-            // sold in, else the shop's own currency — never "the first active
-            // row", which could be a currency the books can't convert.
-            $guess       = Order::resolveCurrency($countryCode);
-            $newCurrency = \App\Support\SellableCurrency::isSellable($guess) ? $guess : \App\Support\SellableCurrency::home();
-        }
-
-        $oldCurrency    = $order->currency_code;
-        $oldCountryCode = $order->customer_country_code;
-
-        if ($oldCurrency === $newCurrency && $oldCountryCode === $countryCode) {
-            return response()->json(['currency_code' => $newCurrency, 'changed' => false]);
-        }
-
-        // ── Reprice every line BEFORE writing anything ────────────────────────
-        // A price row entered for the new currency wins; otherwise the base row
-        // converted at the configured rate; otherwise — for a hand-priced line
-        // the catalogue knows nothing about — the line's own price converted.
-        // Where none of the three can be done the change is refused outright,
-        // because keeping the old figure under a new label is exactly what
-        // turned a KES 4,500 tray into a USD 4,500 order.
-        $repriced    = [];
-        $unpriceable = [];
-
-        foreach ($order->items as $item) {
-            $priced = CurrencyPricing::catalogue($item->product_id, $item->product_variant_id, $newCurrency);
-
-            if ($priced) {
-                $repriced[$item->id] = $priced['regular_price'];
-                continue;
-            }
-
-            $converted = CurrencyPricing::convert((float) $item->unit_price, $oldCurrency, $newCurrency);
-
-            if ($converted === null) {
-                $unpriceable[] = $item->product_name ?: "Item #{$item->id}";
-                continue;
-            }
-
-            $repriced[$item->id] = $converted;
-        }
-
-        if (!empty($unpriceable)) {
-            $names = implode(', ', array_unique($unpriceable));
-
-            return response()->json([
-                'message' => "Cannot switch this order to {$newCurrency}: no {$newCurrency} price on the hub for {$names}"
-                    . (CurrencyPricing::hasRate($newCurrency)
-                        ? '. Set one on the product, then try again.'
-                        : ", and {$newCurrency} has no exchange rate set. Set a {$newCurrency} price or rate, then try again."),
-                'unpriceable_items' => array_values(array_unique($unpriceable)),
-            ], 422);
-        }
-
-        // The cart-level discount and the shipping fee are figures in the OLD
-        // currency too. A plan of null means one of them cannot cross.
-        $plan = OrderRepricer::plan($order, $repriced, $oldCurrency, $newCurrency);
-
-        if ($plan === null) {
-            return response()->json([
-                'message' => "Cannot switch this order to {$newCurrency}: its shipping or discount amount"
-                    . " cannot be converted from {$oldCurrency}. Set a {$newCurrency} exchange rate, then try again.",
-            ], 422);
-        }
-
-        $newTotal = $plan['total'];
-
-        DB::beginTransaction();
+        // The one rule for the customer's country and the one repricer
+        // (OrderCurrencySwitch) — shared with the payment-link check and the
+        // orders:foreign-currency repair.
         try {
-            OrderRepricer::apply($order, $plan, [
-                'currency_code'         => $newCurrency,
-                'customer_country_code' => $countryCode,
-                'is_international'      => $isInternational,
-            ]);
-
-            DB::commit();
-
-        } catch (\Exception $e) {
-            DB::rollBack();
+            $r = \App\Services\OrderCurrencySwitch::toCountry($order, $validated['country_code'], $request->user(), 'set_country');
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (\Throwable $e) {
             return ServerError::respond($e, 'Failed to update currency.');
         }
 
-        // ── Audit log ─────────────────────────────────────────────────────────
-        ActivityLogService::log('currency_changed', $order, [
-            'old_currency'       => $oldCurrency,
-            'new_currency'       => $newCurrency,
-            'old_country_code'   => $oldCountryCode,
-            'new_country_code'   => $countryCode,
-            'is_international'   => $isInternational,
-            'new_total'          => $newTotal,
-        ]);
+        if (!$r['ok']) {
+            return response()->json(array_filter(['message' => $r['message'], 'unpriceable_items' => $r['unpriceable_items'] ?? null]), 422);
+        }
 
-        return response()->json([
-            'currency_code'    => $newCurrency,
-            'is_international' => $isInternational,
-            'new_total'        => $newTotal,
-            'changed'          => true,
-        ]);
+        return response()->json(array_filter([
+            'currency_code'    => $r['currency_code'],
+            'is_international' => $r['is_international'],
+            'new_total'        => $r['new_total'] ?? null,
+            'changed'          => $r['changed'],
+        ], fn ($v) => $v !== null));
     }
     // =========================================================================
     // PATCH /admin/orders/{orderId}/items/{itemId}/price

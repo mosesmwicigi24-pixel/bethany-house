@@ -111,11 +111,8 @@ class StorefrontLeadController extends Controller
         $countryName = $country?->name ?? ($validated['country'] ?? ($validated['country_code'] ?? 'your area'));
         $destination = $city !== '' ? "{$city}, {$countryName}" : $countryName;
 
-        // Currency by the orders rule: KE → KES, else USD.
-        $currency = Order::resolveCurrency($country?->code ?? ($validated['country_code'] ?? ''));
-        if (!\App\Support\SellableCurrency::isSellable($currency)) {
-            $currency = \App\Support\SellableCurrency::home();
-        }
+        // Currency by the one rule for a customer's country (SellableCurrency::forCustomer).
+        $currency = \App\Support\SellableCurrency::forCustomer($country?->code ?? ($validated['country_code'] ?? ''));
 
         // No shippable data (unknown country, or shipping disabled) → manual quote.
         if (!$country || !$country->is_shipping_enabled) {

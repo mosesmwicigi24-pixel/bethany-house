@@ -117,16 +117,10 @@ class StorefrontCheckoutController extends Controller
             }
         }
 
-        // ── Currency from country (Order::resolveCurrency) ───────────────────
-        $homeCountry     = DB::table('settings')->where('key', 'app_country')->value('value') ?? 'KE';
-        $countryCode     = strtoupper($validated['country_code'] ?? $homeCountry);
-        $currency        = Order::resolveCurrency($countryCode);
-        $isInternational = $countryCode !== strtoupper($homeCountry);
-
-        // Only a currency the books can state in shillings; else the shop's own.
-        if (!\App\Support\SellableCurrency::isSellable($currency)) {
-            $currency = \App\Support\SellableCurrency::home();
-        }
+        // ── Currency from country — the one rule (SellableCurrency::forCustomer) ─
+        $countryCode     = strtoupper($validated['country_code'] ?? \App\Support\SellableCurrency::homeCountry());
+        $currency        = \App\Support\SellableCurrency::forCustomer($countryCode);
+        $isInternational = \App\Support\SellableCurrency::isForeign($countryCode);
 
         // ── Load & vet products, price lines ─────────────────────────────────
         // Server-authoritative discounts: the same resolver that overlays the

@@ -1,0 +1,83 @@
+name: Orders — foreign customers billed in KES
+
+# Runs `php artisan orders:foreign-currency` on the VPS, reaching the box as
+# history-repair-tills.yml does (owner, 2026-10-29).
+#
+#   mode = dry-run (default): lists every order for a customer outside Kenya
+#          still in KES, and what would happen to it. Writes nothing.
+#   mode = apply: switches the UNPAID ones to the currency their country is
+#          billed in (USD, or a sellable own currency such as ZMW or ZAR).
+#          Paid and part-paid orders are never touched. Needs `actor` (the
+#          user's email or id) AND `confirm` typed exactly as APPLY.
+#
+# The repository is public: the command prints order ids, order numbers,
+# country codes, currencies and totals only — no customer name, phone or
+# payment detail. Payment links are not resent; staff resend from the order.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run (writes nothing) or apply'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options: [dry-run, apply]
+      actor:
+        description: 'apply only: the user the switches are made by (email or id)'
+        required: false
+        default: ''
+      confirm:
+        description: 'apply only: type APPLY to write'
+        required: false
+        default: ''
+      order:
+        description: 'optional: only this order id'
+        required: false
+        default: ''
+
+concurrency:
+  group: orders-foreign-currency
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: orders:foreign-currency (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse an apply without an actor and the typed confirmation
+        if: inputs.mode == 'apply' && (inputs.actor == '' || inputs.confirm != 'APPLY')
+        run: |
+          echo "::error::apply needs actor=<user> and confirm=APPLY; nothing was run."
+          exit 1
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Run orders:foreign-currency on the VPS
+        env:
+          MODE: ${{ inputs.mode }}
+          ACTOR: ${{ inputs.actor }}
+          ORDER: ${{ inputs.order }}
+        run: |
+          FLAGS=""
+          if [ "$MODE" = "apply" ]; then FLAGS="--apply --actor=$(printf '%q' "$ACTOR")"; fi
+          if [ -n "$ORDER" ]; then FLAGS="$FLAGS --order=$(printf '%q' "$ORDER")"; fi
+          echo "orders:foreign-currency $FLAGS"
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel php artisan orders:foreign-currency $FLAGS 2>&1"
+        timeout-minutes: 15

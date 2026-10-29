@@ -428,7 +428,7 @@ function CountryPickerPanel({
 }: {
     value: string;
     onChange: (code: string) => void;
-    countries: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null }>;
+    countries: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null; sale_currency?: string | null }>;
     activeCurrencies: string[];
     homeCountry: string;
 }) {
@@ -453,7 +453,7 @@ function CountryPickerPanel({
 
     const selected = countries.find(c => c.code === value);
     const isInternational = value !== "" && value !== homeCountry;
-    const previewCurrency = selected?.default_currency_code ?? null;
+    const previewCurrency = selected?.sale_currency ?? null;   // the server's answer (SellableCurrency::forCustomer)
 
     if (!open && !value) {
         return (
@@ -547,9 +547,8 @@ aria-label="Close">
                             <p className="text-2xs text-surface-400 italic px-3 py-3 text-center">No results.</p>
                         ) : filtered.map(c => {
                             const isHome = c.code === homeCountry;
-                            const currOk = !c.default_currency_code ||
-                                activeCurrencies.length === 0 ||
-                                activeCurrencies.includes(c.default_currency_code);
+                            // What this customer is billed in — the server's answer.
+                            const saleCurrency = c.sale_currency ?? null;
                             return (
                                 <button
                                     key={c.code}
@@ -564,11 +563,8 @@ aria-label="Close">
                                     <span className="text-sm shrink-0 w-5 text-center">{c.flag ?? "🏳"}</span>
                                     <span className="flex-1 truncate">{c.name}</span>
                                     {isHome && <span className="text-2xs text-surface-400 shrink-0">Home</span>}
-                                    {c.default_currency_code && (
-                                        <span className={clsx("text-2xs font-semibold shrink-0", currOk ? "text-surface-500" : "text-warning-dark")}>
-                                            {c.default_currency_code}
-                                            {!currOk && " ⚠"}
-                                        </span>
+                                    {saleCurrency && (
+                                        <span className="text-2xs font-semibold shrink-0 text-surface-500">{saleCurrency}</span>
                                     )}
                                     {value === c.code && (
                                         <svg className="w-3 h-3 text-brand-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
@@ -1950,7 +1946,7 @@ export default function PosPage() {
     const { data: countriesData } = useQuery({
         queryKey: ["countries-all"],
         queryFn: () =>
-            get<{ data: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null; is_active: boolean }> }>(
+            get<{ data: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null; sale_currency?: string | null; is_active: boolean }> }>(
                 "/v1/countries",
             ),
         staleTime: 300_000,
@@ -1971,14 +1967,11 @@ export default function PosPage() {
 
     // ── Early currency derivation for product queries ─────────────────────────
     // Needed before selectedOutlet is declared so it can go into React Query keys.
-    // Simple rule: if a customer country is set and its default currency is active,
-    // use it; otherwise send "" so the backend falls back to the outlet's currency.
+    // The server's answer for the customer's country (sale_currency — Kenya →
+    // KES, a sellable own currency → that, else USD); "" with no country, so
+    // the backend prices in the outlet's currency.
     const earlyCountryObj  = allCountries.find((c: any) => c.code === customerCountryCode);
-    const earlyCountryCurr = earlyCountryObj?.default_currency_code ?? "";
-    const currencyForQuery =
-        earlyCountryCurr && (activeCurrencies.length === 0 || activeCurrencies.includes(earlyCountryCurr))
-            ? earlyCountryCurr
-            : "";
+    const currencyForQuery = customerCountryCode !== "" ? (earlyCountryObj?.sale_currency ?? "") : "";
 
     const [shippingAmount, setShippingAmount] = useState(_draft?.shippingAmount ?? 0);
     const [showShippingInput, setShowShippingInput] = useState(false);
@@ -2179,10 +2172,8 @@ export default function PosPage() {
     const isInternationalPosOrder = customerCountryCode !== "" && customerCountryCode !== HOME_COUNTRY;
     const countryObj      = allCountries.find((c: any) => c.code === customerCountryCode);
     const effectiveCurrency =
-        customerCountryCode !== "" && countryObj?.default_currency_code
-            ? (activeCurrencies.length === 0 || activeCurrencies.includes(countryObj.default_currency_code)
-                ? countryObj.default_currency_code
-                : outletCurrency)
+        customerCountryCode !== "" && countryObj?.sale_currency
+            ? countryObj.sale_currency
             : outletCurrency;
 
     const { data: shippingMethodsData } = useQuery({

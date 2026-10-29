@@ -28,7 +28,8 @@ use Tests\TestCase;
  *
  *  - a sale, quotation or order is never in a currency the books can't state
  *    in shillings (no reporting rate): named outright it is refused, derived
- *    from a country it falls back to the shop's own currency;
+ *    from a foreign customer's country it falls back to USD (owner,
+ *    2026-10-29; it was the shop's own currency until then);
  *  - a shipping fee set up in KES is charged in the order's currency at the
  *    pricing rate (KES 500 → USD 5.00 at 100 KES/USD), never as-is;
  *  - M-Pesa takes shillings only, for the balance due;
@@ -123,12 +124,15 @@ class SellableCurrencyTest extends TestCase
 
     // ── which currencies may be sold in ─────────────────────────────────────
 
-    public function test_a_sale_for_a_customer_whose_currency_has_no_reporting_rate_is_rung_in_shillings(): void
+    public function test_a_sale_for_a_customer_whose_currency_has_no_reporting_rate_is_rung_in_usd(): void
     {
         $this->cashier();
 
+        // Owner, 2026-10-29: a foreign customer is never billed in the shop's
+        // own currency by default — GBP can't be sold, so the UK pays in USD,
+        // the same answer Set Country / Currency gives (one rule).
         $gb = $this->pendingOrder(['customer_country_code' => 'GB', 'customer_first_name' => 'Ann'])->assertSuccessful();
-        $this->assertSame('KES', Order::find($gb->json('order.id') ?? $gb->json('id'))->currency_code, 'GBP has no reporting rate: the shop\'s own currency');
+        $this->assertSame('USD', Order::find($gb->json('order.id') ?? $gb->json('id'))->currency_code, 'GBP has no reporting rate: the rest-of-the-world currency');
 
         $us = $this->pendingOrder(['customer_country_code' => 'US', 'customer_first_name' => 'Bob'])->assertSuccessful();
         $this->assertSame('USD', Order::find($us->json('order.id') ?? $us->json('id'))->currency_code, 'USD has one');

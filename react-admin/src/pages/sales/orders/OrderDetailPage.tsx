@@ -1030,7 +1030,7 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
     });
     const { data: countryData } = useQuery({
         queryKey:  ["countries-all"],
-        queryFn:   () => get<{ data: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null; is_active: boolean }> }>(
+        queryFn:   () => get<{ data: Array<{ code: string; name: string; flag: string | null; default_currency_code: string | null; sale_currency?: string | null; is_active: boolean }> }>(
             "/v1/admin/countries"
         ),
         staleTime: 300_000,
@@ -1044,11 +1044,11 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
     const [countryCode, setCountryCode] = useState<string>(currentCountry);
     const [search, setSearch] = useState("");
 
-    // Derive the preview currency from the selected country using the same logic
-    // as the backend (default_currency_code on the country row; fallback to KES).
+    // The server's own answer for this country (sale_currency — the one rule:
+    // Kenya → KES, a sellable own currency → that, else USD). Never guessed
+    // here: the old guess showed BWP for Botswana while the order went to KES.
     const selectedCountryObj = countries.find((c: any) => c.code === countryCode);
-    const previewCurrency = selectedCountryObj?.default_currency_code
-        ?? activeCurrencies[0]?.code
+    const previewCurrency = selectedCountryObj?.sale_currency
         ?? order.currency_code;
 
     const homeCountry = "KE"; // matches app_country setting default
@@ -1079,15 +1079,17 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
         onError: (e: ApiError) => toast.error(e.message),
     });
 
-    const canSave = countryCode.trim().length === 2 && countryCode !== currentCountry;
+    // Same country, wrong currency (a Botswana order left in KES) is a change too.
+    const canSave = countryCode.trim().length === 2
+        && (countryCode !== currentCountry || previewCurrency !== order.currency_code);
 
     return (
         <Modal open title="Change Country / Currency" onClose={onClose}>
             <div className="space-y-4 p-5">
                 <p className="text-xs text-surface-500">
-                    Select the country the customer is paying from. The currency will be set
-                    automatically based on that country's default, and the order will be flagged
-                    as international if the country differs from the store's home country.
+                    Select the country the customer is paying from. Kenya pays in KES; a country
+                    whose own currency the shop sells in (Zambia, for one) pays in that; everyone
+                    else pays in USD. The order is flagged international outside Kenya.
                 </p>
                 <div className="flex items-start gap-2 bg-info-50 border border-info-200 rounded-xl px-3 py-2.5 text-2xs text-info-800">
                     <svg className="w-3.5 h-3.5 text-info-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -3629,6 +3631,8 @@ export default function OrderDetailPage() {
     // Phase 4 - payment link + M-Pesa verify
     const [paymentLink,       setPaymentLink]        = useState<string | null>(null);
     const [paymentLinkLoading, setPaymentLinkLoading] = useState(false);
+    const [currencyCheck,     setCurrencyCheck]      = useState<{ message: string; suggested: string; country: string } | null>(null);
+    const [keepReason,        setKeepReason]         = useState("");
     const [verifyingPaymentId,         setVerifyingPaymentId]         = useState<number | null>(null);
     const [mpesaCode,                  setMpesaCode]                  = useState("");
     const [verifyingPaystackPaymentId, setVerifyingPaystackPaymentId] = useState<number | null>(null);
@@ -3774,21 +3778,46 @@ export default function OrderDetailPage() {
         onError:    (e: ApiError) => toast.error(e.message),
     });
 
-    // Phase 4 - fetch/generate payment link
-    const handleGetPaymentLink = async () => {
+    // Phase 4 - fetch/generate payment link. A foreign customer's order still
+    // in KES stops here (409 foreign_customer_in_home_currency): switch it to
+    // their currency, or keep KES on purpose with a reason (owner, 2026-10-29).
+    const handleGetPaymentLink = async (keep?: string) => {
         if (!order) return;
         setPaymentLinkLoading(true);
         try {
-            const res = await ordersApi.getPaymentLink(order.id);
+            const res = await ordersApi.getPaymentLink(order.id, keep);
             const url = res.payment_url ?? res.url;
             setPaymentLink(url);
+            setCurrencyCheck(null);
             await navigator.clipboard.writeText(url).catch(() => {});
             toast.success("Payment link copied to clipboard!");
         } catch (e: any) {
-            toast.error(e.message ?? "Could not generate payment link");
+            if (e?.reason === "foreign_customer_in_home_currency") {
+                setCurrencyCheck({
+                    message:   e.message,
+                    suggested: String(e.detail?.suggested_currency ?? "USD"),
+                    country:   String(e.detail?.country_code ?? (order as any).customer_country_code ?? ""),
+                });
+            } else {
+                toast.error(e.message ?? "Could not generate payment link");
+            }
         } finally {
             setPaymentLinkLoading(false);
         }
+    };
+    const switchAndGetLink = async () => {
+        if (!order || !currencyCheck) return;
+        setPaymentLinkLoading(true);
+        try {
+            const r: any = await ordersApi.updateCurrency(order.id, currencyCheck.country);
+            toast.success(`Order moved to ${r.currency_code}${r.new_total != null ? ` · ${r.currency_code} ${Number(r.new_total).toLocaleString("en-KE", { minimumFractionDigits: 2 })}` : ""}`);
+            refresh();
+        } catch (e: any) {
+            toast.error(e.message ?? "Could not switch the currency");
+            setPaymentLinkLoading(false);
+            return;
+        }
+        await handleGetPaymentLink();
     };
 
     // Phase 4 - M-Pesa offline verification mutation
@@ -4075,7 +4104,7 @@ export default function OrderDetailPage() {
                             </button>
                         )}
                         {outstanding > 0 && !["cancelled", "voided", "refunded"].includes(order.status) && (
-                            <button onClick={handleGetPaymentLink} disabled={paymentLinkLoading} className="btn-secondary btn-sm gap-1.5">
+                            <button onClick={() => handleGetPaymentLink()} disabled={paymentLinkLoading} className="btn-secondary btn-sm gap-1.5">
                                 {paymentLinkLoading ? <Spinner size="xs" /> : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>}
                                 Payment Link
                             </button>
@@ -5136,6 +5165,29 @@ export default function OrderDetailPage() {
 
             {/* Modals */}
             {showStatusModal   && <StatusUpdateModal   order={order} onClose={() => setShowStatusModal(false)}   onUpdated={refresh} />}
+            {currencyCheck && (
+                <Modal open title="Check the currency before sending" onClose={() => setCurrencyCheck(null)}>
+                    <div className="space-y-4 p-5 text-sm">
+                        <p className="text-surface-700">{currencyCheck.message}</p>
+                        <button onClick={switchAndGetLink} disabled={paymentLinkLoading} className="btn-primary w-full">
+                            {paymentLinkLoading ? <Spinner size="xs" /> : null}
+                            Switch to {currencyCheck.suggested} and get the link
+                        </button>
+                        <p className="text-2xs text-surface-500">
+                            Prices come from the {currencyCheck.suggested} price list, or are converted at the customer rate. Check the new total before you send it.
+                        </p>
+                        <div className="border-t border-line pt-4 space-y-2">
+                            <label className="block text-xs font-semibold text-surface-700">Or keep {order.currency_code} on purpose</label>
+                            <textarea rows={2} className="input w-full text-sm" value={keepReason} onChange={e => setKeepReason(e.target.value)}
+                                placeholder="Why? For example: her sister in Nairobi is paying by M-Pesa." maxLength={300} />
+                            <button onClick={() => handleGetPaymentLink(keepReason.trim())} disabled={paymentLinkLoading || keepReason.trim().length < 5} className="btn-secondary w-full">
+                                Keep {order.currency_code} and get the link
+                            </button>
+                            <p className="text-2xs text-surface-500">The reason goes in the order's audit trail, and you won't be asked again for this order.</p>
+                        </div>
+                    </div>
+                </Modal>
+            )}
             {showVoidModal     && <VoidOrderModal      order={order} onClose={() => setShowVoidModal(false)}     onDone={refresh}    />}
             {showRefundModal   && <RefundModal          order={order} onClose={() => setShowRefundModal(false)}   onDone={refresh}    />}
             {showPaymentModal  && <AddPaymentModal      order={order} onClose={() => setShowPaymentModal(false)}  onDone={refresh}    />}
