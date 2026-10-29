@@ -24,6 +24,14 @@ use Laravel\Sanctum\PersonalAccessToken;
  *
  * A person with several roles gets the strictest of each limit. Storefront
  * customers (not admin-capable) are not subject to staff limits.
+ *
+ * A clock-in kiosk token (People C2) is not a person's session: it sits on a
+ * shared tablet at the door, fenced to /kiosk/* (KioskTokensStayAtTheKiosk),
+ * and every punch needs that person's own terminal PIN. Its holder's idle and
+ * absolute limits would sign the tablet out overnight, so it gets its own
+ * lifetime instead (security.sessions.kiosk_days, from when it was set up).
+ * The account checks in AuthServiceProvider still apply: if the manager who
+ * set it up is deactivated or locked, the kiosk stops.
  */
 class SessionPolicy
 {
@@ -98,6 +106,10 @@ class SessionPolicy
             return true;
         }
 
+        if (\App\Models\PersonalAccessToken::isKioskOnly($token)) {
+            return $this->admitKiosk($token, $user);
+        }
+
         $limits = $this->limitsFor($user);
         if ($limits === null) {
             return true;
@@ -151,6 +163,25 @@ class SessionPolicy
         }
 
         return true;
+    }
+
+    /** A kiosk token lives kiosk_days from set-up; then the tablet needs setting up again. */
+    private function admitKiosk(PersonalAccessToken $token, User $user): bool
+    {
+        if ($this->kioskExpiresAt($token)?->lt(now())) {
+            $this->end($token, $user, 'kiosk_expired');
+            return false;
+        }
+
+        return true;
+    }
+
+    /** When a kiosk token stops working (null when it was never stamped with a creation time). */
+    public function kioskExpiresAt(PersonalAccessToken $token): ?\Illuminate\Support\Carbon
+    {
+        $days = max(1, (int) config('security.sessions.kiosk_days', 90));
+
+        return $token->created_at?->copy()->addDays($days);
     }
 
     private function isBackground(Request $request): bool
