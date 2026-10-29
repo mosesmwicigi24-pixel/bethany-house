@@ -351,4 +351,167 @@ class ForeignCustomerCurrencyTest extends TestCase
         Artisan::call('orders:foreign-currency', ['--apply' => true, '--actor' => $boss->email]);
         $this->assertStringContainsString('Switched 0, refused 0;', Artisan::output());
     }
+    // ── the rand, priced from the USD list (owner, 2026-10-29) ─────────────
+
+    /** Rand customer rate 0.18 per shilling = R18 per USD at the 100 KES/USD customer rate. */
+    private function randFromUsd(?string $from = 'USD'): void
+    {
+        DB::table('currencies')->where('code', 'ZAR')->update(['exchange_rate' => 0.18, 'priced_from' => $from]);
+        CurrencyPricing::forget();
+    }
+
+    public function test_the_rand_is_converted_from_the_usd_price_exactly_and_a_typed_rand_price_holds(): void
+    {
+        $this->randFromUsd();
+        $usdSet   = $this->product(15000, ['USD' => 160]);        // USD 160 → R2,880.00 (not 15,000 × 0.18 = 2,700)
+        $kesOnly  = $this->product(3600);                          // no USD price → KES 3,600 × 0.18 = R648.00
+        $randSet  = $this->product(12000, ['ZAR' => 2999]);        // typed rand price holds: R2,999.00
+        $odd      = $this->product(15000, ['USD' => 149.99]);      // 149.99 × 18 = R2,699.82 — exact, never rounded
+
+        $price = fn (Product $p, string $c) => CurrencyPricing::catalogue($p->id, null, $c)['regular_price'];
+        $this->assertEqualsWithDelta(2880.00, $price($usdSet, 'ZAR'), 0.001);
+        $this->assertEqualsWithDelta(648.00, $price($kesOnly, 'ZAR'), 0.001);
+        $this->assertEqualsWithDelta(2999.00, $price($randSet, 'ZAR'), 0.001);
+        $this->assertEqualsWithDelta(2699.82, $price($odd, 'ZAR'), 0.0001);
+        $this->assertEqualsWithDelta(3000.00, $price($usdSet, 'ZMW'), 0.001, 'kwacha still converts from shillings: 15,000 × 0.2');
+        $this->assertSame('USD', CurrencyPricing::pricedFrom('ZAR'));
+        $this->assertNull(CurrencyPricing::pricedFrom('ZMW'));
+
+        // A South African chat order: R2,880 + R648 + R2,999 = R6,527.00, reported at the rand's own 7.1.
+        $this->staff(['pos.access']);
+        $res = $this->chatOrder('ZA', [
+            ['product_id' => $usdSet->id, 'quantity' => 1, 'unit_price' => 15000],
+            ['product_id' => $kesOnly->id, 'quantity' => 1, 'unit_price' => 3600],
+            ['product_id' => $randSet->id, 'quantity' => 1, 'unit_price' => 12000],
+        ])->assertSuccessful();
+        $order = Order::findOrFail($res->json('order_id'));
+        $this->assertSame('ZAR', $order->currency_code);
+        $this->assertEqualsWithDelta(6527.00, (float) $order->total_amount, 0.001);
+        $this->assertEqualsWithDelta(7.1, (float) $order->reporting_rate_to_kes, 0.000001);
+
+        // Back to shillings as the source: the USD price no longer matters.
+        $this->randFromUsd(null);
+        $this->assertEqualsWithDelta(2700.00, $price($usdSet, 'ZAR'), 0.001);
+    }
+
+    public function test_a_customer_may_choose_any_currency_the_books_carry_and_kes_abroad_needs_a_reason(): void
+    {
+        $this->randFromUsd();
+        $order = $this->legacyBotswanaOrder();                     // KES 15,000 + 3,600 + 12,000, no USD or rand rows
+        $this->staff(['orders.view', 'orders.edit']);
+        $url = "/api/v1/admin/orders/{$order->id}/update-currency";
+
+        $this->postJson($url, ['country_code' => 'BW', 'currency_code' => 'BWP'])->assertStatus(422);              // no reporting rate
+        $this->postJson($url, ['country_code' => 'BW', 'currency_code' => 'KES'])->assertStatus(422)->assertJsonValidationErrors('reason');
+        $this->assertSame('KES', $order->fresh()->currency_code);
+
+        // "When someone says rands, we quote in rands" — no reason needed.
+        $this->postJson($url, ['country_code' => 'BW', 'currency_code' => 'ZAR', 'reason' => 'Asked for the price in rand'])
+            ->assertOk()->assertJsonPath('currency_code', 'ZAR');
+        $order->refresh();
+        $this->assertSame('ZAR', $order->currency_code);
+        $this->assertSame('BW', $order->customer_country_code);
+        $this->assertEqualsWithDelta(30600 * 0.18, (float) $order->total_amount, 0.001);            // R5,508.00
+        $log = DB::table('activity_log')->where('event', 'currency_changed')->where('subject_id', $order->id)->latest('id')->first();
+        $props = json_decode($log->properties, true);
+        $this->assertTrue($props['on_request']);
+        $this->assertSame('Asked for the price in rand', $props['reason']);
+
+        // Asking for shillings on purpose: kept, so the link check and the repair leave it alone.
+        $this->postJson($url, ['country_code' => 'BW', 'currency_code' => 'KES', 'reason' => 'Sister in Nairobi pays by M-Pesa'])->assertOk();
+        $this->assertSame('KES', $order->fresh()->currency_code);
+        $this->getJson("/api/v1/admin/orders/{$order->id}/payment-link")->assertOk();
+    }
+
+    public function test_the_repair_dry_run_shows_each_new_total(): void
+    {
+        $order = $this->legacyBotswanaOrder();
+        $this->assertSame(0, Artisan::call('orders:foreign-currency'));
+        $this->assertStringContainsString("Order #{$order->id} {$order->order_number} BW KES 30,600.00 → would switch to USD 306.00", Artisan::output());
+        $this->assertSame('KES', $order->fresh()->currency_code);
+    }
+
+    /**
+     * South Africa moves to the rand (owner, 29 Oct): customers pay KES ÷ 6.5,
+     * the books value a rand at 7.8 — KES 15,000 → R2,307.69 → KES 18,000.
+     * The basket KES 30,600 → R4,707.69 (30,600 ÷ 6.5), booked at 7.8.
+     */
+    public function test_south_africas_unpaid_orders_move_to_the_rand_in_any_currency_but_chosen_ones_stay(): void
+    {
+        DB::table('currencies')->where('code', 'ZAR')->update(['exchange_rate' => round(1 / 6.5, 6), 'reporting_rate_to_kes' => 7.8, 'priced_from' => 'USD']);
+        DB::table('countries')->where('code', 'ZA')->update(['default_currency_code' => 'USD']);   // production today
+        ReportingCurrency::forget(); CurrencyPricing::forget();
+
+        $this->staff(['pos.access']);
+        $inUsd   = Order::findOrFail($this->chatOrder('ZA')->assertSuccessful()->json('order_id'));
+        $partPd  = Order::findOrFail($this->chatOrder('ZA')->assertSuccessful()->json('order_id'));
+        $asked   = Order::findOrFail($this->chatOrder('ZA')->assertSuccessful()->json('order_id'));
+        $inKes   = Order::findOrFail($this->chatOrder(null)->assertSuccessful()->json('order_id'));
+        DB::table('orders')->where('id', $inKes->id)->update(['customer_country_code' => 'ZA', 'is_international' => true]);
+        $botswana = $this->legacyBotswanaOrder();
+        $this->assertSame(['USD', 'USD', 'USD', 'KES'], [$inUsd->currency_code, $partPd->currency_code, $asked->currency_code, $inKes->fresh()->currency_code]);
+        DB::table('payments')->insert(['order_id' => $partPd->id, 'payment_number' => 'PAY-' . uniqid(), 'amount' => 50, 'currency_code' => 'USD', 'status' => 'paid', 'payment_method' => 'card', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('orders')->where('id', $partPd->id)->update(['payment_status' => 'partial']);
+        $boss = $this->staff(['orders.view', 'orders.edit']);
+        $this->postJson("/api/v1/admin/orders/{$asked->id}/update-currency", ['country_code' => 'ZA', 'currency_code' => 'USD'])->assertOk();  // USD is the rule today: no reason needed
+
+        // The owner switches South Africa to the rand; the customer of $asked then asks to stay in dollars.
+        DB::table('countries')->where('code', 'ZA')->update(['default_currency_code' => 'ZAR']);
+        $this->assertSame('ZAR', SellableCurrency::forCustomer('ZA'));
+        $this->postJson("/api/v1/admin/orders/{$asked->id}/update-currency", ['country_code' => 'ZA', 'currency_code' => 'USD', 'reason' => 'Asked to keep paying in dollars'])->assertOk();
+
+        $this->assertSame(0, Artisan::call('orders:foreign-currency', ['--country' => 'ZA']));
+        $out = Artisan::output();
+        $this->assertStringContainsString('for customers in ZA not in ZAR', $out);
+        $this->assertStringContainsString("Order #{$inUsd->id} {$inUsd->order_number} ZA USD 306.00 → would switch to ZAR 4,707.69", $out);
+        $this->assertStringContainsString("Order #{$inKes->id} {$inKes->order_number} ZA KES 30,600.00 → would switch to ZAR 4,707.69", $out);
+        $this->assertStringContainsString('Would switch 2; left paid 1, kept 1, closed 0.', $out);
+        $this->assertStringNotContainsString("Order #{$botswana->id} ", $out);
+
+        $this->assertSame(0, Artisan::call('orders:foreign-currency', ['--country' => 'ZA', '--apply' => true, '--actor' => $boss->email]));
+        foreach ([$inUsd, $inKes] as $o) {
+            $o->refresh();
+            $this->assertSame('ZAR', $o->currency_code);
+            $this->assertEqualsWithDelta(4707.69, (float) $o->total_amount, 0.001);
+            $this->assertEqualsWithDelta(7.8, (float) $o->reporting_rate_to_kes, 0.000001);          // R4,707.69 × 7.8 ≈ KES 36,720 in the books
+        }
+        $this->assertSame('USD', $partPd->fresh()->currency_code);
+        $this->assertSame('USD', $asked->fresh()->currency_code);
+        $this->assertSame('KES', $botswana->fresh()->currency_code);
+
+        Artisan::call('orders:foreign-currency', ['--country' => 'ZA', '--apply' => true, '--actor' => $boss->email]);
+        $this->assertStringContainsString('Switched 0, refused 0;', Artisan::output());
+        $this->assertSame(1, Artisan::call('orders:foreign-currency', ['--country' => 'KE']));     // the home country is refused
+    }
+
+    public function test_the_till_bills_in_the_currency_the_customer_chooses(): void
+    {
+        DB::table('currencies')->where('code', 'ZAR')->update(['exchange_rate' => round(1 / 6.5, 6), 'reporting_rate_to_kes' => 7.8]);
+        ReportingCurrency::forget(); CurrencyPricing::forget();
+        $this->staff(['pos.access']);
+        $order = fn (?string $country, ?string $currency, ?string $why = null) => $this->postJson('/api/v1/admin/pos/pending-order', array_filter([
+            'outlet_id' => $this->outlet->id, 'channel' => 'whatsapp', 'customer_first_name' => 'Thandi',
+            'customer_country_code' => $country, 'currency_code' => $currency, 'currency_reason' => $why, 'items' => $this->basket(),
+        ], fn ($v) => $v !== null));
+
+        // South Africa's default is the rand: KES 30,600 ÷ 6.5 = R4,707.69.
+        $za = Order::findOrFail($order('ZA', null)->assertSuccessful()->json('order_id'));
+        $this->assertSame('ZAR', $za->currency_code);
+        $this->assertEqualsWithDelta(4707.69, (float) $za->total_amount, 0.001);
+
+        // "When someone says USD, we quote in USD": USD 306.00, and the choice is recorded.
+        $usd = Order::findOrFail($order('ZA', 'USD')->assertSuccessful()->json('order_id'));
+        $this->assertSame('USD', $usd->currency_code);
+        $this->assertEqualsWithDelta(306.00, (float) $usd->total_amount, 0.001);
+        $this->assertTrue(\App\Services\OrderCurrencySwitch::chosenOnPurpose($usd));
+        $this->assertFalse(\App\Services\OrderCurrencySwitch::chosenOnPurpose($za));
+
+        // A Botswana customer who asks for rand gets rand; KES abroad needs a reason; Kenya stays in shillings.
+        $this->assertSame('ZAR', Order::findOrFail($order('BW', 'ZAR')->assertSuccessful()->json('order_id'))->currency_code);
+        $order('BW', 'KES')->assertStatus(422)->assertJsonValidationErrors('currency_reason');
+        $this->assertSame('KES', Order::findOrFail($order('BW', 'KES', 'Relative in Nairobi pays by M-Pesa')->assertSuccessful()->json('order_id'))->currency_code);
+        $order('KE', 'USD')->assertStatus(422)->assertJsonValidationErrors('currency_code');
+        $order('ZA', 'BWP')->assertStatus(422);
+    }
+
 }

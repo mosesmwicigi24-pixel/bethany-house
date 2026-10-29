@@ -34,6 +34,10 @@ on:
         description: 'optional: only this order id'
         required: false
         default: ''
+      country:
+        description: 'optional: only customers in this country (e.g. ZA); also moves its orders in any currency other than the one it is billed in'
+        required: false
+        default: ''
 
 concurrency:
   group: orders-foreign-currency
@@ -72,10 +76,12 @@ jobs:
           MODE: ${{ inputs.mode }}
           ACTOR: ${{ inputs.actor }}
           ORDER: ${{ inputs.order }}
+          COUNTRY: ${{ inputs.country }}
         run: |
           FLAGS=""
           if [ "$MODE" = "apply" ]; then FLAGS="--apply --actor=$(printf '%q' "$ACTOR")"; fi
           if [ -n "$ORDER" ]; then FLAGS="$FLAGS --order=$(printf '%q' "$ORDER")"; fi
+          if [ -n "$COUNTRY" ]; then FLAGS="$FLAGS --country=$(printf '%q' "$COUNTRY")"; fi
           echo "orders:foreign-currency $FLAGS"
           ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
             -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \

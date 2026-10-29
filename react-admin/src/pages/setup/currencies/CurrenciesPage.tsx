@@ -41,6 +41,9 @@ const schema = z.object({
         (v) => (v === "" || v === null || v === undefined ? null : Number(v)),
         z.number().min(0.0001, "Must be positive").nullable(),
     ),
+    // The price list customer prices convert from when a product has no price
+    // of its own here ("" = shillings). The rand from USD (owner, 2026-10-29).
+    priced_from: z.string(),
     decimal_places: z.coerce.number().min(0).max(4),
     thousand_separator: z.string(),
     decimal_separator: z.string(),
@@ -57,6 +60,7 @@ const DEFAULTS: FormValues = {
     symbol: "",
     kes_per_unit: 1,
     reporting_rate_to_kes: null,
+    priced_from: "",
     decimal_places: 2,
     thousand_separator: ",",
     decimal_separator: ".",
@@ -146,6 +150,7 @@ export default function CurrenciesPage() {
             symbol: c.symbol,
             kes_per_unit: c.exchange_rate > 0 ? Math.round((1 / Number(c.exchange_rate)) * 100) / 100 : 1,
             reporting_rate_to_kes: c.reporting_rate_to_kes == null ? null : Number(c.reporting_rate_to_kes),
+            priced_from: c.priced_from ?? "",
             decimal_places: c.decimal_places,
             thousand_separator: c.thousand_separator,
             decimal_separator: c.decimal_separator,
@@ -159,8 +164,9 @@ export default function CurrenciesPage() {
 
     // The form speaks "KES per 1 unit"; the API stores the inverse, to the six
     // decimals the column holds (150 KES/£ → 0.006667).
-    const toPayload = ({ kes_per_unit, ...rest }: FormValues): CurrencyFormData => ({
+    const toPayload = ({ kes_per_unit, priced_from, ...rest }: FormValues): CurrencyFormData => ({
         ...rest,
+        priced_from: priced_from || null,
         // An untouched figure sends the stored rate back exactly: the 2-decimal
         // round trip must never read as a pricing-rate change (Phase 3C).
         exchange_rate: editing && Number(kes_per_unit) === (editing.exchange_rate > 0 ? Math.round((1 / Number(editing.exchange_rate)) * 100) / 100 : 1)
@@ -454,6 +460,29 @@ export default function CurrenciesPage() {
                             />
                             {editing && <NeedsApprovalHint>A change needs approval from finance.</NeedsApprovalHint>}
                         </Field>
+                        {(() => {
+                            const code   = watch("code") || "this currency";
+                            const from   = watch("priced_from");
+                            const anchor = currencies.find(c => c.code === from);
+                            const k      = Number(watch("kes_per_unit"));
+                            const perAnchor = anchor && anchor.exchange_rate > 0 && k > 0 ? (1 / Number(anchor.exchange_rate)) / k : null;
+                            return (
+                                <Field
+                                    label="Customer prices converted from"
+                                    hint={perAnchor
+                                        ? `A product with no ${code} price of its own: its ${from} price × ${perAnchor.toFixed(4).replace(/\.?0+$/, "")} (1 ${from} = ${perAnchor.toFixed(2)} ${code}). Exact, never rounded. A ${code} price typed on a product always holds.`
+                                        : `A product with no ${code} price of its own is converted from its shillings price at the customer rate above. Exact, never rounded. A ${code} price typed on a product always holds.`}
+                                >
+                                    <FieldSelect className="input" {...register("priced_from")}>
+                                        <option value="">The shillings price</option>
+                                        {currencies
+                                            .filter(c => !c.is_base && c.is_active && c.code !== watch("code") && !c.priced_from)
+                                            .map(c => <option key={c.code} value={c.code}>The {c.code} price</option>)}
+                                    </FieldSelect>
+                                    {editing && <NeedsApprovalHint>A change needs approval from finance, with the rate.</NeedsApprovalHint>}
+                                </Field>
+                            );
+                        })()}
                         <Field
                             label={`Reporting rate: KES per 1 ${watch("code") || "unit"}`}
                             error={errors.reporting_rate_to_kes?.message}

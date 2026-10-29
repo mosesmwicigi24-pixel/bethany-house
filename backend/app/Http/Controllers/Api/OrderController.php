@@ -1762,9 +1762,7 @@ class OrderController extends Controller
         if (strtoupper((string) $order->currency_code) !== $home || $suggested === $home) {
             return null;
         }
-        $kept = DB::table('activity_log')->where('event', 'currency_kept')
-            ->where('subject_type', Order::class)->where('subject_id', $order->id)->exists();
-        if ($kept) {
+        if (\App\Services\OrderCurrencySwitch::chosenOnPurpose($order)) {
             return null;
         }
 
@@ -2280,8 +2278,15 @@ class OrderController extends Controller
     public function updateCurrency(Request $request, $id)
     {
         $validated = $request->validate([
-            'country_code' => 'required|string|size:2',
+            'country_code'  => 'required|string|size:2',
+            // A currency the customer asked for instead of their country's
+            // (a Botswana customer who wants rand), with the reason (owner,
+            // 2026-10-29). Only a currency the books can carry.
+            'currency_code' => 'nullable|string|size:3',
+            'reason'        => 'nullable|string|min:5|max:300',
         ]);
+        // Any currency the books carry; a customer abroad in KES needs a reason.
+        $requested = \App\Support\SellableCurrency::chosen($validated['currency_code'] ?? null, $validated['country_code'], $validated['reason'] ?? null);
 
         $order = Order::with(['items'])->findOrFail($id);
 
@@ -2289,7 +2294,7 @@ class OrderController extends Controller
         // (OrderCurrencySwitch) — shared with the payment-link check and the
         // orders:foreign-currency repair.
         try {
-            $r = \App\Services\OrderCurrencySwitch::toCountry($order, $validated['country_code'], $request->user(), 'set_country');
+            $r = \App\Services\OrderCurrencySwitch::toCountry($order, $validated['country_code'], $request->user(), 'set_country', $requested, $validated['reason'] ?? null);
         } catch (\Throwable $e) {
             return ServerError::respond($e, 'Failed to update currency.');
         }

@@ -146,6 +146,9 @@ class CurrencyController extends Controller
             // means "do not convert", and those orders are reported apart rather
             // than at a guess.
             'reporting_rate_to_kes' => 'sometimes|nullable|numeric|min:0.000001',
+            // Which price list customer prices convert from (null = shillings);
+            // proposed with the pricing rate (customer_pricing_fx_change).
+            'priced_from'        => 'sometimes|nullable|string|size:3',
             'decimal_places'     => 'sometimes|integer|min:0|max:4',
             'symbol_position'    => 'sometimes|in:before,after',
             'thousand_separator' => 'sometimes|string|max:5',
@@ -157,7 +160,7 @@ class CurrencyController extends Controller
 
         // The two rates are proposals (Phase 3C); everything else about a
         // currency is a plain edit, and stays the super admin's (settings.edit).
-        $plain = array_diff_key($validated, array_flip(['exchange_rate', 'reporting_rate_to_kes', 'effective_from']));
+        $plain = array_diff_key($validated, array_flip(['exchange_rate', 'priced_from', 'reporting_rate_to_kes', 'effective_from']));
         $plain = array_filter($plain, fn ($v, $k) => !property_exists($currency, $k) || (string) $currency->{$k} !== (string) (is_bool($v) ? (int) $v : $v), ARRAY_FILTER_USE_BOTH);
         if ($plain !== [] && !$request->user()->can('settings.edit')) {
             return response()->json([
@@ -207,8 +210,10 @@ class CurrencyController extends Controller
     {
         $service = app(\App\Services\Approvals\ProposalService::class);
         $out = [];
-        if (array_key_exists('exchange_rate', $validated)) {
-            $out[] = $service->propose('customer_pricing_fx_change', $id, ['exchange_rate' => $validated['exchange_rate']], $request->user());
+        // The pricing rate and the list prices convert from: one proposal.
+        $pricing = array_intersect_key($validated, ['exchange_rate' => 1, 'priced_from' => 1]);
+        if ($pricing !== []) {
+            $out[] = $service->propose('customer_pricing_fx_change', $id, $pricing, $request->user());
         }
         if (array_key_exists('reporting_rate_to_kes', $validated)) {
             $out[] = $service->propose('reporting_fx_change', $id, ['reporting_rate_to_kes' => $validated['reporting_rate_to_kes']],

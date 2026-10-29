@@ -589,9 +589,10 @@ export const ordersApi = {
     /**
      * Phase 4 - Enforce currency from the country selected at order creation.
      */
-    updateCurrency: (id: number, countryCode: string) =>
+    /** request: bill in a currency the customer asked for instead of their country's, with a reason. */
+    updateCurrency: (id: number, countryCode: string, request?: { currency_code: string; reason: string }) =>
         post<{ currency_code: string; changed: boolean }>(
             `/v1/admin/orders/${id}/update-currency`,
-            { country_code: countryCode },
+            { country_code: countryCode, ...(request ?? {}) },
         ),
 };
