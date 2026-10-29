@@ -1364,6 +1364,9 @@ function AddPaymentModal({ order, onClose, onDone }: {
     const [manualRef, setManualRef] = useState("");
     const [verifying, setVerifying] = useState(false);
     const [verifyMsg, setVerifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
+    // A code Safaricom has not confirmed is recorded only when the user
+    // chooses to; the payment then follows the M-Pesa method's approval rule.
+    const [unconfirmed, setUnconfirmed] = useState<string | null>(null);
     const pollRef   = useRef<ReturnType<typeof setInterval>>();
     const pollCount = useRef(0);
     const MAX_POLLS = 18;
@@ -1448,24 +1451,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
                 phone: phone.trim(),
             });
             setStkStep("waiting");
-            pollCount.current = 0;
-            pollRef.current = setInterval(async () => {
-                pollCount.current += 1;
-                if (pollCount.current >= MAX_POLLS) {
-                    stopPolling(); setStkStep("failed");
-                    setStkError("No confirmation received within 3 minutes. Use the transaction code below to complete manually.");
-                    return;
-                }
-                try {
-                    const res = await get<any>(`/v1/admin/orders/${order.id}`);
-                    const status = res?.order?.payment_status ?? res?.payment_status;
-                    if (status === "paid" || status === "partial") {
-                        stopPolling(); setStkStep("confirmed");
-                        toast.success("M-Pesa payment confirmed!");
-                        setTimeout(() => { onDone(); onClose(); }, 1200);
-                    }
-                } catch { /* ignore */ }
-            }, 10_000);
+            startPolling();
         } catch (e: any) {
             setStkError(e.message ?? "Failed to send STK push. Check the phone number and try again.");
             setStkStep("idle");
@@ -1474,39 +1460,68 @@ function AddPaymentModal({ order, onClose, onDone }: {
         }
     };
 
+    // Watches the order until the Hub records the money (an STK push answered,
+    // or Safaricom's reply to a receipt check).
+    const startPolling = () => {
+        stopPolling();
+        pollCount.current = 0;
+        pollRef.current = setInterval(async () => {
+            pollCount.current += 1;
+            if (pollCount.current >= MAX_POLLS) {
+                stopPolling(); setStkStep("failed");
+                setStkError("No confirmation received within 3 minutes. Use the transaction code below to complete manually.");
+                return;
+            }
+            try {
+                const res = await get<any>(`/v1/admin/orders/${order.id}`);
+                const status = res?.order?.payment_status ?? res?.payment_status;
+                if (status === "paid" || status === "partial") {
+                    stopPolling(); setStkStep("confirmed");
+                    toast.success("M-Pesa payment confirmed!");
+                    setTimeout(() => { onDone(); onClose(); }, 1200);
+                }
+            } catch { /* ignore */ }
+        }, 10_000);
+    };
+
     // ── M-Pesa manual Daraja verify ───────────────────────────────────────────
     const verifyManual = async () => {
-        if (!manualRef.trim()) return;
-        setVerifying(true); setVerifyMsg(null);
+        const code = manualRef.trim();
+        if (!code) return;
+        setVerifying(true); setVerifyMsg(null); setUnconfirmed(null);
         try {
             const orderRes = await get<any>(`/v1/admin/orders/${order.id}`);
             const pendingPayment = orderRes?.order?.payments?.find(
                 (p: any) => p.status === "pending" && p.payment_method === "mpesa"
             );
-            if (pendingPayment) {
-                await post(
-                    `/v1/admin/orders/${order.id}/payments/${pendingPayment.id}/verify-mpesa`,
-                    { code: manualRef.trim() }
-                );
-                stopPolling(); setStkStep("confirmed");
-                setVerifyMsg({ ok: true, text: "Verified with Daraja - payment confirmed!" });
-                toast.success("Payment verified via Daraja!");
-                setTimeout(() => { onDone(); onClose(); }, 1200);
+            if (!pendingPayment) {
+                setVerifyMsg({ ok: false, text: "There is no M-Pesa request on this order to check the code against." });
+                setUnconfirmed(code);
                 return;
             }
-            // No pending payment - fall back to recording with the code as reference
-            recordMpesaManual();
-        } catch {
-            setVerifyMsg({ ok: false, text: "Daraja verification failed. Recording as manual confirmation." });
-            recordMpesaManual();
+            const res = await ordersApi.verifyMpesa(order.id, pendingPayment.id, code);
+            if (res.pending) {
+                // Safaricom took the question; the answer settles the payment.
+                setVerifyMsg({ ok: true, text: res.message });
+                startPolling();
+                return;
+            }
+            stopPolling(); setStkStep("confirmed");
+            setVerifyMsg({ ok: true, text: "Safaricom confirmed the payment." });
+            toast.success("M-Pesa payment confirmed!");
+            setTimeout(() => { onDone(); onClose(); }, 1200);
+        } catch (e: any) {
+            setVerifyMsg({ ok: false, text: e?.message ?? "Safaricom did not confirm this code." });
+            setUnconfirmed(code);
         } finally {
             setVerifying(false);
         }
     };
 
-    const recordMpesaManual = () => {
-        setReference(manualRef);
-        manualMutation.mutate({ ref: manualRef });
+    const recordMpesaManual = (code: string) => {
+        setUnconfirmed(null);
+        setReference(code);
+        manualMutation.mutate({ ref: code });
     };
 
     // ── Record payment mutation (manual/cash/bank/other) ─────────────────────
@@ -1856,7 +1871,15 @@ function AddPaymentModal({ order, onClose, onDone }: {
                                         {verifying ? "Checking…" : "Verify & Confirm"}
                                     </button>
                                 </div>
-                                <p className="text-2xs text-surface-400">Code will be validated with Safaricom Daraja before the payment is recorded.</p>
+                                {unconfirmed && stkStep !== "confirmed" ? (
+                                    <button onClick={() => recordMpesaManual(unconfirmed)}
+                                        disabled={manualMutation.isPending}
+                                        className="w-full px-4 py-2 rounded-xl text-xs font-bold text-warning-dark bg-warning-light hover:opacity-90 disabled:opacity-40 transition-opacity">
+                                        Record {unconfirmed} without Safaricom confirmation
+                                    </button>
+                                ) : (
+                                    <p className="text-2xs text-surface-400">The code is checked with Safaricom before the payment is recorded.</p>
+                                )}
                             </div>
                         </div>
                     </div>
