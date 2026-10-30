@@ -126,7 +126,7 @@ class SessionLimitsTest extends TestCase
 
         $this->travel(3)->hours();
 
-        $this->withBearer($t, 'GET', '/api/v1/customer/orders')->assertOk();
+        $this->withBearer($t, 'GET', '/api/v1/admin/auth/me')->assertOk();
     }
 
     public function test_the_kill_switch_turns_the_policy_off(): void
