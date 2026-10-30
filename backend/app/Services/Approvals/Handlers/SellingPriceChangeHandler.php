@@ -6,6 +6,7 @@ use App\Models\ChangeProposal;
 use App\Models\ProductPrice;
 use App\Models\User;
 use App\Support\CostBasis;
+use App\Support\CustomerMoney;
 use App\Support\ReportingCurrency;
 use Illuminate\Validation\ValidationException;
 
@@ -59,11 +60,14 @@ final class SellingPriceChangeHandler extends ProposalHandler
     public function normalise(array $new, int $subjectId): array
     {
         $out = array_intersect_key($new, $this->fields());
+        // A proposal carries the price as it will be saved: a whole unit in
+        // any currency but the shop's own (CustomerMoney::listPrice).
+        $currency = (string) (ProductPrice::whereKey($subjectId)->value('currency_code') ?? '');
         if (array_key_exists('regular_price', $out)) {
             if ($out['regular_price'] === null || !is_numeric($out['regular_price']) || (float) $out['regular_price'] < 0) {
                 throw ValidationException::withMessages(['regular_price' => 'The regular price must be a number, zero or more.']);
             }
-            $out['regular_price'] = round((float) $out['regular_price'], 2);
+            $out['regular_price'] = CustomerMoney::listPrice((float) $out['regular_price'], $currency);
         }
         if (array_key_exists('sale_price', $out)) {
             $sale = $out['sale_price'];
@@ -71,7 +75,7 @@ final class SellingPriceChangeHandler extends ProposalHandler
                 throw ValidationException::withMessages(['sale_price' => 'The sale price must be a number, zero or more.']);
             }
             // 0 means "no sale" (App\Models\ProductPrice).
-            $out['sale_price'] = ($sale === null || (float) $sale <= 0) ? null : round((float) $sale, 2);
+            $out['sale_price'] = ($sale === null || (float) $sale <= 0) ? null : CustomerMoney::listPrice((float) $sale, $currency);
         }
 
         // The resulting row must be one the model will save: a sale below the regular price.

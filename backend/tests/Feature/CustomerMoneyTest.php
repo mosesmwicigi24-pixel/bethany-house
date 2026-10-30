@@ -66,16 +66,43 @@ class CustomerMoneyTest extends TestCase
         $this->assertNull(CustomerMoney::wholeOrNull(null));
     }
 
-    public function test_a_price_typed_with_cents_is_billed_whole_and_the_price_list_keeps_it(): void
+    public function test_a_price_in_any_currency_but_the_shillings_is_saved_whole(): void
+    {
+        $this->currency('ZAR', 0.153846);
+        $product = Product::factory()->create(['status' => Product::STATUS_ACTIVE]);
+        $row = fn (string $code, float $regular, ?float $sale = null) => ProductPrice::create([
+            'product_id' => $product->id, 'product_variant_id' => null, 'currency_code' => $code,
+            'regular_price' => $regular, 'sale_price' => $sale,
+        ])->fresh();
+
+        $usd = $row('USD', 149.99);
+        $this->assertSame('150.00', (string) $usd->regular_price);       // 149.99 → 150
+
+        $zar = $row('ZAR', 3230.77, 3200.50);
+        $this->assertSame('3231.00', (string) $zar->regular_price);      // 3,230.77 → 3,231
+        $this->assertSame('3201.00', (string) $zar->sale_price);         // 3,200.50 → 3,201, halves up
+
+        $kes = $row('KES', 999.50);
+        $this->assertSame('999.50', (string) $kes->regular_price, "the shop's own currency is kept as typed");
+
+        // An edit is rounded too.
+        $usd->update(['regular_price' => 120.40]);
+        $this->assertSame('120.00', (string) $usd->fresh()->regular_price);
+    }
+
+    public function test_a_price_saved_with_cents_before_the_rule_is_still_billed_whole(): void
     {
         $product = Product::factory()->create(['status' => Product::STATUS_ACTIVE]);
-        ProductPrice::create(['product_id' => $product->id, 'product_variant_id' => null, 'currency_code' => 'USD', 'regular_price' => 149.99]);
+        // Written past the model, as rows saved before 30 Oct were.
+        DB::table('product_prices')->insert([
+            'product_id' => $product->id, 'product_variant_id' => null, 'currency_code' => 'USD',
+            'regular_price' => 149.99, 'created_at' => now(), 'updated_at' => now(),
+        ]);
 
         $priced = CurrencyPricing::catalogue($product->id, null, 'USD');
 
         $this->assertSame(150.0, $priced['regular_price']);            // 149.99 → 150
         $this->assertSame(150.0, $priced['effective_price']);
-        $this->assertEqualsWithDelta(149.99, (float) ProductPrice::where('product_id', $product->id)->value('regular_price'), 0.001);
     }
 
     public function test_a_shipping_fee_is_whole_in_every_currency(): void
