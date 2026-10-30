@@ -9,7 +9,6 @@ use App\Http\Controllers\Api\{
     ProductController,
     CategoryController,
     OrderController,
-    CartController,
     CustomerController,
     QuotationController,
     InvoiceController,
@@ -74,23 +73,11 @@ Route::post('/broadcasting/auth', function (Request $request) {
 
 Route::prefix('v1')->group(function () {
 
-    // ═══ AUTHENTICATION (customer / public facing) ═══════════════════════════
+    // ═══ PASSWORD RECOVERY (public) ══════════════════════════════════════════
 
     Route::prefix('auth')->middleware('throttle:auth')->group(function () {
-        Route::post('/register',         [AuthController::class, 'register']);
-        Route::post('/login',            [AuthController::class, 'login']);
         Route::post('/forgot-password',  [AuthController::class, 'forgotPassword']);
         Route::post('/reset-password',   [AuthController::class, 'resetPassword']);
-
-        Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
-            Route::post('/logout',          [AuthController::class, 'logout']);
-            Route::get('/user',             [AuthController::class, 'user']);
-            Route::put('/profile',          [AuthController::class, 'updateProfile']);
-            Route::post('/change-password', [AuthController::class, 'changePassword']);
-            Route::post('/enable-2fa',      [AuthController::class, 'enable2FA']);
-            Route::post('/verify-2fa',      [AuthController::class, 'verify2FA']);
-            Route::post('/disable-2fa',     [AuthController::class, 'disable2FA']);
-        });
     });
 
     // ═══ REACT ADMIN AUTHENTICATION ══════════════════════════════════════════
@@ -301,43 +288,6 @@ Route::prefix('v1')->group(function () {
     // ═══ AUTHENTICATED ROUTES ═════════════════════════════════════════════════
 
     Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
-
-        // ── Customer portal ─────────────────────────────────────────────────
-
-        Route::prefix('customer')->group(function () {
-            Route::get('/orders',                     [OrderController::class, 'customerOrders']);
-            Route::get('/orders/{id}',                [OrderController::class, 'customerOrderDetails']);
-            Route::post('/orders/{id}/cancel',        [OrderController::class, 'cancelOrder']);
-            Route::post('/orders/{id}/return',        [ReturnController::class, 'request']);
-            Route::get('/returns',                    [ReturnController::class, 'customerReturns']);
-            Route::get('/returns/{id}',               [ReturnController::class, 'customerReturnDetails']);
-            Route::post('/returns/{id}/cancel',       [ReturnController::class, 'cancelRequest']);
-            Route::get('/addresses',                  [CustomerController::class, 'addresses']);
-            Route::post('/addresses',                 [CustomerController::class, 'storeAddress']);
-            Route::put('/addresses/{id}',             [CustomerController::class, 'updateAddress']);
-            Route::delete('/addresses/{id}',          [CustomerController::class, 'deleteAddress']);
-            Route::get('/wishlist',                   [CustomerController::class, 'wishlist']);
-            Route::post('/wishlist/{productId}',      [CustomerController::class, 'addToWishlist']);
-            Route::delete('/wishlist/{productId}',    [CustomerController::class, 'removeFromWishlist']);
-            Route::post('/products/{id}/reviews',     [ProductReviewController::class, 'store']);
-            Route::put('/reviews/{id}',               [ProductReviewController::class, 'update']);
-            Route::delete('/reviews/{id}',            [ProductReviewController::class, 'destroy']);
-        });
-
-        // ── Cart ────────────────────────────────────────────────────────────
-
-        Route::prefix('cart')->group(function () {
-            Route::get('/',                 [CartController::class, 'index']);
-            Route::post('/items',           [CartController::class, 'addItem']);
-            Route::put('/items/{id}',       [CartController::class, 'updateItem']);
-            Route::delete('/items/{id}',    [CartController::class, 'removeItem']);
-            Route::delete('/clear',         [CartController::class, 'clear']);
-            Route::post('/apply-coupon',    [CartController::class, 'applyCoupon']);
-            Route::delete('/remove-coupon', [CartController::class, 'removeCoupon']);
-        });
-
-        Route::post('/checkout',            [OrderController::class, 'checkout']);
-        Route::post('/orders/{id}/payment', [PaymentController::class, 'initiatePayment']);
 
         // ═══ COMMUNICATIONS - all authenticated staff ════════════════════
         // Comments, channels, notifications and the sidebar badge count are

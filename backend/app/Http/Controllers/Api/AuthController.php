@@ -4,9 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\Customer;
 use App\Services\ActivityLogService;
-use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -24,123 +22,11 @@ use PragmaRX\Google2FA\Google2FA;
 class AuthController extends Controller
 {
     // =========================================================================
-    // CUSTOMER / PUBLIC AUTH
+    // SESSION + PASSWORD RECOVERY
     // =========================================================================
 
     /**
-     * Register a new user (customer)
-     */
-    public function register(Request $request)
-    {
-        $validated = $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
-            'phone'    => 'nullable|string|max:20',
-            'language' => 'nullable|string|in:en,fr,pt',
-            'currency' => 'nullable|string|in:KES,USD',
-        ]);
-
-        // Split 'name' into first_name / last_name to match the User model
-        $nameParts = explode(' ', $validated['name'], 2);
-
-        $user = User::create([
-            'first_name' => $nameParts[0],
-            'last_name'  => $nameParts[1] ?? '',
-            'email'      => $validated['email'],
-            'password'   => Hash::make($validated['password']),
-            'phone'      => $validated['phone'] ?? null,
-            'status'     => 'active',
-        ]);
-
-        $customer = Customer::create([
-            'user_id'            => $user->id,
-            'preferred_language' => $validated['language'] ?? 'en',
-            'preferred_currency' => $validated['currency'] ?? 'USD',
-        ]);
-
-        $token = $user->createAuthToken('auth_token')->plainTextToken;
-
-        // Phase 3 - welcome notification + audit log
-        try {
-            NotificationService::userWelcome($user->id, $user->first_name);
-            ActivityLogService::auth('register', $user);
-        } catch (\Exception) {}
-
-        return response()->json([
-            'message'  => 'Registration successful',
-            'user'     => $user,
-            'customer' => $customer,
-            'token'    => $token,
-        ], 201);
-    }
-
-    /**
-     * Login - customer-facing storefront.
-     * Does NOT enforce canAccessAdmin(); any active user may log in here.
-     */
-    public function login(Request $request)
-    {
-        $validated = $request->validate([
-            'email'       => 'required|email',
-            'password'    => 'required',
-            'remember_me' => 'boolean',
-        ]);
-
-        $user = User::where('email', $validated['email'])->first();
-
-        // A staff account signing in here gets the staff rules too (Phase
-        // 4C): this door must not be a way round the console's lockout or
-        // its two-step sign-in requirement.
-        $staff   = $user && $user->canAccessAdmin();
-        $lockout = app(AccountLockout::class);
-        if ($staff && ($lock = $lockout->lockOf($user))) {
-            return $this->lockedResponse($lock);
-        }
-
-        if (!$user || !Hash::check($validated['password'], $user->password)) {
-            if ($staff && ($lock = $lockout->recordFailure($user, $request, 'wrong_password'))) {
-                return $this->lockedResponse($lock);
-            }
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
-        }
-
-        if ($user->status !== 'active') {
-            throw ValidationException::withMessages([
-                'email' => ['Your account has been deactivated.'],
-            ]);
-        }
-
-        if ($staff && !$user->two_factor_enabled && app(TwoFactor::class)->requiredFor($user)) {
-            throw ValidationException::withMessages([
-                'email' => ['Sign in through the staff console to set up two-step sign-in.'],
-            ]);
-        }
-
-        if ($user->two_factor_enabled) {
-            return response()->json([
-                'requires_2fa' => true,
-                'user_id'      => $user->id,
-            ]);
-        }
-
-        $tokenName = ($validated['remember_me'] ?? false) ? 'remember_token' : 'auth_token';
-        $token     = $user->createAuthToken($tokenName)->plainTextToken;
-
-        $user->load('customer');
-
-        return response()->json([
-            'message' => 'Login successful',
-            'user'    => $user,
-            'token'   => $token,
-        ]);
-    }
-
-    /**
      * Logout - revokes the current Sanctum token.
-     * Shared by both customer and admin sessions.
      */
     public function logout(Request $request)
     {
@@ -153,88 +39,6 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Logged out successfully',
-        ]);
-    }
-
-    /**
-     * Get authenticated user - customer portal version.
-     */
-    public function user(Request $request)
-    {
-        $user = $request->user()->load('customer');
-
-        return response()->json([
-            'user' => $user,
-        ]);
-    }
-
-    /**
-     * Update user profile
-     */
-    public function updateProfile(Request $request)
-    {
-        $validated = $request->validate([
-            'name'               => 'sometimes|string|max:255',
-            'phone'              => 'nullable|string|max:20',
-            'preferred_language' => 'nullable|string|in:en,fr,pt',
-            'preferred_currency' => 'nullable|string|in:KES,USD',
-        ]);
-
-        $user = $request->user();
-
-        if (!empty($validated['name'])) {
-            $parts = explode(' ', $validated['name'], 2);
-            $user->update([
-                'first_name' => $parts[0],
-                'last_name'  => $parts[1] ?? $user->last_name,
-            ]);
-        }
-
-        if (array_key_exists('phone', $validated)) {
-            $user->update(['phone' => $validated['phone']]);
-        }
-
-        if ($user->customer) {
-            $user->customer->update([
-                'preferred_language' => $validated['preferred_language'] ?? $user->customer->preferred_language,
-                'preferred_currency' => $validated['preferred_currency'] ?? $user->customer->preferred_currency,
-            ]);
-        }
-
-        $user->load('customer');
-
-        return response()->json([
-            'message' => 'Profile updated successfully',
-            'user'    => $user,
-        ]);
-    }
-
-    /**
-     * Change password
-     */
-    public function changePassword(Request $request)
-    {
-        $validated = $request->validate([
-            'current_password' => 'required',
-            'password'         => 'required|string|min:8|confirmed',
-        ]);
-
-        $user = $request->user();
-
-        if (!Hash::check($validated['current_password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'current_password' => ['The current password is incorrect.'],
-            ]);
-        }
-
-        $user->update([
-            'password' => Hash::make($validated['password']),
-        ]);
-
-        try { ActivityLogService::auth('password_changed', $user); } catch (\Exception) {}
-
-        return response()->json([
-            'message' => 'Password changed successfully',
         ]);
     }
 

@@ -110,10 +110,9 @@ class InactiveAccountAccessTest extends TestCase
     }
 
     /**
-     * The customer realm (auth:sanctum without ensure.staff). Its handlers are
-     * not what is under test — several resolve `$user->customer`, a relation
-     * User does not define — so the control asserts AUTHENTICATED (anything
-     * but 401) and the case asserts the token no longer authenticates.
+     * A customer-type token on a route behind auth:sanctum without ensure.staff.
+     * The handler is not what is under test, so the control asserts AUTHENTICATED
+     * (anything but 401) and the case asserts the token no longer authenticates.
      *
      * @dataProvider nonActiveStatuses
      */
@@ -121,12 +120,12 @@ class InactiveAccountAccessTest extends TestCase
     {
         $user  = User::factory()->create(['user_type' => 'customer', 'status' => 'active']);
         $token = $this->bearer($user);
-        $control = $this->getWithToken('/api/v1/cart', $token);
+        $control = $this->getWithToken('/api/v1/admin/auth/me', $token);
         $this->assertNotSame(401, $control->getStatusCode(), 'active control must authenticate: ' . substr((string) $control->getContent(), 0, 300));
 
         DB::table('users')->where('id', $user->id)->update(['status' => $status]);
 
-        $this->assertSame(401, $this->getWithToken('/api/v1/cart', $token)->getStatusCode());
+        $this->assertSame(401, $this->getWithToken('/api/v1/admin/auth/me', $token)->getStatusCode());
     }
 
     /**

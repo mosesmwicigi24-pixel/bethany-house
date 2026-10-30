@@ -119,15 +119,6 @@ class TwoFactorRolloutTest extends TestCase
         $this->assertTrue((bool) $u->fresh()->two_factor_enabled);
     }
 
-    public function test_the_storefront_door_cannot_skip_a_required_setup(): void
-    {
-        config(['security.two_factor.required_roles.admin' => true]);
-        $u = $this->staffWithRoles(['admin']);
-
-        $this->postJson('/api/v1/auth/login', ['email' => $u->email, 'password' => 'password'])->assertStatus(422);
-        $this->assertSame(0, DB::table('personal_access_tokens')->where('tokenable_id', $u->id)->count());
-    }
-
     // ── Resets (tiers) ───────────────────────────────────────────────────────
 
     private function with2fa(array $roles): User

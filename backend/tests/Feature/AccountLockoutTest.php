@@ -136,14 +136,6 @@ class AccountLockoutTest extends TestCase
             ->assertStatus(423)->assertJson(['reason' => 'account_locked']);
     }
 
-    public function test_the_storefront_door_applies_the_same_lock_to_staff(): void
-    {
-        $u = $this->staffWithRoles(['admin']);
-        $u->forceFill(['locked_until' => now()->addMinutes(10)])->save();
-
-        $this->postJson('/api/v1/auth/login', ['email' => $u->email, 'password' => 'password'])->assertStatus(423);
-    }
-
     public function test_the_unlock_command_is_the_break_glass(): void
     {
         $u = $this->staffWithRoles(['super_admin']);
