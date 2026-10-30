@@ -1799,7 +1799,7 @@ class OrderController extends Controller
         }
 
         $oldShipping = (float) $order->shipping_amount;
-        $newShipping = (float) $validated['amount'];
+        $newShipping = \App\Support\CustomerMoney::whole((float) $validated['amount']);
         // A chosen method is priced here, in the order's currency (ShippingFee);
         // the typed figure stands only for a custom fee.
         if (!empty($validated['shipping_method_id'])) {
@@ -2348,7 +2348,7 @@ class OrderController extends Controller
             return response()->json(['message' => 'Order item not found on this order.'], 404);
         }
 
-        $newPrice      = round((float)$validated['unit_price'], 2);
+        $newPrice      = \App\Support\CustomerMoney::whole((float) $validated['unit_price']);
         $currentPrice  = (float)$item->unit_price;
 
         // Upward-only guard: price may not be reduced below the original catalogue price

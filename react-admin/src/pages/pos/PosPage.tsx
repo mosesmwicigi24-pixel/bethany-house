@@ -56,6 +56,7 @@ import SalesHistoryDrawer from "./components/SalesHistoryDrawer";
 import UserEodModal from "./components/UserEodModal";
 import MorningCheckGate from "./components/MorningCheckGate";
 import PosReturnsModal from "./components/PosReturnsModal";
+import { whole } from "@/lib/customerMoney";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -108,10 +109,11 @@ interface ExtCartItem extends CartItem {
 
 function calcItemSubtotal(item: ExtCartItem): number {
     const base = item.price * item.quantity;
+    // A discount is billed as a whole unit (lib/customerMoney), as the server does.
     if (item.discount_type === "flat")
-        return Math.max(0, base - item.discount_value);
+        return Math.max(0, base - whole(item.discount_value));
     if (item.discount_type === "percent")
-        return Math.max(0, base * (1 - item.discount_value / 100));
+        return Math.max(0, base - whole(base * item.discount_value / 100));
     return base;
 }
 
@@ -123,8 +125,8 @@ function calcLineTax(item: ExtCartItem, taxInclusive: boolean): number {
         // Extract tax that is already embedded in the price
         return Math.round((lineSubtotal - lineSubtotal / (1 + rate / 100)) * 100) / 100;
     }
-    // Add tax on top
-    return Math.round(lineSubtotal * rate / 100 * 100) / 100;
+    // Add tax on top — a whole unit, like everything else the customer pays
+    return whole(lineSubtotal * rate / 100);
 }
 
 function calcTotals(
@@ -135,12 +137,14 @@ function calcTotals(
     taxInclusive: boolean = false,
 ) {
     const subtotal = items.reduce((s, i) => s + calcItemSubtotal(i), 0);
-    const discountAmount =
+    shippingAmount = whole(shippingAmount);
+    const discountAmount = whole(
         discType === "flat"
             ? Math.min(discVal, subtotal)
             : discType === "percent"
               ? (subtotal * discVal) / 100
-              : 0;
+              : 0,
+    );
     const afterDisc = subtotal - discountAmount;
 
     // Apply cart-level discount proportionally across lines for tax calculation.
@@ -153,7 +157,7 @@ function calcTotals(
             if (rate === 0) return sum;
             const lineTax = taxInclusive
                 ? lineSub - lineSub / (1 + rate / 100)
-                : lineSub * rate / 100;
+                : whole(lineSub * rate / 100);
             return sum + lineTax;
         }, 0) * 100
     ) / 100;
@@ -2361,6 +2365,7 @@ export default function PosPage() {
                 const u = [...p];
                 const item = u[i];
                 const original = item.original_price ?? item.price;
+                price = whole(price);
                 const isReset  = Math.abs(price - original) < 0.001;
                 u[i] = {
                     ...item,

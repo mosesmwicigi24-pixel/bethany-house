@@ -154,12 +154,15 @@ class OrderTotalsCharacterizationTest extends TestCase
     // ── PosController::createPendingOrder ───────────────────────────────────
 
     /**
-     * subtotal  = (2997 − 44.955) + 500          = 3452.045 → stored 3452.05
-     * tax       = 2997×16% + 500×16%             = 559.52   (on the UNdiscounted base)
-     * total     = 3452.045 − 86.301125 + 559.52 + 150 = 4075.263875 → 4075.26
+     * Every billed part is a whole shilling (CustomerMoney, owner 2026-10-30):
      *
-     * The stored subtotal rounds up while the total is derived from the
-     * unrounded figure — one cent apart, and the reason this cart was chosen.
+     * line A    = 2997 − (1.5% of 2997 = 44.955 → 45) = 2952
+     * subtotal  = 2952 + 500                       = 3452
+     * tax       = 2997×16% = 479.52 → 480, 500×16% = 80 → 560 (on the UNdiscounted base)
+     * cart disc = 2.5% of 3452 = 86.30 → 86
+     * total     = 3452 − 86 + 560 + 150            = 4076
+     *
+     * Before the rounding rule this cart stored 3452.05 / 559.52 / 4075.26.
      */
     public function test_create_pending_order_totals(): void
     {
@@ -170,7 +173,7 @@ class OrderTotalsCharacterizationTest extends TestCase
             ->assertSuccessful()
             ->json('order.id');
 
-        $this->assertOrderMoney(Order::findOrFail($id), 3452.05, 559.52, 4075.26);
+        $this->assertOrderMoney(Order::findOrFail($id), 3452.0, 560.0, 4076.0);
     }
 
     public function test_create_pending_order_totals_under_tax_inclusive_pricing(): void
@@ -182,9 +185,10 @@ class OrderTotalsCharacterizationTest extends TestCase
             ->assertSuccessful()
             ->json('order.id');
 
-        // Tax is extracted, not added: 2997 × 16/116 = 413.38, 500 × 16/116 = 68.97.
-        // The total therefore excludes it — 3452.045 − 86.301125 + 150 = 3515.743875.
-        $this->assertOrderMoney(Order::findOrFail($id), 3452.05, 482.35, 3515.74);
+        // Tax is extracted, not added, and keeps its cents inside the whole
+        // price: 2997 × 16/116 = 413.38, 500 × 16/116 = 68.97.
+        // The total therefore excludes it — 3452 − 86 + 150 = 3516.
+        $this->assertOrderMoney(Order::findOrFail($id), 3452.0, 482.35, 3516.0);
     }
 
     // ── PosController::updatePendingOrder ───────────────────────────────────
@@ -208,7 +212,7 @@ class OrderTotalsCharacterizationTest extends TestCase
 
         // Re-priced to the same awkward cart — must land on the same figures as
         // creating it that way in the first place.
-        $this->assertOrderMoney(Order::findOrFail($id), 3452.05, 559.52, 4075.26);
+        $this->assertOrderMoney(Order::findOrFail($id), 3452.0, 560.0, 4076.0);
     }
 
     // ── PosController::createSale ───────────────────────────────────────────
@@ -217,7 +221,7 @@ class OrderTotalsCharacterizationTest extends TestCase
      * The paid-at-the-till path. Same arithmetic as the pending-order writers,
      * with one wrinkle: createSale derives the figure the tender must cover
      * BEFORE shipping is known, then persists a total that includes it. Both
-     * are pinned — 4075.26 on the row, 3925.26 + 150 demanded at the till.
+     * are pinned — 4076 on the row, 3926 + 150 demanded at the till.
      */
     public function test_create_sale_totals(): void
     {
@@ -227,10 +231,10 @@ class OrderTotalsCharacterizationTest extends TestCase
 
         $id = $this->postJson('/api/v1/admin/pos/sales', $this->posCart() + [
             'payment_method' => 'cash',
-            'payments'       => [['method' => 'cash', 'amount' => 4075.26, 'cash_received' => 4100]],
+            'payments'       => [['method' => 'cash', 'amount' => 4076, 'cash_received' => 4100]],
         ])->assertSuccessful()->json('order.id');
 
-        $this->assertOrderMoney(Order::findOrFail($id), 3452.05, 559.52, 4075.26);
+        $this->assertOrderMoney(Order::findOrFail($id), 3452.0, 560.0, 4076.0);
     }
 
     /** A tender short of goods-plus-shipping is refused. */
@@ -242,7 +246,7 @@ class OrderTotalsCharacterizationTest extends TestCase
 
         $this->postJson('/api/v1/admin/pos/sales', $this->posCart() + [
             'payment_method' => 'cash',
-            'payments'       => [['method' => 'cash', 'amount' => 3925.26, 'cash_received' => 4000]],
+            'payments'       => [['method' => 'cash', 'amount' => 3926, 'cash_received' => 4000]],
         ])->assertStatus(422);
     }
 
@@ -329,7 +333,7 @@ class OrderTotalsCharacterizationTest extends TestCase
         // No line discounts here: converting an order whose stored line discount
         // is in the OLD currency drives the line negative, which is a separate
         // bug and not what this test is pinning.
-        $order = $this->orderWithLines(discount: 10, shipping: 20, lineDiscount: 0);
+        $order = $this->orderWithLines(discount: 1000, shipping: 250, lineDiscount: 0);
 
         foreach ($order->items as $item) {
             DB::table('product_prices')->insert([
@@ -346,16 +350,19 @@ class OrderTotalsCharacterizationTest extends TestCase
             'country_code' => 'US',
         ])->assertOk();
 
-        // 999 → 9.99 and 250 → 2.50 at 0.01. Lines: 29.97 and 5.00.
-        // Line tax is rounded to the column on write: 29.97×16% = 4.7952 → 4.80.
+        // 999 → 9.99 and 250 → 2.50 at 0.01, each to the nearest whole dollar
+        // (converted prices are whole units, owner 2026-10-30): 10 and 3.
+        // Lines: 3 × 10 = 30 and 2 × 3 = 6. Tax 16% added on top, each line
+        // to a whole dollar: 4.80 → 5 and 0.96 → 1.
         $fresh = $order->fresh();
-        $this->assertSame(34.97, (float) $fresh->subtotal);
-        $this->assertSame(5.60, (float) $fresh->tax_amount);
-        // The converted figures are persisted, not merely totalled.
-        $this->assertSame(0.10, (float) $fresh->discount_amount);
-        $this->assertSame(0.20, (float) $fresh->shipping_amount);
-        // 34.97 − 0.10 (cart discount, converted at 0.01) + 5.60 + 0.20 (shipping, converted)
-        $this->assertSame(40.67, (float) $fresh->total_amount);
+        $this->assertSame(36.0, (float) $fresh->subtotal);
+        $this->assertSame(6.0, (float) $fresh->tax_amount);
+        // The converted figures are persisted, not merely totalled, and whole:
+        // KES 1,000 → USD 10; KES 250 → USD 2.50 → 3.
+        $this->assertSame(10.0, (float) $fresh->discount_amount);
+        $this->assertSame(3.0, (float) $fresh->shipping_amount);
+        // 36 − 10 + 6 + 3
+        $this->assertSame(35.0, (float) $fresh->total_amount);
     }
 
     /** An order carrying the awkward cart, already persisted. */

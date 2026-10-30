@@ -6,11 +6,14 @@
  *   - converted from the price list the currency is priced from
  *     (currencies.priced_from — the rand from USD) when that row has a price,
  *   - else from the default (KES) price,
- *   - exactly, to the cent — never rounded further;
+ *   - to the nearest whole unit, halves up (owner, 2026-10-30): R3,231,
+ *     not R3,230.77 — a price typed on a product is never rounded;
  *   - null when it can't be stated: a currency still at the blank default
  *     rate of 1.0 is unconfigured, not a peg, and must never copy the
  *     shilling figure under another label.
  */
+import { whole } from "./customerMoney";
+
 export interface CurrencyRow {
     code: string;
     exchange_rate?: number | string | null;
@@ -44,15 +47,17 @@ export function convertPrice(amount: number, from: string, to: string, currencie
  * The automatic price of `code`, given the other rows' current amounts.
  * amounts: currency → price (null/0 = no price).
  */
+const wholeOrNull = (v: number | null) => (v === null ? null : whole(v));
+
 export function autoPrice(code: string, amounts: Record<string, number | null | undefined>, currencies: CurrencyRow[]): number | null {
     const base = baseOf(currencies);
     if (!base || code === base.code) return null;
     const self = currencies.find((c) => c.code === code);
     const from = self?.priced_from && self.priced_from !== base.code ? self.priced_from : null;
     const fromAmount = from ? Number(amounts[from] ?? 0) : 0;
-    if (from && fromAmount > 0) return convertPrice(fromAmount, from, code, currencies);
+    if (from && fromAmount > 0) return wholeOrNull(convertPrice(fromAmount, from, code, currencies));
     const baseAmount = Number(amounts[base.code] ?? 0);
-    return baseAmount > 0 ? convertPrice(baseAmount, base.code, code, currencies) : null;
+    return baseAmount > 0 ? wholeOrNull(convertPrice(baseAmount, base.code, code, currencies)) : null;
 }
 
 /**

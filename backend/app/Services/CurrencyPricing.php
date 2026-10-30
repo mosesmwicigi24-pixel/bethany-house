@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\CustomerMoney;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -24,13 +25,17 @@ use Illuminate\Support\Facades\DB;
  *   2. With no such row we convert — from the price list the currency is
  *      priced from (currencies.priced_from: the rand from USD, owner
  *      2026-10-29), else from the base-currency row — at the configured rate,
- *      exactly, never rounded — and when no configured rate exists we return NULL
- *      rather than a number. currencies.exchange_rate DEFAULTs to 1.0, so a
+ *      and when no configured rate exists we return NULL rather than a
+ *      number. currencies.exchange_rate DEFAULTs to 1.0, so a
  *      non-base row still sitting at exactly 1.0 is an unconfigured row, not
  *      a peg (the same rule MetricEngine::internationalCorridor applies to
  *      reporting). Multiplying by that 1.0 is how a KES 4,500 tray became a
  *      USD 4,500 order: a 130x overcharge that reads as perfectly normal on
  *      screen, because only the label moved.
+ *
+ * Either way the answer is a whole unit (CustomerMoney, owner 2026-10-30):
+ * the customer is billed USD 150 for a row typed 149.99, while the row itself
+ * keeps what was typed.
  *
  * Callers must handle the null — refuse the write and say which product needs
  * a price (or which currency needs a rate). Guessing is the failure mode this
@@ -260,6 +265,12 @@ class CurrencyPricing
                 return null;
             }
         }
+
+        // What the customer is billed is a whole unit, converted or typed:
+        // R3,230.77 → R3,231, a typed USD 149.99 → USD 150 (owner,
+        // 2026-10-30). The price list itself keeps what was typed.
+        $regular = CustomerMoney::whole($regular);
+        $sale    = CustomerMoney::wholeOrNull($sale);
 
         return [
             'currency_code'   => $currency,

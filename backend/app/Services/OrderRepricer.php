@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Order;
+use App\Support\CustomerMoney;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -55,6 +56,9 @@ class OrderRepricer
                 $lineDiscount = $converted;
             }
 
+            // A repriced order is billed in whole units (CustomerMoney).
+            $unitPrice       = CustomerMoney::whole($unitPrice);
+            $lineDiscount    = CustomerMoney::whole($lineDiscount);
             $lineSubtotal    = max(0, ($unitPrice * (int) $item->quantity) - $lineDiscount);
             $oldLineSubtotal = max(0, ((float) $item->unit_price * (int) $item->quantity) - (float) $item->discount_amount);
 
@@ -62,10 +66,11 @@ class OrderRepricer
                 $rate     = TaxCalculationService::rateForProduct($item->product_id);
                 $lineTax  = $taxInclusive
                     ? round($lineSubtotal * $rate / (1 + $rate), 4)
-                    : round($lineSubtotal * $rate, 4);
+                    : CustomerMoney::whole($lineSubtotal * $rate);
             } elseif ($oldLineSubtotal > 0 && (float) $item->tax_amount > 0) {
                 // No product to ask — keep the rate the line already carries.
                 $lineTax = round($lineSubtotal * ((float) $item->tax_amount / $oldLineSubtotal), 4);
+                $lineTax = $taxInclusive ? $lineTax : CustomerMoney::whole($lineTax);
             } else {
                 $lineTax = 0.0;
             }
@@ -95,6 +100,8 @@ class OrderRepricer
                 return null;
             }
         }
+        $discount = CustomerMoney::whole($discount);
+        $shipping = CustomerMoney::whole($shipping);
 
         return [
             'lines'           => $lines,

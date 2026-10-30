@@ -18,6 +18,7 @@ import { discountCapMessage, minUnitPrice, useDiscountCap } from "@/lib/discount
 import type { ApiError } from "@/types";
 import { salesRevisionApi } from "@/api/salesRevisions";
 import { RevisionRows } from "@/components/documents/SalesRevisions";
+import { whole } from "@/lib/customerMoney";
 
 interface CurrencyOption { code: string; name: string; symbol: string }
 
@@ -494,7 +495,8 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
         setRows((r) => r.filter((row) => row.key !== key));
     }
 
-    const subtotal = rows.reduce((sum, r) => sum + num(r.quantity) * num(r.unit_price), 0);
+    // Quoted in whole units (lib/customerMoney), as the server stores them.
+    const subtotal = rows.reduce((sum, r) => sum + num(r.quantity) * whole(num(r.unit_price)), 0);
 
     // The person's discount limit: a catalogue line may be quoted at most that far under its
     // catalogue price (no ceiling for the super_admin). The server enforces it;
@@ -686,7 +688,7 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                                             <p className="mt-1 text-2xs text-danger text-left">{priceError(r, idx)}</p>
                                         )}
                                     </td>
-                                    <td className="text-right tabular-nums">{money(num(r.quantity) * num(r.unit_price), currency)}</td>
+                                    <td className="text-right tabular-nums">{money(num(r.quantity) * whole(num(r.unit_price)), currency)}</td>
                                     <td>
                                         <button type="button" className="btn-ghost btn-sm text-danger" onClick={() => removeRow(r.key)}>✕</button>
                                     </td>
@@ -714,7 +716,7 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                         </div>
                         <div className="flex items-center justify-end gap-2 border-t pt-2 text-base font-bold">
                             <span>Total (excl. tax)</span>
-                            <span className="tabular-nums">{money(subtotal + num(shipping), currency)}</span>
+                            <span className="tabular-nums">{money(subtotal + whole(num(shipping)), currency)}</span>
                         </div>
                     </div>
                 </div>

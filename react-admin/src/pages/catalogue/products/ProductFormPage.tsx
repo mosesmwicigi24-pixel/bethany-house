@@ -48,6 +48,7 @@ import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 import { proposeChange, waitsForApproval } from "@/api/proposals";
 import { autoPrice, followers, convertPrice, rateOf, baseOf } from "@/lib/autoPrice";
+import { whole } from "@/lib/customerMoney";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -1655,6 +1656,14 @@ function EditVariantModal({
                         // A row can still be typed over by hand afterwards.
                         const regReg  = register(`prices.${i}.regular_price`);
                         const saleReg = register(`prices.${i}.sale_price`);
+                        // Any currency but the shop's own is saved as a whole
+                        // unit (the server rounds it too) — show it on leaving the box.
+                        const wholeOnBlur = (field: "regular_price" | "sale_price") => () => {
+                            if (isBase) return;
+                            const v = getValues(`prices.${i}.${field}` as any) as any;
+                            if (v === "" || v == null || Number.isNaN(Number(v))) return;
+                            if (whole(Number(v)) !== Number(v)) setValue(`prices.${i}.${field}` as any, whole(Number(v)) as any, { shouldDirty: true });
+                        };
                         const cascade = (field: "regular_price" | "sale_price") => () => {
                             const rows = getValues("prices") ?? [];
                             const amounts: Record<string, number | null> = Object.fromEntries(
@@ -1698,6 +1707,7 @@ function EditVariantModal({
                                             {...regReg}
                                             placeholder={auto !== null ? `auto ${auto.toLocaleString("en-KE", { maximumFractionDigits: 2 })}` : "-"}
                                             onChange={(e) => { regReg.onChange(e); cascade("regular_price")(); }}
+                                            onBlur={(e) => { regReg.onBlur(e); wholeOnBlur("regular_price")(); }}
                                         />
                                     </Field>
                                     <Field
@@ -1711,6 +1721,7 @@ function EditVariantModal({
                                             inputMode="decimal"
                                             {...saleReg}
                                             onChange={(e) => { saleReg.onChange(e); cascade("sale_price")(); }}
+                                            onBlur={(e) => { saleReg.onBlur(e); wholeOnBlur("sale_price")(); }}
                                             placeholder="-"
                                         />
                                     </Field>
@@ -2418,7 +2429,8 @@ const PriceRows = React.memo(function PriceRows({
                             <Controller control={control} name={`prices.${i}.regular_price`}
                                 render={({ field: f }) => (
                                     <MoneyInput
-                                        name={f.name} inputRef={f.ref} onBlur={f.onBlur}
+                                        name={f.name} inputRef={f.ref}
+                                        onBlur={() => { f.onBlur(); if (!isBase && f.value != null && whole(Number(f.value)) !== Number(f.value)) f.onChange(whole(Number(f.value))); }}
                                         value={f.value}
                                         onValue={(v) => {
                                             f.onChange(v ?? 0);
@@ -2433,7 +2445,8 @@ const PriceRows = React.memo(function PriceRows({
                                 render={({ field: f, fieldState }) => (
                                     <>
                                         <MoneyInput
-                                            name={f.name} inputRef={f.ref} onBlur={f.onBlur} placeholder="-"
+                                            name={f.name} inputRef={f.ref} placeholder="-"
+                                            onBlur={() => { f.onBlur(); if (!isBase && f.value != null && whole(Number(f.value)) !== Number(f.value)) f.onChange(whole(Number(f.value))); }}
                                             value={f.value}
                                             onValue={(v) => {
                                                 f.onChange(v);

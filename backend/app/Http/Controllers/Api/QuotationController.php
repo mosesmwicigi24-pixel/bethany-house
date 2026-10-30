@@ -99,7 +99,7 @@ class QuotationController extends Controller
                 'source'              => $validated['source'] ?? 'admin',
                 'status'              => Quotation::DRAFT,
                 'currency_code'       => $validated['currency_code'] ?? 'KES',
-                'shipping_amount'     => $validated['shipping_amount'] ?? 0,
+                'shipping_amount'     => \App\Support\CustomerMoney::whole((float) ($validated['shipping_amount'] ?? 0)),
                 'served_by'           => $validated['served_by'] ?? $request->user()?->name,
                 'customer_email'      => $validated['customer_email'] ?? null,
                 'customer_phone'      => $validated['customer_phone'] ?? null,
@@ -156,7 +156,9 @@ class QuotationController extends Controller
                 'user_id'             => $validated['user_id'] ?? $quotation->user_id,
                 'outlet_id'           => $validated['outlet_id'] ?? $quotation->outlet_id,
                 'currency_code'       => $validated['currency_code'] ?? $quotation->currency_code,
-                'shipping_amount'     => $validated['shipping_amount'] ?? $quotation->shipping_amount,
+                'shipping_amount'     => isset($validated['shipping_amount'])
+                    ? \App\Support\CustomerMoney::whole((float) $validated['shipping_amount'])
+                    : $quotation->shipping_amount,
                 'served_by'           => $validated['served_by'] ?? $quotation->served_by,
                 // A key absent from the request (a mask that matched nothing
                 // on file was dropped) leaves the stored value alone.
@@ -449,6 +451,11 @@ class QuotationController extends Controller
      */
     private function syncItemsAndTotals(Quotation $quotation, array $items): void
     {
+        // The customer is quoted whole units (CustomerMoney). The discount
+        // limits were checked on the figures as typed.
+        $items = array_map(fn ($i) => ['unit_price' => \App\Support\CustomerMoney::whole((float) $i['unit_price']),
+            'discount_amount' => \App\Support\CustomerMoney::whole((float) ($i['discount_amount'] ?? 0))] + $i, $items);
+
         $lines = collect($items)->map(fn ($i) => [
             'product_id'      => (int) ($i['product_id'] ?? 0),
             'unit_price'      => (float) $i['unit_price'],

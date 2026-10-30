@@ -190,7 +190,7 @@ class WhatsAppOrderCurrencyTest extends TestCase
 
         $order = Order::with('items')->find($res->json('order_id'));
         $this->assertSame('USD', $order->currency_code);
-        $this->assertEqualsWithDelta(34.65, (float) $order->items->first()->unit_price, 0.01);
+        $this->assertEqualsWithDelta(35.0, (float) $order->items->first()->unit_price, 0.01);   // 4,500 × 0.0077 = 34.65 → 35, a whole dollar
     }
 
     public function test_an_unconfigured_rate_refuses_the_order_instead_of_relabelling_kes(): void
@@ -356,7 +356,7 @@ class WhatsAppOrderCurrencyTest extends TestCase
         $priced = CurrencyPricing::catalogue($product->id, null, 'USD');
 
         // The blank row is ignored and the KES price converts instead.
-        $this->assertEqualsWithDelta(34.65, $priced['regular_price'], 0.01);
+        $this->assertEqualsWithDelta(35.0, $priced['regular_price'], 0.01);   // 34.65 → 35, a whole dollar
         $this->assertSame('KES', $priced['converted_from']);
     }
 

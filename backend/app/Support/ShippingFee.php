@@ -18,19 +18,19 @@ use Illuminate\Validation\ValidationException;
  */
 final class ShippingFee
 {
-    /** @return float the fee in $currency, rounded to the cent */
+    /** @return float the fee in $currency, a whole unit (CustomerMoney) */
     public static function inCurrency(ShippingMethod $method, float $goodsTotal, string $currency): float
     {
         $currency = strtoupper($currency);
         $kesFee   = $method->calculateCost($goodsTotal);
 
         if ($method->cost_type === 'percentage' || $kesFee <= 0) {
-            return round($kesFee, 2);
+            return CustomerMoney::whole($kesFee);
         }
 
         $base = CurrencyPricing::baseCode();
         if ($currency === $base) {
-            return round($kesFee, 2);
+            return CustomerMoney::whole($kesFee);
         }
 
         $converted = CurrencyPricing::convert($kesFee, $base, $currency);
@@ -40,6 +40,6 @@ final class ShippingFee
             ]]);
         }
 
-        return round($converted, 2);
+        return CustomerMoney::whole($converted);
     }
 }

@@ -360,19 +360,20 @@ class ForeignCustomerCurrencyTest extends TestCase
         CurrencyPricing::forget();
     }
 
-    public function test_the_rand_is_converted_from_the_usd_price_exactly_and_a_typed_rand_price_holds(): void
+    public function test_the_rand_is_converted_from_the_usd_price_to_a_whole_rand_and_a_typed_rand_price_holds(): void
     {
         $this->randFromUsd();
         $usdSet   = $this->product(15000, ['USD' => 160]);        // USD 160 → R2,880.00 (not 15,000 × 0.18 = 2,700)
         $kesOnly  = $this->product(3600);                          // no USD price → KES 3,600 × 0.18 = R648.00
         $randSet  = $this->product(12000, ['ZAR' => 2999]);        // typed rand price holds: R2,999.00
-        $odd      = $this->product(15000, ['USD' => 149.99]);      // 149.99 × 18 = R2,699.82 — exact, never rounded
+        $odd      = $this->product(15000, ['USD' => 149.99]);      // 149.99 × 18 = R2,699.82 → R2,700 (whole rand, owner 30 Oct)
 
         $price = fn (Product $p, string $c) => CurrencyPricing::catalogue($p->id, null, $c)['regular_price'];
         $this->assertEqualsWithDelta(2880.00, $price($usdSet, 'ZAR'), 0.001);
         $this->assertEqualsWithDelta(648.00, $price($kesOnly, 'ZAR'), 0.001);
         $this->assertEqualsWithDelta(2999.00, $price($randSet, 'ZAR'), 0.001);
-        $this->assertEqualsWithDelta(2699.82, $price($odd, 'ZAR'), 0.0001);
+        $this->assertEqualsWithDelta(2700.00, $price($odd, 'ZAR'), 0.0001);
+        $this->assertEqualsWithDelta(2999.00, $price($randSet, 'ZAR'), 0.0001, 'a typed rand price is never rounded');
         $this->assertEqualsWithDelta(3000.00, $price($usdSet, 'ZMW'), 0.001, 'kwacha still converts from shillings: 15,000 × 0.2');
         $this->assertSame('USD', CurrencyPricing::pricedFrom('ZAR'));
         $this->assertNull(CurrencyPricing::pricedFrom('ZMW'));
@@ -434,7 +435,7 @@ class ForeignCustomerCurrencyTest extends TestCase
     /**
      * South Africa moves to the rand (owner, 29 Oct): customers pay KES ÷ 6.5,
      * the books value a rand at 7.8 — KES 15,000 → R2,307.69 → KES 18,000.
-     * The basket KES 30,600 → R4,707.69 (30,600 ÷ 6.5), booked at 7.8.
+     * The basket KES 30,600 → R2,308 + R554 + R1,846 = R4,708 (each line to a whole rand), booked at 7.8.
      */
     public function test_south_africas_unpaid_orders_move_to_the_rand_in_any_currency_but_chosen_ones_stay(): void
     {
@@ -463,8 +464,8 @@ class ForeignCustomerCurrencyTest extends TestCase
         $this->assertSame(0, Artisan::call('orders:foreign-currency', ['--country' => 'ZA']));
         $out = Artisan::output();
         $this->assertStringContainsString('for customers in ZA not in ZAR', $out);
-        $this->assertStringContainsString("Order #{$inUsd->id} {$inUsd->order_number} ZA USD 306.00 → would switch to ZAR 4,707.69", $out);
-        $this->assertStringContainsString("Order #{$inKes->id} {$inKes->order_number} ZA KES 30,600.00 → would switch to ZAR 4,707.69", $out);
+        $this->assertStringContainsString("Order #{$inUsd->id} {$inUsd->order_number} ZA USD 306.00 → would switch to ZAR 4,708.00", $out);
+        $this->assertStringContainsString("Order #{$inKes->id} {$inKes->order_number} ZA KES 30,600.00 → would switch to ZAR 4,708.00", $out);
         $this->assertStringContainsString('Would switch 2; left paid 1, kept 1, closed 0.', $out);
         $this->assertStringNotContainsString("Order #{$botswana->id} ", $out);
 
@@ -472,8 +473,8 @@ class ForeignCustomerCurrencyTest extends TestCase
         foreach ([$inUsd, $inKes] as $o) {
             $o->refresh();
             $this->assertSame('ZAR', $o->currency_code);
-            $this->assertEqualsWithDelta(4707.69, (float) $o->total_amount, 0.001);
-            $this->assertEqualsWithDelta(7.8, (float) $o->reporting_rate_to_kes, 0.000001);          // R4,707.69 × 7.8 ≈ KES 36,720 in the books
+            $this->assertEqualsWithDelta(4708.00, (float) $o->total_amount, 0.001);
+            $this->assertEqualsWithDelta(7.8, (float) $o->reporting_rate_to_kes, 0.000001);          // R4,708 × 7.8 = KES 36,722.40 in the books
         }
         $this->assertSame('USD', $partPd->fresh()->currency_code);
         $this->assertSame('USD', $asked->fresh()->currency_code);
@@ -494,10 +495,11 @@ class ForeignCustomerCurrencyTest extends TestCase
             'customer_country_code' => $country, 'currency_code' => $currency, 'currency_reason' => $why, 'items' => $this->basket(),
         ], fn ($v) => $v !== null));
 
-        // South Africa's default is the rand: KES 30,600 ÷ 6.5 = R4,707.69.
+        // South Africa's default is the rand, each line to a whole rand:
+        // 15,000 ÷ 6.5 = 2,307.69 → 2,308; 3,600 → 553.85 → 554; 12,000 → 1,846.15 → 1,846. Total R4,708.
         $za = Order::findOrFail($order('ZA', null)->assertSuccessful()->json('order_id'));
         $this->assertSame('ZAR', $za->currency_code);
-        $this->assertEqualsWithDelta(4707.69, (float) $za->total_amount, 0.001);
+        $this->assertEqualsWithDelta(4708.00, (float) $za->total_amount, 0.001);
 
         // "When someone says USD, we quote in USD": USD 306.00, and the choice is recorded.
         $usd = Order::findOrFail($order('ZA', 'USD')->assertSuccessful()->json('order_id'));
