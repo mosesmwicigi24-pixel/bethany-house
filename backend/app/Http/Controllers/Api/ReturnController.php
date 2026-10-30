@@ -509,7 +509,11 @@ class ReturnController extends Controller
                 $order?->user_id ?? null,
                 $validated['reason']
             );
-        } catch (\Exception) {}
+        } catch (\Throwable $e) {
+            // \Throwable, not \Exception: the change is already committed, and the
+            // NotificationService method called above does not exist yet (\Error).
+            \Illuminate\Support\Facades\Log::warning('Return rejection notification failed: ' . $e->getMessage());
+        }
 
         return response()->json([
             'message' => 'Return rejected',

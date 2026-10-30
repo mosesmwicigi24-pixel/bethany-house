@@ -24,12 +24,16 @@ class OrderReturn extends Model
         'refunded_at',
         'created_by',
         'approved_by',
+        'rejected_at',
+        'rejected_by',
+        'rejection_reason',
     ];
 
     protected $casts = [
         'refund_amount' => 'decimal:2',
         'requested_at' => 'datetime',
         'approved_at' => 'datetime',
+        'rejected_at' => 'datetime',
         'received_at' => 'datetime',
         'refunded_at' => 'datetime',
     ];
@@ -66,6 +70,11 @@ class OrderReturn extends Model
     public function approvedBy()
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function rejectedBy()
+    {
+        return $this->belongsTo(User::class, 'rejected_by');
     }
 
     public function scopeRequested($query)
