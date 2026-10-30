@@ -546,6 +546,10 @@ class ForeignCustomerCurrencyTest extends TestCase
         $this->assertTrue($zaMethods->has('wu_moneygram'));
         $this->assertTrue($zaMethods->has('bank_transfer'));
         $this->assertSame('+254700706875', $zaMethods['mukuru']['instructions']['recipient_phone']);
+        foreach (['mukuru', 'wu_moneygram'] as $rail) {                                   // the number's registered holder
+            $this->assertSame('Moses Nganga', $zaMethods[$rail]['instructions']['recipient_name']);
+            $this->assertStringNotContainsString('Mwicigi', implode(' ', $zaMethods[$rail]['instructions']['steps']));
+        }
         $this->assertStringContainsString('Send to M-Pesa', implode(' ', $zaMethods['mukuru']['instructions']['steps']));
         $bankSteps = implode(' ', $zaMethods['bank_transfer']['instructions']['steps']);
         foreach (['I&M Bank Kenya', '00106090796350', 'Bank code: 57', 'Branch code: 001', 'IMBLKENA', 'Kenyatta Avenue'] as $detail) {
