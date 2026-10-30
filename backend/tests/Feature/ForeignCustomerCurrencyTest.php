@@ -514,4 +514,48 @@ class ForeignCustomerCurrencyTest extends TestCase
         $order('ZA', 'BWP')->assertStatus(422);
     }
 
+    /**
+     * A rand order's payment link offered "No payment methods available" (owner,
+     * 30 Oct). Mukuru, Western Union / MoneyGram and the I&M bank transfer now
+     * take every sale currency, with the pay-to details on the page; Mukuru stays
+     * for its send markets and Western Union stays off Kenyan numbers.
+     */
+    public function test_a_rand_order_can_be_paid_by_mukuru_western_union_or_bank_transfer(): void
+    {
+        DB::table('currencies')->where('code', 'ZAR')->update(['exchange_rate' => round(1 / 6.5, 6), 'reporting_rate_to_kes' => 7.8]);
+        DB::table('countries')->where('code', 'ZA')->update(['default_currency_code' => 'ZAR']);
+        ReportingCurrency::forget(); CurrencyPricing::forget();
+        $this->staff(['pos.access']);
+        $make = fn (string $country, string $phone) => Order::findOrFail($this->postJson('/api/v1/admin/pos/pending-order', [
+            'outlet_id' => $this->outlet->id, 'channel' => 'whatsapp', 'customer_first_name' => 'Makwaba',
+            'customer_phone' => $phone, 'customer_country_code' => $country, 'items' => $this->basket(),
+        ])->assertSuccessful()->json('order_id'));
+        $za = $make('ZA', '+27823846159');
+        $ke = $make('KE', '+254722918403');
+        $this->assertSame('ZAR', $za->currency_code);
+
+        $this->staff(['orders.view', 'orders.edit']);
+        $codes = function (Order $o) {
+            $url = $this->getJson("/api/v1/admin/orders/{$o->id}/payment-link")->assertOk()->json('payment_url');
+            $token = basename(parse_url($url, PHP_URL_PATH));
+            return collect($this->getJson("/api/v1/pay/{$token}")->assertOk()->json('available_methods'))->keyBy('code');
+        };
+
+        $zaMethods = $codes($za);
+        $this->assertTrue($zaMethods->has('mukuru'), 'Mukuru takes rand from a South African number');
+        $this->assertTrue($zaMethods->has('wu_moneygram'));
+        $this->assertTrue($zaMethods->has('bank_transfer'));
+        $this->assertSame('+254700706875', $zaMethods['mukuru']['instructions']['recipient_phone']);
+        $this->assertStringContainsString('Send to M-Pesa', implode(' ', $zaMethods['mukuru']['instructions']['steps']));
+        $bankSteps = implode(' ', $zaMethods['bank_transfer']['instructions']['steps']);
+        foreach (['I&M Bank Kenya', '00106090796350', 'Bank code: 57', 'Branch code: 001', 'IMBLKENA', 'Kenyatta Avenue'] as $detail) {
+            $this->assertStringContainsString($detail, $bankSteps);
+        }
+
+        $keMethods = $codes($ke);
+        $this->assertFalse($keMethods->has('mukuru'), 'not offered to a Kenyan number');
+        $this->assertFalse($keMethods->has('wu_moneygram'), 'not offered to a Kenyan number');
+        $this->assertTrue($keMethods->has('bank_transfer'));
+    }
+
 }
