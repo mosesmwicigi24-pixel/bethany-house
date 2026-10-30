@@ -581,7 +581,7 @@ export const posApi = {
             data,
         ),
 
-    // Phase 4A: the autocomplete returns name + MASKED phone + id only, from
+    // Phase 4A: the autocomplete returns name + phone + id only, from
     // 3 characters, at most 20 results, scoped before matching.
     searchCustomers: (q: string) =>
         get<{ data: { id: number; name: string; phone: string | null; email?: string | null }[] }>(

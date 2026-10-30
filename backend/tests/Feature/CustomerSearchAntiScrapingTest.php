@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Artisan;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\MaskedRole;
 use Tests\TestCase;
 
 /**
@@ -28,6 +29,7 @@ use Tests\TestCase;
  */
 class CustomerSearchAntiScrapingTest extends TestCase
 {
+    use MaskedRole;
     use RefreshDatabase;
 
     private Outlet $a;
@@ -85,7 +87,7 @@ class CustomerSearchAntiScrapingTest extends TestCase
         $this->assertSame([], $this->posSearch('mo%s')->assertOk()->json('data'), '% is not a pattern');
     }
 
-    public function test_the_autocomplete_is_id_name_and_a_masked_phone_only(): void
+    public function test_the_autocomplete_is_id_name_and_phone_only(): void
     {
         $this->as('outlet_manager', $this->a);
         $c = $this->customerAt($this->a, 'Moses', '0711000001');
@@ -93,7 +95,18 @@ class CustomerSearchAntiScrapingTest extends TestCase
         $row = $this->posSearch('Mos')->assertOk()->json('data.0');
         $this->assertSame(['id', 'name', 'phone'], array_keys($row));
         $this->assertSame($c->id, $row['id']);
-        $this->assertSame('07••••0001', $row['phone'], 'masked even for a manager who may see it in full elsewhere');
+        $this->assertSame('0711000001', $row['phone']);
+    }
+
+    public function test_the_till_search_follows_the_role(): void
+    {
+        $this->as('pos_clerk', $this->a);
+        $this->customerAt($this->a, 'Moses', '0711000001');
+
+        $this->assertSame('0711000001', $this->posSearch('Mos')->assertOk()->json('data.0.phone'));
+
+        $this->as($this->maskedCopyOf('pos_clerk'), $this->a);
+        $this->assertSame('07••••0001', $this->posSearch('Mos')->assertOk()->json('data.0.phone'));
     }
 
     public function test_at_most_twenty_results(): void
@@ -119,10 +132,10 @@ class CustomerSearchAntiScrapingTest extends TestCase
         $this->assertSame([], $this->posSearch('Thereonly')->assertOk()->json('data'), 'another outlet\'s customer is not found by name');
         $this->assertSame([], $this->posSearch('0722')->assertOk()->json('data'), 'nor by a fragment of their number');
 
-        // The whole number of the person at the counter finds them — masked.
+        // The whole number of the person at the counter finds them.
         $hit = $this->posSearch('0722 000 002')->assertOk()->json('data');
         $this->assertSame([$there->id], collect($hit)->pluck('id')->all());
-        $this->assertSame('07••••0002', $hit[0]['phone']);
+        $this->assertSame('0722000002', $hit[0]['phone']);
     }
 
     public function test_the_customers_list_refuses_a_short_search(): void

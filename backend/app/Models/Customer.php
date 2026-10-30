@@ -109,7 +109,7 @@ class Customer extends Model
      *           customer profile counts history by.
      *   Own     (cashier) record-specific: the customer on a sale of HERS that
      *           is still open — in progress, or with money still owed. The
-     *           till finds other people through the masked autocomplete
+     *           till finds other people through the autocomplete
      *           (PosController::searchCustomers), never through this list.
      *   None    nobody.
      *

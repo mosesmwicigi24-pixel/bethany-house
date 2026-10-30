@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\MaskedRole;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ use Tests\TestCase;
  */
 class OrderListRowTest extends TestCase
 {
+    use MaskedRole;
     use RefreshDatabase;
 
     private const PHONE = '0712341853';
@@ -172,7 +174,7 @@ class OrderListRowTest extends TestCase
         $order = $this->order(['customer_id' => $customer->id, 'payment_status' => 'paid']);
         $this->pay($order, 'inmpaybill', 4500);
 
-        $this->as('accountant');
+        $this->as($this->maskedCopyOf('accountant'));
         $response = $this->getJson('/api/v1/admin/orders?per_page=50')->assertOk();
         $this->assertStringNotContainsString(self::PHONE, $response->getContent());
 

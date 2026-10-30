@@ -106,7 +106,7 @@ function realEmail(email: string | null | undefined): string | null {
     return email && !email.startsWith("noemail+") ? email : null;
 }
 
-/** Phone first (the mock), else a real email. Masked by the server for masked roles. */
+/** Phone first (the mock), else a real email. Masked by the server for a masked role. */
 export function customerContact(order: Order): string | null {
     return order.customer_phone || realEmail(order.customer_email) || null;
 }

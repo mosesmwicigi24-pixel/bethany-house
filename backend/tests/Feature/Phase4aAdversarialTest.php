@@ -14,6 +14,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\Concerns\StepsUp;
+use Tests\Concerns\MaskedRole;
 use Tests\TestCase;
 
 /**
@@ -32,6 +33,7 @@ use Tests\TestCase;
  */
 class Phase4aAdversarialTest extends TestCase
 {
+    use MaskedRole;
     use RefreshDatabase, StepsUp;
 
     private Outlet $a;
@@ -232,8 +234,8 @@ class Phase4aAdversarialTest extends TestCase
 
     public function test_no_masked_role_receives_a_contact_in_full(): void
     {
-        $this->assertGreaterThanOrEqual(3, $this->assertNoRawContacts('accountant', null), 'accountant opened real surfaces');
-        $this->assertGreaterThanOrEqual(2, $this->assertNoRawContacts('pos_clerk', $this->a), 'cashier opened real surfaces');
+        $this->assertGreaterThanOrEqual(3, $this->assertNoRawContacts($this->maskedCopyOf('accountant'), null), 'accountant opened real surfaces');
+        $this->assertGreaterThanOrEqual(2, $this->assertNoRawContacts($this->maskedCopyOf('pos_clerk'), $this->a), 'cashier opened real surfaces');
         foreach (['procurement_manager', 'procurement_officer', 'tailor', 'system_admin'] as $role) {
             $this->assertNoRawContacts($role, $this->a);
         }
@@ -241,7 +243,7 @@ class Phase4aAdversarialTest extends TestCase
 
     public function test_the_masked_shape_is_what_a_masked_role_sees_and_the_manager_sees_in_full(): void
     {
-        $this->as('accountant');
+        $this->as($this->maskedCopyOf('accountant'));
         $row = collect($this->getJson('/api/v1/admin/orders?per_page=100')->assertOk()->json('data'))->firstWhere('id', $this->ordersA[0]->id);
         $this->assertSame('07••••3344', $row['customer_phone']);
         $this->assertSame('n•••82@gmail.com', $row['customer_email']);

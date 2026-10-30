@@ -223,7 +223,7 @@ struct CustomerSheet: View {
     static let reasons: [(String, String)] = [("payment_follow_up", "Payment follow-up"), ("delivery", "Delivery"), ("customer_callback", "Calling the customer back"), ("order_issue", "A problem with the order")]
 
     var body: some View {
-        PosSheetFrame("Customer", subtitle: "Contacts are masked at the till; a reveal is audited.") {
+        PosSheetFrame("Customer", subtitle: "Who this sale is for.") {
             if let c = session.customer {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
