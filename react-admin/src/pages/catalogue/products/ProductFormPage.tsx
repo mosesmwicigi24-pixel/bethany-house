@@ -47,6 +47,7 @@ import { clsx } from "clsx";
 import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 import { proposeChange, waitsForApproval } from "@/api/proposals";
+import { autoPrice, followers, convertPrice, rateOf, baseOf } from "@/lib/autoPrice";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -1439,6 +1440,7 @@ function EditVariantModal({
         handleSubmit,
         watch,
         setValue,
+        getValues,
         reset,
         formState: { errors },
     } = form;
@@ -1463,11 +1465,12 @@ function EditVariantModal({
                 );
                 return {
                     currency_code: c.code,
-                    regular_price: p
-                        ? Number(p.regular_price)
-                        : fallback
-                          ? Number(fallback.regular_price)
-                          : 0,
+                    // A row at 0 is "no price" (the hub converts one at sale time):
+                    // shown blank with the automatic figure as its hint, never "0".
+                    regular_price: (() => {
+                        const v = p ? Number(p.regular_price) : fallback ? Number(fallback.regular_price) : 0;
+                        return v > 0 ? v : (null as unknown as number);
+                    })(),
                     sale_price: p?.sale_price
                         ? Number(p.sale_price)
                         : (fallback?.sale_price ? Number(fallback.sale_price) : null),
@@ -1526,21 +1529,18 @@ function EditVariantModal({
     // product priced only in the base currency still fills every column.
     const hasProductPrices = productPrices.some((p) => Number(p.regular_price) > 0);
     const resetToProductPrice = () => {
-        const baseCur   = currencies.find((c: any) => c.is_base || c.is_default);
-        const baseRate  = Number(baseCur?.exchange_rate ?? 1);
-        const baseProd  = productPrices.find((x) => x.currency_code === baseCur?.code);
-        const convert   = (v: number, rate: number) =>
-            baseRate > 0 && rate > 0 ? Math.round((v / baseRate) * rate * 100) / 100 : 0;
+        // The product's own row for each currency; where it has none, the
+        // figure the hub would charge (autoPrice: from the list the currency
+        // is priced from, else KES; never through an unset 1.0 rate).
+        const prodAmounts: Record<string, number> = Object.fromEntries(productPrices.map((x) => [x.currency_code, Number(x.regular_price)]));
+        const prodSales:   Record<string, number> = Object.fromEntries(productPrices.filter((x) => x.sale_price != null).map((x) => [x.currency_code, Number(x.sale_price)]));
         currencies.forEach((c: any, i: number) => {
-            const fallback = productPrices.find((x) => x.currency_code === c.code);
-            const rate = Number(c.exchange_rate ?? 1);
-            const reg = fallback
-                ? Number(fallback.regular_price)
-                : baseProd ? convert(Number(baseProd.regular_price), rate) : 0;
+            const fallback = productPrices.find((x) => x.currency_code === c.code && Number(x.regular_price) > 0);
+            const reg = fallback ? Number(fallback.regular_price) : autoPrice(c.code, prodAmounts, currencies);
             const sale = fallback
                 ? (fallback.sale_price != null ? Number(fallback.sale_price) : null)
-                : (baseProd?.sale_price != null ? convert(Number(baseProd.sale_price), rate) : null);
-            setValue(`prices.${i}.regular_price` as any, reg, { shouldDirty: true });
+                : autoPrice(c.code, prodSales, currencies);
+            setValue(`prices.${i}.regular_price` as any, (reg ?? null) as any, { shouldDirty: true });
             setValue(`prices.${i}.sale_price` as any, sale as any, { shouldDirty: true });
             if (c.code !== COST_CURRENCY) return;
             // Cost, KES row only: a variant with its own cost is set to the
@@ -1608,7 +1608,7 @@ function EditVariantModal({
                     <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-2">
                         Attributes
                     </p>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         {Object.entries(attrs).map(([k, v]) => (
                             <Field key={k} label={k}>
                                 <FieldInput
@@ -1644,85 +1644,94 @@ function EditVariantModal({
                         )}
                     </div>
                     {currencies.map((currency, i) => {
-                        const baseCur    = currencies.find((c: any) => c.is_base || c.is_default);
-                        const isBase     = currency.code === baseCur?.code;
-                        const baseRate   = (baseCur?.exchange_rate ?? 1) as number;
-                        const thisRate   = (currency.exchange_rate ?? 1) as number;
+                        const baseCur  = baseOf(currencies);
+                        const isBase   = currency.code === baseCur?.code;
+                        const rate     = rateOf(currency, baseCur);
+                        const fromCode = !isBase && currency.priced_from && currency.priced_from !== baseCur?.code ? currency.priced_from : null;
 
-                        // Editing the default currency's price derives every other
-                        // currency from its exchange rate — the same formula the
-                        // variant generator uses. Only the base row cascades; any
-                        // currency can still be overridden by hand afterwards.
+                        // Typing a price fills the rows that follow it, the
+                        // hub's way (autoPrice): KES fills every other row; a
+                        // row the rand is priced from (USD) fills the rand.
+                        // A row can still be typed over by hand afterwards.
                         const regReg  = register(`prices.${i}.regular_price`);
                         const saleReg = register(`prices.${i}.sale_price`);
-                        const cascade = (field: "regular_price" | "sale_price") =>
-                            (e: React.ChangeEvent<HTMLInputElement>) => {
-                                if (!isBase || !(baseRate > 0)) return;
-                                const raw = e.target.value;
-                                currencies.forEach((c: any, j: number) => {
-                                    if (j === i) return;
-                                    const otherRate = Number(c.exchange_rate ?? 1);
-                                    if (!(otherRate > 0)) return;
-                                    const val = raw === ""
-                                        ? (field === "sale_price" ? null : 0)
-                                        : Math.round((Number(raw) / baseRate) * otherRate * 100) / 100;
-                                    setValue(`prices.${j}.${field}` as any, val as any, { shouldDirty: true });
-                                });
-                            };
+                        const cascade = (field: "regular_price" | "sale_price") => () => {
+                            const rows = getValues("prices") ?? [];
+                            const amounts: Record<string, number | null> = Object.fromEntries(
+                                currencies.map((c: any, j: number) => [c.code, (rows[j]?.[field] as any) === "" || rows[j]?.[field] == null ? null : Number(rows[j][field])]),
+                            );
+                            followers(currency.code, currencies).forEach((code) => {
+                                const j = currencies.findIndex((c: any) => c.code === code);
+                                if (j < 0) return;
+                                const next = autoPrice(code, amounts, currencies);
+                                if (next === null && rateOf(currencies[j], baseCur) === null) return;   // no rate: leave it to be typed
+                                amounts[code] = next;
+                                setValue(`prices.${j}.${field}` as any, next as any, { shouldDirty: true });
+                            });
+                        };
+                        // What this row comes to on its own — shown when it is blank.
+                        const pricesNow = watch("prices") ?? [];
+                        const auto = isBase ? null : autoPrice(currency.code, Object.fromEntries(
+                            currencies.map((c: any, j: number) => [c.code, pricesNow[j]?.regular_price == null || (pricesNow[j]?.regular_price as any) === "" ? null : Number(pricesNow[j].regular_price)]),
+                        ), currencies);
+                        const rateText = isBase ? "Default" : rate === null
+                            ? "No rate set — type it"
+                            : fromCode
+                                ? `from ${fromCode} · 1 ${fromCode} = ${(convertPrice(1, fromCode, currency.code, currencies) ?? 0).toFixed(2)}`
+                                : `1 ${baseCur?.code} = ${(rate / (rateOf(baseCur, baseCur) ?? 1)).toFixed(4)}`;
 
                         return (
                             <div
                                 key={currency.code}
-                                className={`grid ${canSeeCost ? "grid-cols-4" : "grid-cols-3"} gap-2 items-end rounded-lg p-2.5 mb-2 ${isBase ? "bg-brand-50 border border-brand-200" : "bg-surface-50"}`}
+                                className={`rounded-lg p-2.5 mb-2 ${isBase ? "bg-brand-50 border border-brand-200" : "bg-surface-50"}`}
                             >
-                                <div className={`text-xs font-mono font-semibold ${isBase ? "text-brand-700" : "text-surface-600"}`}>
-                                    {currency.code}
-                                    {isBase && <span className="block text-2xs font-normal text-brand-500 normal-case">Default</span>}
-                                    {!isBase && baseCur && <span className="block text-2xs font-normal text-surface-400 normal-case">{(thisRate / baseRate).toFixed(4)}</span>}
+                                <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                                    <span className={`text-sm font-mono font-semibold ${isBase ? "text-brand-700" : "text-surface-700"}`}>{currency.code}</span>
+                                    <span className={`text-2xs truncate ${rate === null && !isBase ? "text-amber-700" : isBase ? "text-brand-500" : "text-surface-400"}`}>{rateText}</span>
                                 </div>
-                                <Field label="Regular">
-                                    <FieldInput
-                                        className="input text-sm"
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        {...regReg}
-                                        onChange={(e) => { regReg.onChange(e); cascade("regular_price")(e); }}
-                                    />
-                                </Field>
-                                <Field
-                                    label="Sale"
-                                    error={(errors as any).prices?.[i]?.sale_price?.message}
-                                    hint={discountCap !== null ? `${discountCapHint(discountCap)} under regular` : undefined}
-                                >
-                                    <FieldInput
-                                        className="input text-sm"
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        {...saleReg}
-                                        onChange={(e) => { saleReg.onChange(e); cascade("sale_price")(e); }}
-                                        placeholder="-"
-                                    />
-                                </Field>
-                                {canSeeCost && (currency.code === COST_CURRENCY ? (
-                                <Field label="Cost" hint={ownKesCost === null && productKesCost !== null ? "Blank = uses the product's cost" : undefined}>
-                                    <FieldInput
-                                        className="input text-sm"
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        // A cleared box is "no cost of its own" (null), never 0 —
-                                        // z.coerce would turn "" into a 0 that shadows the product's cost.
-                                        {...register(`prices.${i}.cost_price`, { setValueAs: (v: any) => (v === "" || v === null || v === undefined ? null : Number(v)) })}
-                                        placeholder={productKesCost !== null ? `${kesFmt(productKesCost)} (product)` : "-"}
-                                    />
-                                </Field>
-                                ) : (
-                                <Field label="Cost">
-                                    <ConvertedCost kesCost={effectiveKesCost} code={currency.code} currencies={currencies} inherited={ownKesCost === null && productKesCost !== null} />
-                                </Field>
-                                ))}
+                                <div className={`grid gap-2 ${canSeeCost ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2"}`}>
+                                    <Field label="Regular">
+                                        <FieldInput
+                                            className="input text-sm w-full min-w-0"
+                                            type="text"
+                                            inputMode="decimal"
+                                            {...regReg}
+                                            placeholder={auto !== null ? `auto ${auto.toLocaleString("en-KE", { maximumFractionDigits: 2 })}` : "-"}
+                                            onChange={(e) => { regReg.onChange(e); cascade("regular_price")(); }}
+                                        />
+                                    </Field>
+                                    <Field
+                                        label="Sale"
+                                        error={(errors as any).prices?.[i]?.sale_price?.message}
+                                        hint={discountCap !== null ? `${discountCapHint(discountCap)} under regular` : undefined}
+                                    >
+                                        <FieldInput
+                                            className="input text-sm w-full min-w-0"
+                                            type="text"
+                                            inputMode="decimal"
+                                            {...saleReg}
+                                            onChange={(e) => { saleReg.onChange(e); cascade("sale_price")(); }}
+                                            placeholder="-"
+                                        />
+                                    </Field>
+                                    {canSeeCost && (currency.code === COST_CURRENCY ? (
+                                    <Field label="Cost" className="col-span-2 sm:col-span-1" hint={ownKesCost === null && productKesCost !== null ? "Blank = uses the product's cost" : undefined}>
+                                        <FieldInput
+                                            className="input text-sm w-full min-w-0"
+                                            type="text"
+                                            inputMode="decimal"
+                                            // A cleared box is "no cost of its own" (null), never 0 —
+                                            // z.coerce would turn "" into a 0 that shadows the product's cost.
+                                            {...register(`prices.${i}.cost_price`, { setValueAs: (v: any) => (v === "" || v === null || v === undefined ? null : Number(v)) })}
+                                            placeholder={productKesCost !== null ? `${kesFmt(productKesCost)} (product)` : "-"}
+                                        />
+                                    </Field>
+                                    ) : (
+                                    <Field label="Cost" className="col-span-2 sm:col-span-1">
+                                        <ConvertedCost kesCost={effectiveKesCost} code={currency.code} currencies={currencies} inherited={ownKesCost === null && productKesCost !== null} />
+                                    </Field>
+                                    ))}
+                                </div>
                             </div>
                         );
                     })}
@@ -2331,27 +2340,25 @@ const PriceRows = React.memo(function PriceRows({
     // form to change instead of reaching around it: setValue is the mechanism
     // that exists for this, and the inputs below are controlled, so the value
     // it writes is the value on screen and the value that saves.
-    const cascade = useCallback((field: "regular_price" | "sale_price", amount: number | null) => {
-        const blank = amount === null || !Number.isFinite(amount);
+    // …and a row the rand is priced from (USD) fills the rand, the hub's
+    // way (autoPrice: from currencies.priced_from, else KES; never through
+    // an unset 1.0 rate), exact to the cent (owner, 2026-10-30).
+    const cascade = useCallback((changed: string, field: "regular_price" | "sale_price", amount: number | null) => {
+        const blank = amount === null || !Number.isFinite(amount) || amount === 0;
+        const amounts: Record<string, number | null> = { [changed]: blank ? null : amount };
 
-        fields.forEach((f: any, idx: number) => {
-            if (f.currency_code === baseCurrency?.code) return;
-
-            const rate = configuredRate(
-                currencies.find((c: any) => c.code === f.currency_code),
-                baseCurrency,
-            );
+        followers(changed, currencies).forEach((code) => {
+            const idx = fields.findIndex((f: any) => f.currency_code === code);
+            if (idx < 0) return;
             // No rate to convert with: leave the field alone rather than copy
             // the shilling figure into it under another currency's label.
-            if (rate === null || !(baseRate > 0)) return;
-
-            setValue(
-                `prices.${idx}.${field}`,
-                blank || amount === 0
-                    ? (field === "sale_price" ? null : 0)
-                    : Math.round(((amount as number) / baseRate) * rate * 100) / 100,
-                { shouldDirty: true },
-            );
+            if (rateOf(currencies.find((c: any) => c.code === code), baseCurrency) === null || !(baseRate > 0)) return;
+            const next = blank && changed === baseCurrency?.code
+                ? (field === "sale_price" ? null : 0)
+                : autoPrice(code, amounts, currencies);
+            if (next === null && changed !== baseCurrency?.code) return;   // its source was cleared: leave it
+            amounts[code] = next;
+            setValue(`prices.${idx}.${field}`, next ?? (field === "sale_price" ? null : 0), { shouldDirty: true });
         });
     }, [fields, currencies, baseCurrency, baseRate, setValue]);
 
@@ -2402,7 +2409,7 @@ const PriceRows = React.memo(function PriceRows({
                         </div>
                         {!isBase && rate !== null && (
                             <button type="button" className="text-2xs text-brand-500 hover:text-brand-700 hover:underline" onClick={() => onRecalculate(i)}>
-                                ↺ Recalculate from {baseCurrency?.code}
+                                ↺ Recalculate from {(currency as any)?.priced_from && (currency as any).priced_from !== baseCurrency?.code ? (currency as any).priced_from : baseCurrency?.code}
                             </button>
                         )}
                     </div>
@@ -2415,7 +2422,7 @@ const PriceRows = React.memo(function PriceRows({
                                         value={f.value}
                                         onValue={(v) => {
                                             f.onChange(v ?? 0);
-                                            if (isBase) cascade("regular_price", v);
+                                            cascade(field.currency_code, "regular_price", v);
                                         }}
                                     />
                                 )}
@@ -2430,7 +2437,7 @@ const PriceRows = React.memo(function PriceRows({
                                             value={f.value}
                                             onValue={(v) => {
                                                 f.onChange(v);
-                                                if (isBase) cascade("sale_price", v);
+                                                cascade(field.currency_code, "sale_price", v);
                                             }}
                                         />
                                         {fieldState.error?.message && (
@@ -2817,14 +2824,16 @@ export default function ProductFormPage() {
             const rate     = configuredRate(target, baseCurrency);
             if (rate === null || !(baseRate > 0)) return;
 
-            const baseRegular = Number(getValues(`prices.${baseIndex}.regular_price`) ?? 0);
-            const baseSale    = Number(getValues(`prices.${baseIndex}.sale_price`) ?? 0);
-            const convert     = (v: number) => Math.round((v / baseRate) * rate * 100) / 100;
+            // The hub's figure (autoPrice): from the list this currency is
+            // priced from (the rand from USD) when it has a price, else KES.
+            const regular = Object.fromEntries(prices.map((p: any) => [p.currency_code, Number(p.regular_price ?? 0)]));
+            const sale    = Object.fromEntries(prices.map((p: any) => [p.currency_code, Number(p.sale_price ?? 0)]));
+            const code    = prices[targetIndex]?.currency_code;
+            const reg     = autoPrice(code, regular, currencies);
+            const sal     = autoPrice(code, sale, currencies);
 
-            setValue(`prices.${targetIndex}.regular_price`, convert(baseRegular) as any, { shouldDirty: true });
-            if (baseSale) {
-                setValue(`prices.${targetIndex}.sale_price`, convert(baseSale) as any, { shouldDirty: true });
-            }
+            if (reg !== null) setValue(`prices.${targetIndex}.regular_price`, reg as any, { shouldDirty: true });
+            if (sal !== null) setValue(`prices.${targetIndex}.sale_price`, sal as any, { shouldDirty: true });
         },
         [currencies, baseCurrency, getValues, setValue],
     );
