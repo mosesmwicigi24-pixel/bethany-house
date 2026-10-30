@@ -923,6 +923,8 @@ class PosController extends Controller
                     ], 422);
                 }
 
+                // The customer is billed a whole unit (CustomerMoney).
+                $item['unit_price'] = \App\Support\CustomerMoney::whole((float) $item['unit_price']);
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float) ($item['discount_value'] ?? 0);
@@ -940,6 +942,8 @@ class PosController extends Controller
                 );
                 [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven((float) $item['unit_price'], (int) $item['quantity'], $lineDiscount, $catUnit);
                 $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
+                // Checked above at its exact figure; billed as a whole unit.
+                $lineDiscount  = \App\Support\CustomerMoney::whole($lineDiscount);
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -988,6 +992,8 @@ class PosController extends Controller
             PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
             // The lines and the cart together: at most 5% of the sale's gross.
             $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
+            // Checked above at its exact figure; billed as a whole unit.
+            $cartDiscount = \App\Support\CustomerMoney::whole($cartDiscount);
 
             // Phase 2 — total tax is sum of per-line taxes already calculated above.
             // This is the goods total, derived BEFORE the shipping charge is read,
@@ -2803,7 +2809,7 @@ class PosController extends Controller
             }
         }
 
-        return round((float) ($validated['shipping_amount'] ?? 0), 2);
+        return \App\Support\CustomerMoney::whole((float) ($validated['shipping_amount'] ?? 0));
     }
 
     private function generateUniqueOrderNumber(string $prefix): string
@@ -3218,6 +3224,8 @@ class PosController extends Controller
                     ], 422);
                 }
 
+                // The customer is billed a whole unit (CustomerMoney).
+                $item['unit_price'] = \App\Support\CustomerMoney::whole((float) $item['unit_price']);
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
@@ -3232,6 +3240,8 @@ class PosController extends Controller
                 );
                 [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven((float) $item['unit_price'], (int) $item['quantity'], $lineDiscount, $catUnit);
                 $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
+                // Checked above at its exact figure; billed as a whole unit.
+                $lineDiscount  = \App\Support\CustomerMoney::whole($lineDiscount);
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3301,6 +3311,8 @@ class PosController extends Controller
                     }
                 }
 
+                $mtoUnitPrice = \App\Support\CustomerMoney::whole($mtoUnitPrice);
+
                 // A made-to-order line carries no discount column, so a lower
                 // price IS its discount: measured against the catalogue too.
                 $mtoCat = \App\Support\DiscountRule::catalogueUnit($mtoProductId ?: null, $mtoVariantId, $resolvedCurrency);
@@ -3342,6 +3354,8 @@ class PosController extends Controller
             PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
             // The lines and the cart together: at most 5% of the order's gross.
             $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
+            // Checked above at its exact figure; billed as a whole unit.
+            $cartDiscount = \App\Support\CustomerMoney::whole($cartDiscount);
             $shippingAmt  = $this->shippingFeeFor($validated, $resolvedCurrency, (float) $itemSubtotal);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,
@@ -3665,7 +3679,7 @@ class PosController extends Controller
 
                 // Agent-taken order: the hub's own price for this currency, or
                 // nothing. Refusing beats charging a KES number as USD.
-                $unitPrice       = (float) $item['unit_price'];
+                $unitPrice       = \App\Support\CustomerMoney::whole((float) $item['unit_price']);
                 $catalogueSaving = 0.0;   // a till operator types the price they mean
                 $promotionSaving = 0.0;   // what a running promotion takes off this line
                 if ($hubPrices) {
@@ -3729,11 +3743,10 @@ class PosController extends Controller
                     [$given, $givenBase, $short] = \App\Support\DiscountRule::lineGiven($unitPrice, (int) $item['quantity'], $askedFor, $catUnit);
                     $tally->line($given, $givenBase, $short ? "items.{$idx}.unit_price" : "items.{$idx}.discount_value");
                 }
-                // Deliberately NOT rounded here. resolveDiscount's full
-                // precision has always flowed into the line subtotal, and
-                // rounding the sum moved a characterised total by a cent. The
-                // catalogue saving is already rounded to the currency.
-                $lineDiscount = $askedFor + $catalogueSaving;
+                // Checked above at its exact figure; billed as a whole unit
+                // (CustomerMoney). The catalogue saving is already whole: it is
+                // the gap between two whole prices.
+                $lineDiscount  = \App\Support\CustomerMoney::whole($askedFor + $catalogueSaving);
                 $lineSubtotal  = $lineBase - $lineDiscount;
                 $itemSubtotal += $lineSubtotal;
 
@@ -3803,6 +3816,8 @@ class PosController extends Controller
                     }
                 }
 
+                $mtoUnitPrice = \App\Support\CustomerMoney::whole($mtoUnitPrice);
+
                 // A made-to-order line carries no discount column, so a lower
                 // price IS its discount: measured against the catalogue too.
                 $mtoCat = $hubPrices ? null
@@ -3844,6 +3859,8 @@ class PosController extends Controller
             PosDiscountPolicy::assertAllowed(auth()->user(), $cartDiscount, $itemSubtotal, 'cart_discount_value');
             // The lines and the cart together: at most 5% of the order's gross.
             $tally->amount($cartDiscount, 'cart_discount_value')->assert(auth()->user());
+            // Checked above at its exact figure; billed as a whole unit.
+            $cartDiscount = \App\Support\CustomerMoney::whole($cartDiscount);
             $shippingAmt  = $this->shippingFeeFor($validated, $currencyCode, (float) $itemSubtotal);
             $totals       = OrderTotals::fromParts(
                 $itemSubtotal,

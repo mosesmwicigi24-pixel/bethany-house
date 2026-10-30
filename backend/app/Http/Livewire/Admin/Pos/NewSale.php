@@ -125,10 +125,11 @@ class NewSale extends Component
             'name'         => $name,
             'variant_name' => $variantId ? '' : '',
             'sku'          => $sku,
-            'unit_price'   => (float) $unitPrice,
+            // The customer is billed whole units (CustomerMoney).
+            'unit_price'   => \App\Support\CustomerMoney::whole((float) $unitPrice),
             'qty'          => 1,
             'discount'     => 0,
-            'subtotal'     => (float) $unitPrice,
+            'subtotal'     => \App\Support\CustomerMoney::whole((float) $unitPrice),
         ];
     }
 
@@ -160,7 +161,7 @@ class NewSale extends Component
 
     public function setItemDiscount(int $idx, string $value): void
     {
-        $this->cart[$idx]['discount'] = max(0, (float) $value);
+        $this->cart[$idx]['discount'] = max(0, \App\Support\CustomerMoney::whole((float) $value));
         $this->recalcItem($idx);
     }
 
@@ -196,7 +197,7 @@ class NewSale extends Component
         } else {
             $this->orderDiscount = $val;
         }
-        $this->orderDiscount = min($this->orderDiscount, $this->getSubtotalProperty());
+        $this->orderDiscount = min(\App\Support\CustomerMoney::whole($this->orderDiscount), $this->getSubtotalProperty());
     }
 
     // ── Computed totals ────────────────────────────────

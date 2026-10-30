@@ -158,9 +158,11 @@ class TaxCalculationService
             $subtotalNet  = round($lineTotal - $taxAmount, 4);
             $subtotalGross = $lineTotal;
         } else {
-            // Add tax on top
+            // Add tax on top — and what is added to the customer's bill is
+            // a whole unit (CustomerMoney). Tax already inside a price, above,
+            // keeps its cents: the customer pays the whole price either way.
             $subtotalNet   = $lineTotal;
-            $taxAmount     = round($lineTotal * $rate, 4);
+            $taxAmount     = \App\Support\CustomerMoney::whole($lineTotal * $rate);
             $subtotalGross = round($lineTotal + $taxAmount, 4);
         }
 
