@@ -198,9 +198,10 @@ class SellableCurrencyTest extends TestCase
         $this->assertSame('5.00', (string) $usd->fresh()->shipping_amount);
         $this->assertSame('105.00', (string) $usd->fresh()->total_amount);
 
-        // A custom fee (no method) is taken as typed, in the order's currency.
+        // A custom fee (no method) is taken in the order's currency, as a
+        // whole unit (CustomerMoney): 7.50 → 8.
         $this->patchJson("/api/v1/admin/orders/{$usd->id}/shipping-fee", ['amount' => 7.5])->assertSuccessful();
-        $this->assertSame('7.50', (string) $usd->fresh()->shipping_amount);
+        $this->assertSame('8.00', (string) $usd->fresh()->shipping_amount);
     }
 
     // ── M-Pesa ──────────────────────────────────────────────────────────────
