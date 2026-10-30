@@ -24,7 +24,7 @@ use Illuminate\Support\Facades\DB;
  *   2. With no such row we convert — from the price list the currency is
  *      priced from (currencies.priced_from: the rand from USD, owner
  *      2026-10-29), else from the base-currency row — at the configured rate,
- *      exactly, never rounded — and when no configured rate exists we return NULL
+ *      to the nearest whole unit (owner, 2026-10-30) — and when no configured rate exists we return NULL
  *      rather than a number. currencies.exchange_rate DEFAULTs to 1.0, so a
  *      non-base row still sitting at exactly 1.0 is an unconfigured row, not
  *      a peg (the same rule MetricEngine::internationalCorridor applies to
@@ -244,6 +244,12 @@ class CurrencyPricing
             : "\"{$productName}\" has no {$currency} price on the hub, and {$currency} has no exchange rate set.";
     }
 
+    /** Nearest whole unit, halves up (2,307.50 → 2,308). */
+    public static function whole(float $amount): float
+    {
+        return (float) round($amount, 0, PHP_ROUND_HALF_UP);
+    }
+
     /**
      * @return array{currency_code: string, regular_price: float, sale_price: float|null, effective_price: float, converted_from: string|null}|null
      */
@@ -259,6 +265,11 @@ class CurrencyPricing
             if ($regular === null) {
                 return null;
             }
+            // A converted price is a whole unit — R3,231, not R3,230.77
+            // (owner, 2026-10-30), halves up. Only what the hub works out:
+            // a price typed for the currency (rule 1) is used as entered.
+            $regular = self::whole($regular);
+            $sale    = $sale !== null ? self::whole($sale) : null;
         }
 
         return [

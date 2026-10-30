@@ -6,7 +6,8 @@
  *   - converted from the price list the currency is priced from
  *     (currencies.priced_from — the rand from USD) when that row has a price,
  *   - else from the default (KES) price,
- *   - exactly, to the cent — never rounded further;
+ *   - to the nearest whole unit, halves up (owner, 2026-10-30): R3,231,
+ *     not R3,230.77 — a price typed on a product is never rounded;
  *   - null when it can't be stated: a currency still at the blank default
  *     rate of 1.0 is unconfigured, not a peg, and must never copy the
  *     shilling figure under another label.
@@ -50,9 +51,10 @@ export function autoPrice(code: string, amounts: Record<string, number | null | 
     const self = currencies.find((c) => c.code === code);
     const from = self?.priced_from && self.priced_from !== base.code ? self.priced_from : null;
     const fromAmount = from ? Number(amounts[from] ?? 0) : 0;
-    if (from && fromAmount > 0) return convertPrice(fromAmount, from, code, currencies);
+    const whole = (v: number | null) => (v === null ? null : Math.round(v));
+    if (from && fromAmount > 0) return whole(convertPrice(fromAmount, from, code, currencies));
     const baseAmount = Number(amounts[base.code] ?? 0);
-    return baseAmount > 0 ? convertPrice(baseAmount, base.code, code, currencies) : null;
+    return baseAmount > 0 ? whole(convertPrice(baseAmount, base.code, code, currencies)) : null;
 }
 
 /**
