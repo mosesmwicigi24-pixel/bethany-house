@@ -20,7 +20,7 @@ use Illuminate\Validation\Rule;
  * POST /admin/customers/{id}/reveal — one contact, for one reason, tied to
  * one sale (Phase 4A, plan §9).
  *
- * A masked role (cashier, accountant) is served 07••••1853. When the work in
+ * A masked role (one the role table does not name) is served 07••••1853. When the work in
  * hand needs the number — chasing a balance, arranging a delivery — the
  * reveal is the way, and it is narrow on purpose:
  *

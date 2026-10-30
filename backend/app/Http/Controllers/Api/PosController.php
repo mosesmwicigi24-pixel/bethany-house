@@ -669,7 +669,7 @@ class PosController extends Controller
      */
     /**
      * Phase 4A: a cashier is served the attached customer's phone and email
-     * MASKED (07••••1853), and the till sends back what it holds. Swap a mask
+     * MASKED (07••••1853) when their role is, and the till sends back what it holds. Swap a mask
      * for the value on file — the chosen customer's, else the order's — so
      * the sale records the real number and is never refused for bullets
      * (CustomerContacts::restoreMasked).
@@ -1674,8 +1674,8 @@ class PosController extends Controller
         // Phase 4A anti-scraping (App\Support\CustomerSearch): 3 real
         // characters, wildcards literal, at most 20 rows, 30 a minute
         // (throttle:customer-search on the route), scope BEFORE matching, and
-        // an answer of id + name + masked phone — nothing that turns the
-        // autocomplete into a phone list.
+        // an answer of id + name + phone, in full only for a role that holds
+        // contacts in full (CustomerContacts::policyFor).
         $validated = $request->validate([
             'q'        => 'required|string|max:100',
             'per_page' => 'nullable|integer|min:1|max:' . \App\Support\CustomerSearch::MAX_RESULTS,
@@ -1686,6 +1686,8 @@ class PosController extends Controller
         $prefix = \App\Support\CustomerSearch::escape($q) . '%';
         $phone  = \App\Support\CustomerSearch::wholePhone($q);
         $user   = $request->user();
+        $full   = \App\Support\CustomerContacts::policyFor($user, 'pos.access')['contacts']
+            === \App\Support\CustomerContacts::FULL;
 
         $customers = \App\Models\Customer::with('user:id,first_name,last_name,phone')
             ->where(function ($query) use ($like, $phone, $user) {
@@ -1710,8 +1712,8 @@ class PosController extends Controller
                     });
                 });
                 // Anywhere: the WHOLE number of the person at the counter.
-                // Knowing it is the point — and the answer is a masked echo of
-                // what was typed, so the till never needs a duplicate record.
+                // Knowing it is the point — and the answer is an echo of what
+                // was typed, so the till never needs a duplicate record.
                 if ($phone !== null) {
                     $query->orWhereRaw('normalize_phone(customers.phone) = normalize_phone(?)', [$phone]);
                 }
@@ -1725,7 +1727,7 @@ class PosController extends Controller
             ->orderByRaw("TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,'')))")
             ->limit($validated['per_page'] ?? 8)
             ->get()
-            ->map(function ($c) {
+            ->map(function ($c) use ($full) {
                 // Prefer the customer's own name, fall back to a linked user.
                 $first = $c->first_name ?: $c->user?->first_name;
                 $last  = $c->last_name  ?: $c->user?->last_name;
@@ -1734,7 +1736,7 @@ class PosController extends Controller
                 return [
                     'id'    => $c->id,
                     'name'  => trim(($first ?? '') . ' ' . ($last ?? '')) ?: "Customer #{$c->id}",
-                    'phone' => $phone ? \App\Support\CustomerContacts::maskPhone($phone) : null,
+                    'phone' => $phone && !$full ? \App\Support\CustomerContacts::maskPhone($phone) : $phone,
                 ];
             });
 

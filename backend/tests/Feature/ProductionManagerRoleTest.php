@@ -160,12 +160,12 @@ class ProductionManagerRoleTest extends TestCase
         $this->assertSame(2, DB::table('notifications')->where('notifiable_id', $pm->id)->count());
     }
 
-    public function test_customer_contacts_are_masked_and_addresses_withheld(): void
+    public function test_customer_contacts_are_read_in_full(): void
     {
         $pm = $this->userWithRole('production_manager');
 
         $policy = CustomerContacts::policyFor($pm, 'production.view');
-        $this->assertSame(CustomerContacts::MASKED, $policy['contacts']);
-        $this->assertSame(CustomerContacts::OMITTED, $policy['address']);
+        $this->assertSame(CustomerContacts::FULL, $policy['contacts']);
+        $this->assertSame(CustomerContacts::FULL, $policy['address']);
     }
 }
