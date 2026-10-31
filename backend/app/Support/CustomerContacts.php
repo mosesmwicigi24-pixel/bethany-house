@@ -142,15 +142,16 @@ final class CustomerContacts
     // for identity keys). Everywhere else a customer's contacts reach a
     // browser, this decides what the caller's ROLES allow:
     //
-    //   phone/email  full    super_admin, admin, finance_manager, outlet_manager
-    //                masked  accountant, pos_clerk, production_manager
-    //                        (07••••1853, n•••82@gmail.com)
-    //                omitted procurement_*, tailor, system_admin
-    //   address      masked  finance_manager, pos_clerk, accountant
-    //                omitted wherever contacts are omitted
+    //   full     super_admin, admin, outlet_manager, finance_manager,
+    //            accountant, pos_clerk, production_manager
+    //   omitted  procurement_*, tailor, system_admin
+    //
+    // The sales roles work with the customer, so they see the whole contact
+    // (owner, 2026-10-30: "Do not hide contacts in Till, Chat, web orders").
     //
     // A role this table does not name (one made in the Roles screen) is
-    // masked: a new role sees less until someone decides it should see more.
+    // masked (07••••1853, n•••82@gmail.com): a new role sees less until
+    // someone decides it should see more.
 
     public const FULL    = 'full';
     public const MASKED  = 'masked';
@@ -163,14 +164,11 @@ final class CustomerContacts
     public const ROLE_POLICY = [
         'super_admin'         => [self::FULL, self::FULL],
         'admin'               => [self::FULL, self::FULL],
-        'finance_manager'     => [self::FULL, self::MASKED],
+        'finance_manager'     => [self::FULL, self::FULL],
         'outlet_manager'      => [self::FULL, self::FULL],
-        // Sees whose job it is (the name is never masked); a phone or email
-        // only masked — the floor rarely calls a customer, and the shop that
-        // took the order holds the full contact. No delivery address.
-        'production_manager'  => [self::MASKED, self::OMITTED],
-        'accountant'          => [self::MASKED, self::MASKED],
-        'pos_clerk'           => [self::MASKED, self::MASKED],
+        'production_manager'  => [self::FULL, self::FULL],
+        'accountant'          => [self::FULL, self::FULL],
+        'pos_clerk'           => [self::FULL, self::FULL],
         'procurement_officer' => [self::OMITTED, self::OMITTED],
         'procurement_manager' => [self::OMITTED, self::OMITTED],
         'tailor'              => [self::OMITTED, self::OMITTED],

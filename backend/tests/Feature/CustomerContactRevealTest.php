@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use Tests\Concerns\MaskedRole;
 use Tests\TestCase;
 
 /**
@@ -26,6 +27,7 @@ use Tests\TestCase;
  */
 class CustomerContactRevealTest extends TestCase
 {
+    use MaskedRole;
     use RefreshDatabase;
 
     private const PHONE = '0712341853';
@@ -70,7 +72,7 @@ class CustomerContactRevealTest extends TestCase
 
     public function test_a_cashier_reveals_the_phone_of_the_customer_on_her_open_sale_and_it_is_audited(): void
     {
-        $clerk = $this->as('pos_clerk');
+        $clerk = $this->as($this->maskedCopyOf('pos_clerk'));
         $sale  = $this->saleBy($clerk);
 
         $res = $this->reveal(['field' => 'phone', 'reason' => 'payment_follow_up',
@@ -92,7 +94,7 @@ class CustomerContactRevealTest extends TestCase
 
     public function test_the_address_is_revealed_for_delivery(): void
     {
-        $clerk = $this->as('pos_clerk');
+        $clerk = $this->as($this->maskedCopyOf('pos_clerk'));
         $sale  = $this->saleBy($clerk);
 
         $this->reveal(['field' => 'address', 'reason' => 'delivery', 'context' => ['type' => 'order', 'id' => $sale->id]])
@@ -101,7 +103,7 @@ class CustomerContactRevealTest extends TestCase
 
     public function test_a_cashier_cannot_reveal_through_a_colleagues_sale_or_a_closed_one(): void
     {
-        $clerk     = $this->as('pos_clerk');
+        $clerk     = $this->as($this->maskedCopyOf('pos_clerk'));
         $colleague = User::factory()->create();
         $theirs    = $this->saleBy($colleague);
         $closed    = $this->saleBy($clerk, ['status' => 'completed', 'payment_status' => 'paid']);
@@ -115,7 +117,7 @@ class CustomerContactRevealTest extends TestCase
 
     public function test_a_masked_role_must_say_which_sale_and_why(): void
     {
-        $this->as('pos_clerk');
+        $this->as($this->maskedCopyOf('pos_clerk'));
 
         $this->reveal(['field' => 'phone', 'reason' => 'payment_follow_up'])->assertStatus(422);
         $this->reveal(['field' => 'phone', 'reason' => 'curiosity', 'context' => ['type' => 'order', 'id' => 1]])->assertStatus(422)
@@ -138,7 +140,7 @@ class CustomerContactRevealTest extends TestCase
         $owner = User::factory()->create();
         $owner->assignRole(Role::findByName('super_admin', 'sanctum'));
 
-        $clerk = $this->as('pos_clerk');
+        $clerk = $this->as($this->maskedCopyOf('pos_clerk'));
         $sale  = $this->saleBy($clerk);
         $body  = ['field' => 'phone', 'reason' => 'payment_follow_up', 'context' => ['type' => 'order', 'id' => $sale->id]];
 

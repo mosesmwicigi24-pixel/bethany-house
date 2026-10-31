@@ -18,6 +18,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\Concerns\StepsUp;
+use Tests\Concerns\MaskedRole;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,7 @@ use Tests\TestCase;
  */
 class ContactExportTest extends TestCase
 {
+    use MaskedRole;
     use RefreshDatabase, StepsUp;
 
     private Outlet $a;
@@ -111,7 +113,7 @@ class ContactExportTest extends TestCase
     public function test_a_masked_role_gets_a_masked_csv(): void
     {
         $this->orders($this->a, 2);
-        $this->actAs($this->user('accountant'));
+        $this->actAs($this->user($this->maskedCopyOf('accountant')));
 
         $csv = $this->get('/api/v1/admin/orders/export')->assertOk()->getContent();
         $this->assertStringNotContainsString('0711000000', $csv);
@@ -141,9 +143,18 @@ class ContactExportTest extends TestCase
         $this->assertSame(DownloadPolicy::GATED, $this->latestDownload()->category, 'exactly 200 is not more than 200');
 
         $this->orders($this->b, 5);
-        $this->actAs($this->user('accountant'));    // 205 rows, but masked
+        $this->actAs($this->user($this->maskedCopyOf('accountant')));    // 205 rows, but masked
         $this->get('/api/v1/admin/orders/export')->assertOk();
         $this->assertSame(DownloadPolicy::GATED, $this->latestDownload()->category);
+    }
+
+    public function test_an_accountant_now_reads_contacts_in_full_so_a_big_export_is_a_bulk_one(): void
+    {
+        $this->orders($this->a, 201);
+        $this->actAs($this->user('accountant'));
+
+        $this->get('/api/v1/admin/orders/export')->assertOk();
+        $this->assertSame(DownloadPolicy::BULK_CONTACTS, $this->latestDownload()->category);
     }
 
     public function test_when_enforcing_only_a_super_admin_approver_decides_a_bulk_contacts_export(): void

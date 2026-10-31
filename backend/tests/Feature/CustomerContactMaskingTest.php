@@ -14,16 +14,17 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\Concerns\StepsUp;
+use Tests\Concerns\MaskedRole;
 use Tests\TestCase;
 
 /**
  * Phase 4A masking (plan §9): what a role's browser receives of a customer's
  * phone, email and delivery address.
  *
- *   phone/email   unmasked: super_admin, admin, finance_manager, outlet_manager
- *                 masked (07••••1853, n•••82@gmail.com): accountant, pos_clerk
- *                 omitted: procurement, tailor, system_admin
- *   address       masked for finance_manager and pos_clerk (and accountant)
+ *   full     super_admin, admin, outlet_manager, finance_manager, accountant,
+ *            pos_clerk, production_manager (owner, 2026-10-30)
+ *   masked   a role the table does not name (07••••1853, n•••82@gmail.com)
+ *   omitted  procurement, tailor, system_admin
  *
  * In the serializer (the response), never in the browser: the raw value must
  * not be anywhere in a masked role's JSON or CSV. One rulebook —
@@ -32,6 +33,7 @@ use Tests\TestCase;
  */
 class CustomerContactMaskingTest extends TestCase
 {
+    use MaskedRole;
     use RefreshDatabase, StepsUp;
 
     private const PHONE   = '0712341853';
@@ -91,10 +93,12 @@ class CustomerContactMaskingTest extends TestCase
     {
         $cases = [
             'admin'               => ['full', 'full'],
-            'finance_manager'     => ['full', 'masked'],
+            'finance_manager'     => ['full', 'full'],
             'outlet_manager'      => ['full', 'full'],
-            'accountant'          => ['masked', 'masked'],
-            'pos_clerk'           => ['masked', 'masked'],
+            'accountant'          => ['full', 'full'],
+            'pos_clerk'           => ['full', 'full'],
+            'production_manager'  => ['full', 'full'],
+            $this->maskedCopyOf('accountant') => ['masked', 'masked'],
             'procurement_manager' => ['omitted', 'omitted'],
             'tailor'              => ['omitted', 'omitted'],
             'system_admin'        => ['omitted', 'omitted'],
@@ -109,8 +113,8 @@ class CustomerContactMaskingTest extends TestCase
 
     public function test_the_strictest_mask_among_the_granting_roles_wins(): void
     {
-        // Both grant orders.view: accountant's mask is the stricter.
-        $user = $this->as('finance_manager', 'accountant');
+        // Both grant orders.view: the unnamed role's mask is the stricter.
+        $user = $this->as('finance_manager', $this->maskedCopyOf('accountant'));
         $this->assertSame('masked', CustomerContacts::policyFor($user, 'orders.view')['contacts']);
 
         // procurement_officer grants no orders.view, so it does not get a say.
@@ -120,10 +124,10 @@ class CustomerContactMaskingTest extends TestCase
 
     // ── Orders: list, detail, export ─────────────────────────────────────────
 
-    public function test_an_accountant_never_receives_the_raw_contacts(): void
+    public function test_a_masked_role_never_receives_the_raw_contacts(): void
     {
         $order = $this->order();
-        $this->as('accountant');
+        $this->as($this->maskedCopyOf('accountant'));
 
         foreach (['/api/v1/admin/orders', "/api/v1/admin/orders/{$order->id}", '/api/v1/admin/orders/pending-queue'] as $url) {
             $body = $this->getJson($url)->assertOk()->getContent();
@@ -143,7 +147,25 @@ class CustomerContactMaskingTest extends TestCase
         $this->assertStringContainsString('07••••1853', $csv);
     }
 
-    public function test_finance_sees_contacts_but_not_the_delivery_address(): void
+    public function test_the_sales_roles_read_the_whole_contact(): void
+    {
+        foreach (['accountant', 'finance_manager', 'pos_clerk'] as $role) {
+            $user  = $this->as($role);
+            $order = $this->order(['created_by' => $user->id]);
+
+            $detail = $this->getJson("/api/v1/admin/orders/{$order->id}")->assertOk()->json('order');
+            $this->assertSame(self::PHONE, $detail['customer_phone'], $role);
+            $this->assertSame(self::EMAIL, $detail['customer_email'], $role);
+            $this->assertSame(self::ADDRESS, $detail['shipping_address_line1'], $role);
+            $this->assertStringContainsString(self::PHONE, $detail['notes'], $role);
+        }
+
+        $this->as('accountant');
+        $csv = $this->get('/api/v1/admin/orders/export')->assertOk()->getContent();
+        $this->assertStringContainsString(self::PHONE, $csv);
+    }
+
+    public function test_finance_sees_the_delivery_address(): void
     {
         $order = $this->order();
         $this->as('finance_manager');
@@ -151,7 +173,7 @@ class CustomerContactMaskingTest extends TestCase
         $detail = $this->getJson("/api/v1/admin/orders/{$order->id}")->assertOk()->json('order');
         $this->assertSame(self::PHONE, $detail['customer_phone']);
         $this->assertSame(self::EMAIL, $detail['customer_email']);
-        $this->assertNotSame(self::ADDRESS, $detail['shipping_address_line1']);
+        $this->assertSame(self::ADDRESS, $detail['shipping_address_line1']);
         $this->assertSame('Nairobi', $detail['shipping_city'], 'the city stays — it is where, not who');
     }
 
@@ -168,9 +190,9 @@ class CustomerContactMaskingTest extends TestCase
 
     // ── Customers ────────────────────────────────────────────────────────────
 
-    public function test_a_cashier_sees_the_customer_on_her_sale_masked(): void
+    public function test_a_masked_role_sees_the_customer_on_its_sale_masked(): void
     {
-        $clerk    = $this->as('pos_clerk');
+        $clerk    = $this->as($this->maskedCopyOf('pos_clerk'));
         $customer = Customer::create(['first_name' => 'Nancy', 'last_name' => 'Wanjiru', 'phone' => self::PHONE, 'email' => self::EMAIL]);
         $this->order(['customer_id' => $customer->id, 'created_by' => $clerk->id]);
 
@@ -184,9 +206,9 @@ class CustomerContactMaskingTest extends TestCase
 
     // ── Quotations and shipments ─────────────────────────────────────────────
 
-    public function test_a_cashier_reads_her_quotation_masked(): void
+    public function test_a_masked_role_reads_its_quotation_masked(): void
     {
-        $clerk = $this->as('pos_clerk');
+        $clerk = $this->as($this->maskedCopyOf('pos_clerk'));
         $q = Quotation::create(['outlet_id' => $this->shop->id, 'source' => 'admin', 'status' => Quotation::DRAFT,
             'currency_code' => 'KES', 'customer_first_name' => 'Nancy', 'customer_phone' => self::PHONE,
             'customer_email' => self::EMAIL, 'subtotal' => 1, 'tax_amount' => 0, 'total_amount' => 1, 'created_by' => $clerk->id]);
@@ -196,11 +218,11 @@ class CustomerContactMaskingTest extends TestCase
         $this->assertStringNotContainsString(self::EMAIL, $body->getContent());
     }
 
-    public function test_a_cashier_saving_her_quotation_keeps_the_number_on_file(): void
+    public function test_a_masked_role_saving_its_quotation_keeps_the_number_on_file(): void
     {
-        // The edit form is filled from what she was served — the masked
-        // number. Sending it back must not overwrite the real one, nor fail.
-        $clerk = $this->as('pos_clerk');
+        // The edit form is filled from what was served — the masked number.
+        // Sending it back must not overwrite the real one, nor fail.
+        $clerk = $this->as($this->maskedCopyOf('pos_clerk'));
         $q = Quotation::create(['outlet_id' => $this->shop->id, 'source' => 'admin', 'status' => Quotation::DRAFT,
             'currency_code' => 'KES', 'customer_first_name' => 'Nancy', 'customer_phone' => self::PHONE,
             'customer_email' => self::EMAIL, 'subtotal' => 1, 'tax_amount' => 0, 'total_amount' => 1, 'created_by' => $clerk->id]);

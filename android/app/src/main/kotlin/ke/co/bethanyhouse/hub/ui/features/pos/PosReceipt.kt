@@ -294,7 +294,7 @@ internal fun CustomerSheet(session: PosSession, onDismiss: () -> Unit) {
         } catch (e: Exception) { env.toasts.error(e) }
     }
 
-    PosSheet("Customer", subtitle = "Contacts are masked at the till; a reveal is audited.", onDismiss = onDismiss, actions = { TextButton(onClick = onDismiss) { Text("Done") } }) {
+    PosSheet("Customer", subtitle = "Who this sale is for.", onDismiss = onDismiss, actions = { TextButton(onClick = onDismiss) { Text("Done") } }) {
         session.customer?.let { c ->
             Row(Modifier.fillMaxWidth().background(MaterialTheme.hub.card, MaterialTheme.shapes.small).padding(Space.m), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {

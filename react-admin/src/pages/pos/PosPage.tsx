@@ -594,7 +594,7 @@ aria-label="Close">
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Phase 4A: a cashier is served the attached customer's phone MASKED
+ * A role the contact policy masks is served the attached customer's phone
  * (07••••1853). When the sale exists on the server (held, resumed, part-paid)
  * she can reveal it for that sale, with a reason — audited, 20 an hour. Before
  * the sale is saved there is no sale to tie the reveal to, and the till does
