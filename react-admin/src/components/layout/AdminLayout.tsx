@@ -7,7 +7,9 @@ import { BottomTabBar } from './BottomTabBar'
 import { PWAInstallBanner } from '@/components/pwa/PWAInstallBanner'
 import { CommandPalette } from '@/components/ui/CommandPalette'
 import { useAuthStore } from '@/store/auth.store'
-import { subscribeToUserChannel, getEcho } from '@/lib/echo'
+import { subscribeToUserChannel, subscribeToAttention, onEchoConnected, getEcho } from '@/lib/echo'
+import MessageNotices from '@/components/comms/MessageNotices'
+import { refreshAttention, onAttentionAnnounced, isViewing } from '@/lib/commsAttention'
 import { primeAudio, messageAlert } from '@/lib/alertSound'
 import { DownloadApprovalDialog } from '@/components/downloads/DownloadApprovalDialog'
 import { useViewportFrame } from '@/lib/useViewportFrame'
@@ -178,11 +180,26 @@ export function AdminLayout() {
             qc.invalidateQueries({ queryKey: ['notif-count'] })
             const d = (data as { data?: Record<string, unknown> }).data
             if (d && 'channel_message_id' in d) {
-                messageAlert()
-                qc.invalidateQueries({ queryKey: ['channels'] })
+                // No chime for the conversation already open in front of you —
+                // it is on screen, and the thread reads it as it arrives.
+                if (!isViewing(Number(d.channel_id) || null)) messageAlert()
+                refreshAttention(qc)
             }
         })
-        return () => { getEcho().leave(`user.${user.id}`) }
+        // My own action on another tab or device (read, replied, dismissed,
+        // handled): drop the notice here too.
+        subscribeToAttention(user.id, () => refreshAttention(qc))
+        // Back online / socket reconnected / another tab acted: ask again, so
+        // nothing that arrived meanwhile is missed and nothing stale lingers.
+        const offConnected = onEchoConnected(() => refreshAttention(qc))
+        const offTabs = onAttentionAnnounced(() => refreshAttention(qc))
+        const onOnline = () => refreshAttention(qc)
+        window.addEventListener('online', onOnline)
+        return () => {
+            offConnected(); offTabs()
+            window.removeEventListener('online', onOnline)
+            getEcho().leave(`user.${user.id}`)
+        }
     }, [user?.id])
 
     // Desktop: collapsed state (persisted)
@@ -266,6 +283,9 @@ export function AdminLayout() {
 
             {/* ── PWA banners (install prompt, offline bar, update alert) ── */}
             <PWAInstallBanner />
+
+            {/* ── Floating message notices (top-right; stay until acted on) ── */}
+            <MessageNotices />
 
             {/* ── Command palette — global search/nav (⌘K / Ctrl+K) ── */}
             <CommandPalette />

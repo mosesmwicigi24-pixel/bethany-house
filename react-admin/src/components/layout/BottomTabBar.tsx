@@ -4,6 +4,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { useHomePath, useIsFloorWorker } from '@/hooks/useHomePath'
 import { MY_TASKS_PATH } from '@/lib/homePath'
 import { useVisualViewport } from '@/lib/useVisualViewport'
+import { useAttention } from '@/lib/commsAttention'
 
 /*
  * Mobile app shell: a five-slot bottom tab bar, phone-only (md:hidden).
@@ -142,6 +143,12 @@ export function BottomTabBar({ onOpenMenu }: { onOpenMenu: () => void }) {
     // the field being typed into — on the product Pricing tab it cut the Cost
     // Price box in half. Nobody navigates while typing, so stand down until
     // the keyboard closes; the flex column reclaims the height immediately.
+    // Unread messages on the Messages tab — red when something has waited
+    // on your reply past the escalation time (owner, 2026-11-02).
+    const { data: attention } = useAttention()
+    const unread    = attention?.totals.unread ?? 0
+    const escalated = (attention?.totals.escalated ?? 0) > 0
+
     if (keyboardOpen) return null
 
     return (
@@ -168,6 +175,7 @@ export function BottomTabBar({ onOpenMenu }: { onOpenMenu: () => void }) {
                                     active ? 'text-brand-700' : 'text-surface-500',
                                 )}
                             >
+                                <span className="relative">
                                 <svg
                                     className={clsx(
                                         'w-[22px] h-[22px] transition-colors',
@@ -185,6 +193,18 @@ export function BottomTabBar({ onOpenMenu }: { onOpenMenu: () => void }) {
                                 >
                                     {tab.icon}
                                 </svg>
+                                {tab.href === '/comms' && unread > 0 && (
+                                    <span
+                                        aria-label={`${unread} unread message${unread === 1 ? '' : 's'}`}
+                                        className={clsx(
+                                            'absolute -top-1.5 -right-2 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-center text-white ring-2 ring-white tabular-nums',
+                                            escalated ? 'bg-danger-500' : 'bg-brand-500',
+                                        )}
+                                    >
+                                        {unread > 99 ? '99+' : unread}
+                                    </span>
+                                )}
+                                </span>
                                 <span
                                     className={clsx(
                                         'text-[10px] leading-none tracking-tight',

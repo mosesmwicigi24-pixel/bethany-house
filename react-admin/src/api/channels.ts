@@ -119,6 +119,43 @@ export interface ChannelRead {
     user_id:              number;
     name:                 string;
     last_read_message_id: number | null;
+    /** This member's latest message here: they RESPONDED to a message exactly when this is greater than its id. */
+    last_posted_message_id?: number | null;
+}
+
+/**
+ * What in my conversations still needs me (GET /channels/attention) — the
+ * server's answer, rebuilt from three per-member pointers, so a notice
+ * survives a reload and clears on every tab and device at once.
+ */
+export type AttentionLevel = "waiting" | "warn" | "escalated";
+export interface AttentionNotice {
+    message_id:  number;
+    body:        string;
+    mentions_me: boolean;
+    created_at:  string;
+    /** Messages behind this notice (it shows the newest). */
+    count:       number;
+    user:        { id: number; name: string; initials: string } | null;
+}
+export interface AttentionChannel {
+    channel_id:    number;
+    type:          ChannelType;
+    name:          string | null;
+    context_type:  string | null;
+    muted:         boolean;
+    unread_count:  number;
+    /** Messages waiting on MY reply: every message in a DM, an @mention elsewhere. */
+    pending_count: number;
+    pending_since: string | null;
+    level:         AttentionLevel | null;
+    notice:        AttentionNotice | null;
+}
+export interface Attention {
+    channels:    AttentionChannel[];
+    totals:      { unread: number; pending: number; warn: number; escalated: number; notices: number };
+    thresholds:  { warn_minutes: number; escalate_minutes: number };
+    server_time: string;
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -256,6 +293,18 @@ export const channelApi = {
     /** Mark channel as fully read. */
     markRead: (channelId: number) =>
         post<{ message: string }>(`/v1/admin/channels/${channelId}/read`, {}),
+
+    /** What still needs me: unread, floating notices, waiting on my reply. */
+    attention: () =>
+        get<Attention>("/v1/admin/channels/attention"),
+
+    /** Hide the floating notice up to a message. NOT a read — the message stays unread. */
+    dismissNotice: (channelId: number, messageId?: number) =>
+        post<{ dismissed_up_to: number | null }>(`/v1/admin/channels/${channelId}/notice-dismiss`, messageId ? { message_id: messageId } : {}),
+
+    /** "Handled": what waits on me here needs no reply. Also reads it. */
+    acknowledge: (channelId: number) =>
+        post<{ acknowledged_up_to: number | null }>(`/v1/admin/channels/${channelId}/acknowledge`, {}),
 
     /**
      * Dismiss an order/production-order thread from my own sidebar. Per-user
