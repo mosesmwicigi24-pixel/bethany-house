@@ -26,6 +26,7 @@ import { posApi } from "@/api/pos";
 import type { PosSale, Outlet } from "@/api/pos";
 import { useToastStore } from "@/store/toast.store";
 import { clsx } from "clsx";
+import { formatAmount, formatMoney } from "@/lib/customerMoney";
 
 interface Props {
     sale: PosSale;
@@ -37,7 +38,8 @@ interface Props {
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
-const fmt = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
+// "4,500" — cents only when there are some (lib/customerMoney).
+const fmt = (n: number) => formatAmount(n);
 const DASH32 = "─".repeat(32);
 const DASH40 = "─".repeat(40);
 

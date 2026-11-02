@@ -18,6 +18,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
+import { formatAmount, formatMoney } from "@/lib/customerMoney";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -128,8 +129,8 @@ async function apiForm<T>(path: string, form: FormData): Promise<T> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const fmt = (n: number, cc = "KES") =>
-    `${cc} ${n.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// "KES 4,500" — cents only when there are some (lib/customerMoney).
+const fmt = (n: number, cc = "KES") => formatMoney(n, cc);
 
 const isMpesa   = (m: PaymentMethod) => m.code === "mpesa"   || m.type === "mobile_money";
 const isPaystack = (m: PaymentMethod) => m.code === "card_paystack" || m.provider === "paystack" || m.code === "paystack";
