@@ -67,7 +67,7 @@ export default function MessageNotices() {
             aria-live="polite"
             className={clsx(
                 "fixed z-[70] flex flex-col gap-2 pointer-events-none",
-                "left-2 right-2 top-[calc(env(safe-area-inset-top)+0.5rem)]",
+                "left-2 right-2 top-[calc(env(safe-area-inset-top)+64px)]",
                 "sm:left-auto sm:right-4 sm:top-[72px] sm:w-[380px]",
             )}
         >
@@ -196,7 +196,7 @@ function NoticeCard({ item, now }: { item: AttentionChannel; now: number }) {
                     <p className="mt-0.5 text-[13px] leading-snug text-surface-700 line-clamp-2 break-words">{notice.body || "Sent an attachment"}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         {notice.mentions_me && <Chip tone="brand">@ mentioned you</Chip>}
-                        {pending && item.pending_since && (
+                        {pending && item.pending_since && (item.level === "warn" || item.level === "escalated") && (
                             <Chip tone={item.level === "escalated" ? "danger" : item.level === "warn" ? "amber" : "muted"}>
                                 Waiting {waited(item.pending_since, now)}
                             </Chip>

@@ -176,29 +176,39 @@ export function AdminLayout() {
     useEffect(() => {
         primeAudio()
         if (!user?.id) return
-        subscribeToUserChannel(user.id, data => {
-            qc.invalidateQueries({ queryKey: ['notif-count'] })
-            const d = (data as { data?: Record<string, unknown> }).data
-            if (d && 'channel_message_id' in d) {
-                // No chime for the conversation already open in front of you —
-                // it is on screen, and the thread reads it as it arrives.
-                if (!isViewing(Number(d.channel_id) || null)) messageAlert()
-                refreshAttention(qc)
-            }
-        })
-        // My own action on another tab or device (read, replied, dismissed,
-        // handled): drop the notice here too.
-        subscribeToAttention(user.id, () => refreshAttention(qc))
-        // Back online / socket reconnected / another tab acted: ask again, so
-        // nothing that arrived meanwhile is missed and nothing stale lingers.
-        const offConnected = onEchoConnected(() => refreshAttention(qc))
+        // Another tab acting, or the network coming back: ask again. These need
+        // no socket, so they work even when the live connection cannot start.
         const offTabs = onAttentionAnnounced(() => refreshAttention(qc))
         const onOnline = () => refreshAttention(qc)
         window.addEventListener('online', onOnline)
+        // The live socket is a bonus over the 60 s poll: a missing or broken
+        // Reverb setup must never take the whole console down with it.
+        let offConnected = () => {}
+        let live = false
+        try {
+            subscribeToUserChannel(user.id, data => {
+                qc.invalidateQueries({ queryKey: ['notif-count'] })
+                const d = (data as { data?: Record<string, unknown> }).data
+                if (d && 'channel_message_id' in d) {
+                    // No chime for the conversation already open in front of you —
+                    // it is on screen, and the thread reads it as it arrives.
+                    if (!isViewing(Number(d.channel_id) || null)) messageAlert()
+                    refreshAttention(qc)
+                }
+            })
+            // My own action on another tab or device (read, replied, dismissed,
+            // handled): drop the notice here too.
+            subscribeToAttention(user.id, () => refreshAttention(qc))
+            // Socket reconnected (laptop woke, network blipped): fetch what was missed.
+            offConnected = onEchoConnected(() => refreshAttention(qc))
+            live = true
+        } catch (e) {
+            console.warn('Live updates unavailable; falling back to polling.', e)
+        }
         return () => {
             offConnected(); offTabs()
             window.removeEventListener('online', onOnline)
-            getEcho().leave(`user.${user.id}`)
+            if (live) { try { getEcho().leave(`user.${user.id}`) } catch { /* already gone */ } }
         }
     }, [user?.id])
 

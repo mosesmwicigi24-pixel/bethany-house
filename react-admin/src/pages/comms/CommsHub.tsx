@@ -2944,59 +2944,67 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
     }, [channel.id]);
 
     useEffect(() => {
-        subscribeToChannel(channel.id, msg => {
-            setMessages(prev => { const m2 = msg as unknown as ChannelMessage; return prev.some(m => String(m.id) === String(m2.id)) ? prev : [...prev, m2]; });
-            // Reading is being HERE when it lands: advance my pointer so the
-            // sender's tick goes green now, not on my next visit. Skip when the
-            // tab is hidden — a background tab has read nothing.
-            const m2 = msg as unknown as ChannelMessage;
-            if (m2.user?.id !== user?.id && document.visibilityState === "visible") {
-                readHere();
-            }
-        });
-
-        // Tick flips from everyone else (and my own other devices).
-        subscribeToRead(channel.id, ({ user_id, last_read_message_id }) => {
-            setReads(prev => {
-                const known = prev.some(r => r.user_id === user_id);
-                if (!known) {
-                    // Member joined after the thread loaded — name arrives with
-                    // the next full fetch; the pointer must not be dropped.
-                    return [...prev, { user_id, name: "", last_read_message_id }];
+        // Live updates are a bonus over the polls: a socket that cannot start
+        // must not take the conversation down with it.
+        let live = false;
+        try {
+            subscribeToChannel(channel.id, msg => {
+                setMessages(prev => { const m2 = msg as unknown as ChannelMessage; return prev.some(m => String(m.id) === String(m2.id)) ? prev : [...prev, m2]; });
+                // Reading is being HERE when it lands: advance my pointer so the
+                // sender's tick goes green now, not on my next visit. Skip when the
+                // tab is hidden — a background tab has read nothing.
+                const m2 = msg as unknown as ChannelMessage;
+                if (m2.user?.id !== user?.id && document.visibilityState === "visible") {
+                    readHere();
                 }
-                return prev.map(r => r.user_id === user_id
-                    ? { ...r, last_read_message_id: Math.max(r.last_read_message_id ?? 0, last_read_message_id) }
-                    : r);
             });
-        });
 
-        // Reaction updates: patch only the reactions field of the affected message.
-        // This fires for every channel member, including the reactor themselves
-        // (server-confirmed state), so it naturally syncs all open tabs/windows.
-        subscribeToReaction(channel.id, ({ message_id, reactions }) => {
-            setMessages(prev =>
-                prev.map(m => m.id === message_id ? { ...m, reactions } : m)
-            );
-        });
+            // Tick flips from everyone else (and my own other devices).
+            subscribeToRead(channel.id, ({ user_id, last_read_message_id }) => {
+                setReads(prev => {
+                    const known = prev.some(r => r.user_id === user_id);
+                    if (!known) {
+                        // Member joined after the thread loaded — name arrives with
+                        // the next full fetch; the pointer must not be dropped.
+                        return [...prev, { user_id, name: "", last_read_message_id }];
+                    }
+                    return prev.map(r => r.user_id === user_id
+                        ? { ...r, last_read_message_id: Math.max(r.last_read_message_id ?? 0, last_read_message_id) }
+                        : r);
+                });
+            });
 
-        joinPresenceChannel(channel.id, {
-            onHere:    ms  => setOnlineIds((ms as any[]).map(m => m.id)),
-            onJoining: m   => setOnlineIds(prev => [...prev, (m as any).id]),
-            onLeaving: m   => setOnlineIds(prev => prev.filter(id => id !== (m as any).id)),
-            onTyping:  m   => {
-                const name = (m as any).name;
-                setTyping(prev => prev.includes(name) ? prev : [...prev, name]);
-                clearTimeout(timers.current[name]);
-                timers.current[name] = setTimeout(() => setTyping(prev => prev.filter(n => n !== name)), 2500);
-            },
-        });
+            // Reaction updates: patch only the reactions field of the affected message.
+            // This fires for every channel member, including the reactor themselves
+            // (server-confirmed state), so it naturally syncs all open tabs/windows.
+            subscribeToReaction(channel.id, ({ message_id, reactions }) => {
+                setMessages(prev =>
+                    prev.map(m => m.id === message_id ? { ...m, reactions } : m)
+                );
+            });
+
+            joinPresenceChannel(channel.id, {
+                onHere:    ms  => setOnlineIds((ms as any[]).map(m => m.id)),
+                onJoining: m   => setOnlineIds(prev => [...prev, (m as any).id]),
+                onLeaving: m   => setOnlineIds(prev => prev.filter(id => id !== (m as any).id)),
+                onTyping:  m   => {
+                    const name = (m as any).name;
+                    setTyping(prev => prev.includes(name) ? prev : [...prev, name]);
+                    clearTimeout(timers.current[name]);
+                    timers.current[name] = setTimeout(() => setTyping(prev => prev.filter(n => n !== name)), 2500);
+                },
+            });
+            live = true;
+        } catch (e) {
+            console.warn("Live updates unavailable in this conversation.", e);
+        }
         readHere();
         // Coming back to a hidden tab with this thread open reads what landed meanwhile.
         const onVisible = () => { if (document.visibilityState === "visible") readHere(); };
         document.addEventListener("visibilitychange", onVisible);
         return () => {
             document.removeEventListener("visibilitychange", onVisible);
-            getEcho().leave(`channel.${channel.id}`); getEcho().leave(`presence.channel.${channel.id}`);
+            if (live) { getEcho().leave(`channel.${channel.id}`); getEcho().leave(`presence.channel.${channel.id}`); }
         };
     }, [channel.id]);
 
