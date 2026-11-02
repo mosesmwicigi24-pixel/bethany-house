@@ -268,6 +268,23 @@ self.addEventListener("push", (event: PushEvent) => {
         },
     } as NotificationOptions;
 
+    // A chat message (owner, 2026-11-02): while a hub window is in front the
+    // in-app notice stack shows it, so the OS banner would only repeat it.
+    // In the background, one banner per conversation — a newer message
+    // replaces the older one instead of piling up.
+    const channelId = payload.data?.channel_id;
+    if (payload.data?.channel_message_id && channelId) {
+        (options as any).tag      = `bh-chat-${channelId}`;
+        (options as any).renotify = true;
+        event.waitUntil(
+            self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+                const inFront = wins.some((w) => (w as WindowClient).focused && (w as WindowClient).visibilityState === "visible");
+                return inFront ? undefined : self.registration.showNotification(title, options);
+            }),
+        );
+        return;
+    }
+
     event.waitUntil(self.registration.showNotification(title, options));
 });
 

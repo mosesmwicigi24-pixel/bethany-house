@@ -314,6 +314,11 @@ class ChannelController extends Controller
         // Every member's read pointer, for WhatsApp-style ticks. One row per
         // member — a message is read by a member exactly when their pointer is
         // ≥ its id, so the client derives per-message state from this alone.
+        // And each member's latest message here: a member has RESPONDED to a
+        // message exactly when they posted after it (per-recipient tracking
+        // of @mentions, owner 2026-11-02).
+        $lastPosted = ChannelMessage::where('channel_id', $id)->whereNotNull('user_id')
+            ->groupBy('user_id')->selectRaw('user_id, MAX(id) AS id')->pluck('id', 'user_id');
         $reads = DB::table('channel_members')
             ->join('users', 'users.id', '=', 'channel_members.user_id')
             ->where('channel_members.channel_id', $id)
@@ -322,9 +327,10 @@ class ChannelController extends Controller
                 'channel_members.last_read_message_id',
             ])
             ->map(fn ($r) => [
-                'user_id'              => (int) $r->user_id,
-                'name'                 => trim("{$r->first_name} {$r->last_name}"),
-                'last_read_message_id' => $r->last_read_message_id ? (int) $r->last_read_message_id : null,
+                'user_id'                => (int) $r->user_id,
+                'name'                   => trim("{$r->first_name} {$r->last_name}"),
+                'last_read_message_id'   => $r->last_read_message_id ? (int) $r->last_read_message_id : null,
+                'last_posted_message_id' => isset($lastPosted[$r->user_id]) ? (int) $lastPosted[$r->user_id] : null,
             ]);
 
         return response()->json([
@@ -352,6 +358,13 @@ class ChannelController extends Controller
             $validated['body'],
             $validated['reply_to_id'] ?? null,
         );
+
+        // Replying answers the thread: what came before is read, and a reply
+        // answers everything waiting on you (MessageAttention), so the
+        // notice clears on every tab and device.
+        if (! $this->advanceRead((int) $channel->id, $request->user()->id)) {
+            \App\Events\MessageAttentionChanged::send($request->user()->id, (int) $channel->id, 'replied');
+        }
 
         return response()->json(['message' => $this->formatMessage($message)], 201);
     }
@@ -477,6 +490,17 @@ class ChannelController extends Controller
     {
         $this->findAccessible($id, $request->user()->id);
 
+        $this->advanceRead((int) $id, $request->user()->id);
+
+        return response()->json(['message' => 'Marked as read.']);
+    }
+
+    /**
+     * Move a member's read pointer to the newest message, never backwards.
+     * Returns whether it moved. Shared by markRead, a reply and "handled".
+     */
+    private function advanceRead(int $id, int $userId): bool
+    {
         $lastMessageId = ChannelMessage::where('channel_id', $id)
             ->orderByDesc('id')
             ->value('id');
@@ -487,7 +511,7 @@ class ChannelController extends Controller
         // a stale client can never drag another device's pointer backwards.
         $advanced = $lastMessageId !== null && DB::table('channel_members')
             ->where('channel_id', $id)
-            ->where('user_id', $request->user()->id)
+            ->where('user_id', $userId)
             ->where(fn ($q) => $q
                 ->whereNull('last_read_message_id')
                 ->orWhere('last_read_message_id', '<', $lastMessageId))
@@ -497,13 +521,73 @@ class ChannelController extends Controller
             // Live tick flip for everyone with the thread open. Same guard as
             // the message broadcast: Reverb being down must not fail the read.
             try {
-                broadcast(new ChannelReadUpdated((int) $id, $request->user()->id, (int) $lastMessageId));
+                broadcast(new ChannelReadUpdated($id, $userId, (int) $lastMessageId));
             } catch (\Exception $e) {
                 \Illuminate\Support\Facades\Log::warning('Reverb read broadcast failed: ' . $e->getMessage());
             }
+            // The reader's other tabs and devices drop the notice too.
+            \App\Events\MessageAttentionChanged::send($userId, $id, 'read');
         }
 
-        return response()->json(['message' => 'Marked as read.']);
+        return $advanced;
+    }
+
+    // ── GET /channels/attention ───────────────────────────────────────────────
+    //
+    // What in my conversations still needs me: unread, the floating notices,
+    // and the messages waiting on my reply (App\Services\Comms\MessageAttention).
+    // Asked again by every tab on load, on reconnect and on attention.changed,
+    // so a notice survives a reload and clears everywhere at once.
+    public function attention(Request $request)
+    {
+        return response()->json(\App\Services\Comms\MessageAttention::forUser($request->user()));
+    }
+
+    // ── POST /channels/{id}/notice-dismiss ────────────────────────────────────
+    //
+    // Hides the floating notice up to a message. NOT a read: the messages stay
+    // unread and keep their badge. A newer message brings the notice back.
+    public function dismissNotice(Request $request, $id)
+    {
+        $this->findAccessible($id, $request->user()->id);
+        $validated = $request->validate(['message_id' => 'sometimes|nullable|integer']);
+
+        $upTo = (int) ChannelMessage::where('channel_id', $id)
+            ->when($validated['message_id'] ?? null, fn ($q, $mid) => $q->where('id', '<=', $mid))
+            ->max('id');
+
+        $moved = $upTo > 0 && DB::table('channel_members')
+            ->where('channel_id', $id)->where('user_id', $request->user()->id)
+            ->where(fn ($q) => $q->whereNull('notice_dismissed_message_id')->orWhere('notice_dismissed_message_id', '<', $upTo))
+            ->update(['notice_dismissed_message_id' => $upTo]) > 0;
+
+        if ($moved) {
+            \App\Events\MessageAttentionChanged::send($request->user()->id, (int) $id, 'dismissed');
+        }
+
+        return response()->json(['dismissed_up_to' => $upTo ?: null]);
+    }
+
+    // ── POST /channels/{id}/acknowledge ───────────────────────────────────────
+    //
+    // "Handled": the messages waiting on me here need no reply. Reads them too
+    // (you cannot have handled what you have not read). A newer message that
+    // asks something of me is pending again.
+    public function acknowledge(Request $request, $id)
+    {
+        $this->findAccessible($id, $request->user()->id);
+
+        $upTo = (int) ChannelMessage::where('channel_id', $id)->max('id');
+        if ($upTo > 0) {
+            DB::table('channel_members')
+                ->where('channel_id', $id)->where('user_id', $request->user()->id)
+                ->where(fn ($q) => $q->whereNull('acknowledged_message_id')->orWhere('acknowledged_message_id', '<', $upTo))
+                ->update(['acknowledged_message_id' => $upTo]);
+        }
+        $this->advanceRead((int) $id, $request->user()->id);
+        \App\Events\MessageAttentionChanged::send($request->user()->id, (int) $id, 'acknowledged');
+
+        return response()->json(['acknowledged_up_to' => $upTo ?: null]);
     }
 
     // ── POST /channels/{id}/dismiss ───────────────────────────────────────────

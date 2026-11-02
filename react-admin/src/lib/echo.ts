@@ -75,6 +75,30 @@ export function subscribeToUserChannel(
         .listen(".notification.pushed", onNotification);
 }
 
+/**
+ * What needs me changed by my own hand on another tab or device (read,
+ * replied, dismissed, handled). Same private user channel as the bell.
+ */
+export function subscribeToAttention(
+    userId: number,
+    onChange: (data: { channel_id: number; reason: string }) => void,
+) {
+    return getEcho()
+        .private(`user.${userId}`)
+        .listen(".attention.changed", onChange);
+}
+
+/**
+ * Run `onConnected` each time the socket (re)connects — after a dropped
+ * connection or the laptop waking — so state missed while offline is fetched.
+ */
+export function onEchoConnected(onConnected: () => void): () => void {
+    const conn = (getEcho() as any)?.connector?.pusher?.connection;
+    if (!conn?.bind) return () => {};
+    conn.bind("connected", onConnected);
+    return () => conn.unbind?.("connected", onConnected);
+}
+
 /** Subscribe to a comment thread for real-time comment updates. */
 export function subscribeToThread(
     model: string,

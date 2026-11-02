@@ -7,7 +7,9 @@ import { BottomTabBar } from './BottomTabBar'
 import { PWAInstallBanner } from '@/components/pwa/PWAInstallBanner'
 import { CommandPalette } from '@/components/ui/CommandPalette'
 import { useAuthStore } from '@/store/auth.store'
-import { subscribeToUserChannel, getEcho } from '@/lib/echo'
+import { subscribeToUserChannel, subscribeToAttention, onEchoConnected, getEcho } from '@/lib/echo'
+import MessageNotices from '@/components/comms/MessageNotices'
+import { refreshAttention, onAttentionAnnounced, isViewing } from '@/lib/commsAttention'
 import { primeAudio, messageAlert } from '@/lib/alertSound'
 import { DownloadApprovalDialog } from '@/components/downloads/DownloadApprovalDialog'
 import { useViewportFrame } from '@/lib/useViewportFrame'
@@ -174,15 +176,40 @@ export function AdminLayout() {
     useEffect(() => {
         primeAudio()
         if (!user?.id) return
-        subscribeToUserChannel(user.id, data => {
-            qc.invalidateQueries({ queryKey: ['notif-count'] })
-            const d = (data as { data?: Record<string, unknown> }).data
-            if (d && 'channel_message_id' in d) {
-                messageAlert()
-                qc.invalidateQueries({ queryKey: ['channels'] })
-            }
-        })
-        return () => { getEcho().leave(`user.${user.id}`) }
+        // Another tab acting, or the network coming back: ask again. These need
+        // no socket, so they work even when the live connection cannot start.
+        const offTabs = onAttentionAnnounced(() => refreshAttention(qc))
+        const onOnline = () => refreshAttention(qc)
+        window.addEventListener('online', onOnline)
+        // The live socket is a bonus over the 60 s poll: a missing or broken
+        // Reverb setup must never take the whole console down with it.
+        let offConnected = () => {}
+        let live = false
+        try {
+            subscribeToUserChannel(user.id, data => {
+                qc.invalidateQueries({ queryKey: ['notif-count'] })
+                const d = (data as { data?: Record<string, unknown> }).data
+                if (d && 'channel_message_id' in d) {
+                    // No chime for the conversation already open in front of you —
+                    // it is on screen, and the thread reads it as it arrives.
+                    if (!isViewing(Number(d.channel_id) || null)) messageAlert()
+                    refreshAttention(qc)
+                }
+            })
+            // My own action on another tab or device (read, replied, dismissed,
+            // handled): drop the notice here too.
+            subscribeToAttention(user.id, () => refreshAttention(qc))
+            // Socket reconnected (laptop woke, network blipped): fetch what was missed.
+            offConnected = onEchoConnected(() => refreshAttention(qc))
+            live = true
+        } catch (e) {
+            console.warn('Live updates unavailable; falling back to polling.', e)
+        }
+        return () => {
+            offConnected(); offTabs()
+            window.removeEventListener('online', onOnline)
+            if (live) { try { getEcho().leave(`user.${user.id}`) } catch { /* already gone */ } }
+        }
     }, [user?.id])
 
     // Desktop: collapsed state (persisted)
@@ -266,6 +293,9 @@ export function AdminLayout() {
 
             {/* ── PWA banners (install prompt, offline bar, update alert) ── */}
             <PWAInstallBanner />
+
+            {/* ── Floating message notices (top-right; stay until acted on) ── */}
+            <MessageNotices />
 
             {/* ── Command palette — global search/nav (⌘K / Ctrl+K) ── */}
             <CommandPalette />

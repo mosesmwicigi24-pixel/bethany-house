@@ -390,6 +390,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('/entity-search',                       [ChannelController::class, 'entitySearch']);
                 // ── Message search across your conversations (chat list search box) ──
                 Route::get('/search',                              [ChannelController::class, 'search']);
+                // ── What still needs me: unread, floating notices, waiting on my reply ──
+                Route::get('/attention',                           [ChannelController::class, 'attention']);
                 // ── Quick replies: the business's saved messages, inserted with `/` ──
                 Route::get('/quick-replies',                       [\App\Http\Controllers\Api\QuickReplyController::class, 'index']);
                 Route::post('/quick-replies',                      [\App\Http\Controllers\Api\QuickReplyController::class, 'store']);
@@ -407,6 +409,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{id}/messages/{msgId}/react',        [ChannelController::class, 'react']);
                 Route::post('/{id}/messages/{msgId}/forward',      [ChannelController::class, 'forward']);
                 Route::post('/{id}/read',                          [ChannelController::class, 'markRead']);
+                Route::post('/{id}/notice-dismiss',                [ChannelController::class, 'dismissNotice']);
+                Route::post('/{id}/acknowledge',                   [ChannelController::class, 'acknowledge']);
                 // ── Per-user thread dismissal — order/production threads only ───
                 Route::post('/{id}/dismiss',                       [ChannelController::class, 'dismiss']);
                 Route::post('/{id}/undismiss',                     [ChannelController::class, 'undismiss']);

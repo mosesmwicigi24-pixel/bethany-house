@@ -1196,7 +1196,7 @@ class NotificationService
                 body:      $bodyPreview,
                 actionUrl: $actionUrl,
                 icon:      'bell',
-                data:      ['channel_message_id' => $messageId],
+                data:      ['channel_message_id' => $messageId, 'channel_id' => (int) $channelId, 'mention' => true],
             ));
         }
     }
@@ -1216,12 +1216,13 @@ class NotificationService
     ): void {
         $user = self::user($userId);
         if ($user) {
+            $channelId = (int) DB::table('channel_messages')->where('id', $messageId)->value('channel_id');
             self::send($user, new InAppNotification(
                 title:     "New message in #{$channelName}",
                 body:      "{$posterName}: {$bodyPreview}",
                 actionUrl: $actionUrl,
                 icon:      'bell',
-                data:      ['channel_message_id' => $messageId],
+                data:      ['channel_message_id' => $messageId, 'channel_id' => $channelId],
             ));
         }
     }

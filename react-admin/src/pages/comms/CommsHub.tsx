@@ -23,7 +23,10 @@ import { EntityChipWithPreview, ENTITY_CHIP } from "@/components/comms/EntityChi
 import { commentApi, type MentionUser } from "@/api/comments";
 import { useAuthStore } from "@/store/auth.store";
 import { usePermissions } from "@/hooks/usePermissions";
+import { avatarGradient, initialsOf } from "@/lib/commsAvatar";
 import { useToastStore } from "@/store/toast.store";
+import { useAttention, useActiveChannel, refreshAttention, announceAttention, waited } from "@/lib/commsAttention";
+import type { AttentionChannel } from "@/api/channels";
 import { subscribeToChannel, subscribeToReaction, subscribeToRead, joinPresenceChannel, whisperTyping, getEcho } from "@/lib/echo";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1796,6 +1799,29 @@ function EntityChip({ entity, isOwn }: { entity: LinkedEntity; isOwn: boolean })
 // them via the title. Derived entirely from each member's read pointer —
 // nothing is stored per message.
 
+/** On my own message: each @mentioned person — replied, seen, or not yet. */
+function MentionStatus({ message, people }: { message: ChannelMessage; people: ChannelRead[] }) {
+    const state = (r: ChannelRead) =>
+        (r.last_posted_message_id ?? 0) > message.id ? "replied"
+            : (r.last_read_message_id ?? 0) >= message.id ? "seen" : "waiting";
+    return (
+        <span className="inline-flex items-center gap-1 ml-1">
+            {people.map(r => {
+                const st = state(r);
+                const first = (r.name || "Someone").split(" ")[0];
+                return (
+                    <span key={r.user_id}
+                        title={`${r.name || "Someone"}: ${st === "replied" ? "replied" : st === "seen" ? "seen, not replied yet" : "not seen yet"}`}
+                        className={clsx("inline-flex items-center gap-0.5 rounded-full px-1.5 text-[10px] font-medium leading-4",
+                            st === "replied" ? "bg-success-50 text-success-700" : st === "seen" ? "bg-amber-50 text-amber-800" : "bg-surface-100 text-surface-500")}>
+                        {st === "replied" ? "↩" : st === "seen" ? "👁" : "•"} {first}
+                    </span>
+                );
+            })}
+        </span>
+    );
+}
+
 function Ticks({ readers, others }: {
     /** Names of the OTHER members whose pointer has passed this message. */
     readers: string[];
@@ -2903,56 +2929,83 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
         staleTime: 0,
     });
 
+    // This conversation is on screen: it gets no floating notice, and reading
+    // it clears its notice on every tab and device.
+    const setActiveChannel = useActiveChannel(s => s.set);
+    // How many messages were unread when I opened this conversation: the
+    // first of them gets a "New messages" line, so I see where I left off
+    // even though opening reads them all.
+    const unreadAtOpen = useRef(channel.unread_count ?? 0);
+    useEffect(() => { setActiveChannel(channel.id); return () => setActiveChannel(null); }, [channel.id]);
+    const readHere = useCallback(() => {
+        channelApi.markRead(channel.id)
+            .then(() => { refreshAttention(qc); announceAttention(); })
+            .catch(() => {});
+    }, [channel.id]);
+
     useEffect(() => {
-        subscribeToChannel(channel.id, msg => {
-            setMessages(prev => { const m2 = msg as unknown as ChannelMessage; return prev.some(m => String(m.id) === String(m2.id)) ? prev : [...prev, m2]; });
-            // Reading is being HERE when it lands: advance my pointer so the
-            // sender's tick goes green now, not on my next visit. Skip when the
-            // tab is hidden — a background tab has read nothing.
-            const m2 = msg as unknown as ChannelMessage;
-            if (m2.user?.id !== user?.id && document.visibilityState === "visible") {
-                channelApi.markRead(channel.id).catch(() => {});
-            }
-        });
-
-        // Tick flips from everyone else (and my own other devices).
-        subscribeToRead(channel.id, ({ user_id, last_read_message_id }) => {
-            setReads(prev => {
-                const known = prev.some(r => r.user_id === user_id);
-                if (!known) {
-                    // Member joined after the thread loaded — name arrives with
-                    // the next full fetch; the pointer must not be dropped.
-                    return [...prev, { user_id, name: "", last_read_message_id }];
+        // Live updates are a bonus over the polls: a socket that cannot start
+        // must not take the conversation down with it.
+        let live = false;
+        try {
+            subscribeToChannel(channel.id, msg => {
+                setMessages(prev => { const m2 = msg as unknown as ChannelMessage; return prev.some(m => String(m.id) === String(m2.id)) ? prev : [...prev, m2]; });
+                // Reading is being HERE when it lands: advance my pointer so the
+                // sender's tick goes green now, not on my next visit. Skip when the
+                // tab is hidden — a background tab has read nothing.
+                const m2 = msg as unknown as ChannelMessage;
+                if (m2.user?.id !== user?.id && document.visibilityState === "visible") {
+                    readHere();
                 }
-                return prev.map(r => r.user_id === user_id
-                    ? { ...r, last_read_message_id: Math.max(r.last_read_message_id ?? 0, last_read_message_id) }
-                    : r);
             });
-        });
 
-        // Reaction updates: patch only the reactions field of the affected message.
-        // This fires for every channel member, including the reactor themselves
-        // (server-confirmed state), so it naturally syncs all open tabs/windows.
-        subscribeToReaction(channel.id, ({ message_id, reactions }) => {
-            setMessages(prev =>
-                prev.map(m => m.id === message_id ? { ...m, reactions } : m)
-            );
-        });
+            // Tick flips from everyone else (and my own other devices).
+            subscribeToRead(channel.id, ({ user_id, last_read_message_id }) => {
+                setReads(prev => {
+                    const known = prev.some(r => r.user_id === user_id);
+                    if (!known) {
+                        // Member joined after the thread loaded — name arrives with
+                        // the next full fetch; the pointer must not be dropped.
+                        return [...prev, { user_id, name: "", last_read_message_id }];
+                    }
+                    return prev.map(r => r.user_id === user_id
+                        ? { ...r, last_read_message_id: Math.max(r.last_read_message_id ?? 0, last_read_message_id) }
+                        : r);
+                });
+            });
 
-        joinPresenceChannel(channel.id, {
-            onHere:    ms  => setOnlineIds((ms as any[]).map(m => m.id)),
-            onJoining: m   => setOnlineIds(prev => [...prev, (m as any).id]),
-            onLeaving: m   => setOnlineIds(prev => prev.filter(id => id !== (m as any).id)),
-            onTyping:  m   => {
-                const name = (m as any).name;
-                setTyping(prev => prev.includes(name) ? prev : [...prev, name]);
-                clearTimeout(timers.current[name]);
-                timers.current[name] = setTimeout(() => setTyping(prev => prev.filter(n => n !== name)), 2500);
-            },
-        });
-        channelApi.markRead(channel.id).catch(() => {});
-        qc.invalidateQueries({ queryKey: ["channels"] });
-        return () => { getEcho().leave(`channel.${channel.id}`); getEcho().leave(`presence.channel.${channel.id}`); };
+            // Reaction updates: patch only the reactions field of the affected message.
+            // This fires for every channel member, including the reactor themselves
+            // (server-confirmed state), so it naturally syncs all open tabs/windows.
+            subscribeToReaction(channel.id, ({ message_id, reactions }) => {
+                setMessages(prev =>
+                    prev.map(m => m.id === message_id ? { ...m, reactions } : m)
+                );
+            });
+
+            joinPresenceChannel(channel.id, {
+                onHere:    ms  => setOnlineIds((ms as any[]).map(m => m.id)),
+                onJoining: m   => setOnlineIds(prev => [...prev, (m as any).id]),
+                onLeaving: m   => setOnlineIds(prev => prev.filter(id => id !== (m as any).id)),
+                onTyping:  m   => {
+                    const name = (m as any).name;
+                    setTyping(prev => prev.includes(name) ? prev : [...prev, name]);
+                    clearTimeout(timers.current[name]);
+                    timers.current[name] = setTimeout(() => setTyping(prev => prev.filter(n => n !== name)), 2500);
+                },
+            });
+            live = true;
+        } catch (e) {
+            console.warn("Live updates unavailable in this conversation.", e);
+        }
+        readHere();
+        // Coming back to a hidden tab with this thread open reads what landed meanwhile.
+        const onVisible = () => { if (document.visibilityState === "visible") readHere(); };
+        document.addEventListener("visibilitychange", onVisible);
+        return () => {
+            document.removeEventListener("visibilitychange", onVisible);
+            if (live) { getEcho().leave(`channel.${channel.id}`); getEcho().leave(`presence.channel.${channel.id}`); }
+        };
     }, [channel.id]);
 
     // Open on the NEWEST message — once, the first time the messages are
@@ -2998,7 +3051,28 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
         const readers = others
             .filter(r => (r.last_read_message_id ?? 0) >= m.id)
             .map(r => r.name || "Someone");
-        return <Ticks readers={readers} others={others.length} />;
+        // Each person this message @mentions: replied, seen, or not yet
+        // (accountability per intended recipient, owner 2026-11-02).
+        const named = (m.mentions ?? []).map(Number)
+            .filter(id => id !== user.id)
+            .map(id => reads.find(r => r.user_id === id))
+            .filter((r): r is ChannelRead => !!r);
+        return (
+            <>
+                <Ticks readers={readers} others={others.length} />
+                {named.length > 0 && <MentionStatus message={m} people={named} />}
+            </>
+        );
+    };
+
+    // Waiting on MY reply here — shown under the header until I reply or mark it handled.
+    const { data: attention } = useAttention();
+    const waitingHere = attention?.channels.find(c => c.channel_id === channel.id && c.pending_count > 0) ?? null;
+    const [handling, setHandling] = useState(false);
+    const markHandled = async () => {
+        setHandling(true);
+        try { await channelApi.acknowledge(channel.id); refreshAttention(qc); announceAttention(); }
+        finally { setHandling(false); }
     };
 
     // Escape closes what is open, innermost first.
@@ -3113,6 +3187,27 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                     )}
                 </div>
 
+                {waitingHere && (
+                    <div role="status" className={clsx(
+                        "flex items-center gap-2 px-4 py-1.5 text-xs border-b",
+                        waitingHere.level === "escalated" ? "bg-danger-50 border-danger-100 text-danger-800"
+                            : waitingHere.level === "warn" ? "bg-amber-50 border-amber-100 text-amber-900"
+                            : "bg-brand-50/60 border-brand-100 text-brand-800",
+                    )}>
+                        <span aria-hidden="true" className={clsx("w-1.5 h-1.5 rounded-full shrink-0",
+                            waitingHere.level === "escalated" ? "bg-danger-500" : waitingHere.level === "warn" ? "bg-amber-500" : "bg-brand-500")} />
+                        <span className="min-w-0 flex-1 truncate">
+                            {waitingHere.pending_count === 1 ? "A message is" : `${waitingHere.pending_count} messages are`} waiting on your reply
+                            {waitingHere.pending_since && <> · {waited(waitingHere.pending_since)}</>}
+                        </span>
+                        <button type="button" onClick={markHandled} disabled={handling}
+                            className="shrink-0 rounded-md px-2 py-0.5 font-medium hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50"
+                            title="No reply needed — clears it for you only">
+                            {handling ? "Marking…" : "Mark handled"}
+                        </button>
+                    </div>
+                )}
+
                 {search !== null && (() => {
                     const needle = search.trim().toLowerCase();
                     const ids = needle ? messages.filter(m => m.type !== "system" && m.body.toLowerCase().includes(needle)).map(m => m.id) : [];
@@ -3215,7 +3310,17 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                 </p>
                             </div>
                         </div>
-                    ) : (<div ref={contentRef}>{grouped.map(({ date, messages: msgs }) => (
+                    ) : (<div ref={contentRef}>{(() => {
+                        // The first message that was unread when I opened this thread.
+                        let left = unreadAtOpen.current;
+                        let firstNewId: ChannelMessage["id"] | null = null;
+                        if (left > 0) {
+                            for (let k = messages.length - 1; k >= 0 && left > 0; k--) {
+                                const m = messages[k];
+                                if (m.type !== "system" && m.user?.id !== user?.id) { firstNewId = m.id; left--; }
+                            }
+                        }
+                        return grouped.map(({ date, messages: msgs }) => (
                         <div key={date}>
                             {/* Sticky pill: scroll back through a long day and you never
                                 lose track of which day you're reading. */}
@@ -3225,7 +3330,15 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                 </span>
                             </div>
                             {msgs.map((msg, i) => (
-                                <MessageBubble key={msg.id} message={msg} channelId={channel.id}
+                                <div key={msg.id}>
+                                {msg.id === firstNewId && (
+                                    <div role="separator" aria-label="New messages" className="flex items-center gap-3 px-4 my-2">
+                                        <span className="h-px flex-1 bg-brand-200" />
+                                        <span className="text-2xs font-semibold uppercase tracking-wider text-brand-600">New messages</span>
+                                        <span className="h-px flex-1 bg-brand-200" />
+                                    </div>
+                                )}
+                                <MessageBubble message={msg} channelId={channel.id}
                                     continued={isContinuation(msg, msgs[i - 1])}
                                     currentUserId={user?.id} onReply={setReplyTo}
                                     onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
@@ -3236,9 +3349,11 @@ function ChannelView({ channel, onOpenSidebar }: { channel: Channel; onOpenSideb
                                     ticks={ticksFor(msg)} showAvatar={channel.type !== "dm"}
                                     highlighted={search !== null && !!search.trim() && msg.type !== "system" && msg.body.toLowerCase().includes(search.trim().toLowerCase())}
                                     startEditing={editId === msg.id} onEditStarted={() => setEditId(null)} />
+                                </div>
                             ))}
                         </div>
-                    ))}</div>)}
+                    ));
+                    })()}</div>)}
                     {typing.filter(n => n !== (user?.first_name ?? "")).length > 0 && (
                         <div className="flex items-center gap-2 px-4 py-2">
                             {/* Three breathing dots read as "someone is there" far faster
@@ -3443,22 +3558,6 @@ aria-label="Close">
 // stable per-person colour, name + relative time on one line, preview + unread
 // badge on the next. Unread rows carry visual weight; read rows recede.
 
-const AVATAR_GRADIENTS = [
-    "from-info-500 to-info-600",
-    "from-success-500 to-info-600",
-    "from-accent-500 to-accent-600",
-    "from-danger-500 to-accent-600",
-    "from-amber-500 to-brand-600",
-    "from-info-500 to-info-700",
-    "from-info-500 to-info-600",
-    "from-accent-500 to-accent-600",
-];
-// Deterministic: the same person is always the same colour, everywhere.
-const avatarGradient = (seed: string) =>
-    AVATAR_GRADIENTS[[...seed].reduce((n, ch) => n + ch.charCodeAt(0), 0) % AVATAR_GRADIENTS.length];
-const initialsOf = (name: string) =>
-    name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? "").join("") || "?";
-
 /** WhatsApp-style relative time: now · 12m · 14:05 · Yest · Mon · 12 Jul */
 function fmtWhen(iso?: string | null): string | null {
     if (!iso) return null;
@@ -3483,10 +3582,12 @@ function fmtWhen(iso?: string | null): string | null {
 // left pane. Order and production threads carry a label, as WhatsApp Business
 // labels do, from data the hub already has.
 
-type ChatFilter = "all" | "unread" | "orders" | "spaces" | "people";
+type ChatFilter = "all" | "unread" | "reply" | "orders" | "spaces" | "people";
 
-function ChatRow({ channel, active, onClick, currentUserName, snippet, onDismiss }: {
+function ChatRow({ channel, active, onClick, currentUserName, snippet, onDismiss, waiting }: {
     channel: Channel; active: boolean; onClick: () => void; currentUserName?: string | null;
+    /** Waiting on MY reply here (GET /channels/attention): its level colours the marker. */
+    waiting?: AttentionChannel | null;
     /** A search hit: the matching message replaces the last-message preview. */
     snippet?: { text: string; count: number } | null;
     /** Order and production threads can be dismissed until their next message. */
@@ -3555,11 +3656,22 @@ function ChatRow({ channel, active, onClick, currentUserName, snippet, onDismiss
                         ) : (
                             <p className="text-[13px] sm:text-xs text-surface-400 italic truncate">No messages yet</p>
                         )}
-                        {unread > 0 && (
-                            <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-brand-500 text-white text-[11px] font-bold flex items-center justify-center tabular-nums">
-                                {unread > 99 ? "99+" : unread}
-                            </span>
-                        )}
+                        <span className="shrink-0 flex items-center gap-1">
+                            {waiting && (
+                                <span title={`Waiting on your reply${waiting.pending_since ? ` · ${waited(waiting.pending_since)}` : ""}`}
+                                    className={clsx("h-5 px-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide flex items-center",
+                                        waiting.level === "escalated" ? "bg-danger-500 text-white"
+                                            : waiting.level === "warn" ? "bg-amber-400 text-amber-950"
+                                            : "bg-brand-50 text-brand-700 ring-1 ring-brand-200")}>
+                                    Reply
+                                </span>
+                            )}
+                            {unread > 0 && (
+                                <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-brand-500 text-white text-[11px] font-bold flex items-center justify-center tabular-nums">
+                                    {unread > 99 ? "99+" : unread}
+                                </span>
+                            )}
+                        </span>
                     </div>
                 </div>
             </button>
@@ -3598,9 +3710,13 @@ function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage,
     const byActivity = (a: Channel, b: Channel) =>
         (b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0) -
         (a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0);
+    // Waiting on my reply, per conversation (the same answer as the floating notices).
+    const { data: attention } = useAttention();
+    const waitingFor = new Map((attention?.channels ?? []).filter(a => a.pending_count > 0).map(a => [a.channel_id, a]));
     const rows = channels
         .filter(c => {
             if (filter === "unread"  && !(c.unread_count ?? 0)) return false;
+            if (filter === "reply"   && !waitingFor.has(c.id)) return false;
             if (filter === "orders"  && !c.context_type) return false;
             if (filter === "spaces"  && (c.type === "dm" || c.context_type)) return false;
             if (filter === "people"  && c.type !== "dm") return false;
@@ -3650,6 +3766,7 @@ function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage,
                 <div className="mt-2.5 flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1" role="tablist" aria-label="Filter conversations">
                     {chip("all", "All")}
                     {chip("unread", "Unread", unreadCount)}
+                    {chip("reply", "Needs reply", waitingFor.size)}
                     {chip("orders", "Orders")}
                     {chip("spaces", "Spaces")}
                     {chip("people", "People")}
@@ -3671,7 +3788,8 @@ function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage,
                     <ChatRow key={c.id} channel={c} active={c.id === activeId} onClick={() => onSelect(c.id)}
                         currentUserName={currentUserName}
                         snippet={needle && hitFor.has(c.id) && !c.name.toLowerCase().includes(needle) ? hitFor.get(c.id) : null}
-                        onDismiss={c.context_type ? () => onDismiss(c) : undefined} />
+                        onDismiss={c.context_type ? () => onDismiss(c) : undefined}
+                        waiting={waitingFor.get(c.id) ?? null} />
                 ))}
             </div>
 
