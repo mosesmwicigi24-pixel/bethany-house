@@ -16,6 +16,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
+import { formatAmount, formatMoney } from "@/lib/customerMoney";
 
 // This page is PUBLIC. It deliberately uses a bare fetch rather than
 // @/api/client, which injects the staff Bearer token and redirects on 401 —
@@ -103,8 +104,7 @@ export default function OrderPage() {
         return () => { alive = false; };
     }, [token]);
 
-    const fmt = (n: number) =>
-        `${order?.currency_code ?? "KES"} ${Number(n).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+    const fmt = (n: number) => formatMoney(n, order?.currency_code ?? "KES");
 
     async function payNow() {
         setPaying(true);

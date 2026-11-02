@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { formatAmount, formatMoney } from "@/lib/customerMoney";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -19,8 +20,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     return body as T;
 }
 
-const fmt = (n: number, cc = "KES") =>
-    `${cc} ${Number(n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// "KES 4,500" — cents only when there are some (lib/customerMoney).
+const fmt = (n: number, cc = "KES") => formatMoney(n, cc);
 
 interface QItem { product_name: string; variant_name: string | null; quantity: number; unit_price: number; total_price: number }
 interface QuoteView {

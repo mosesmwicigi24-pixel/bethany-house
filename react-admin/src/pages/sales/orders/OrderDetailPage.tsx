@@ -26,6 +26,7 @@ import { discountCapHint, maxDiscountAmount, useDiscountCap } from "@/lib/discou
 import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 import { CorrectPaymentModal, OrderDocumentHistory } from "@/components/documents/SalesRevisions";
+import { formatAmount, formatMoney } from "@/lib/customerMoney";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -120,8 +121,8 @@ const PAYMENT_METHODS: Record<string, { label: string; icon: string }> = {
     other:         { label: "Other",         icon: "money"    },
 };
 
-const fmt = (n: number | null | undefined, cc = "KES") =>
-    `${cc} ${(n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+// "KES 4,500" — cents only when there are some (lib/customerMoney).
+const fmt = (n: number | null | undefined, cc = "KES") => formatMoney(n, cc);
 
 // ── M-Pesa receipt verification in flight ─────────────────────────────────
 // Verify-with-receipt asks Safaricom and answers 202; Safaricom's answer comes
@@ -644,7 +645,7 @@ function VoidOrderModal({ order, onClose, onDone }: {
         onError: (e: ApiError) => toast.error(e.message),
     });
 
-    const fmt = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
+    const fmt = (n: number) => formatAmount(n);
     const cc   = order.currency_code ?? "KES";
 
     return (
@@ -849,7 +850,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
         onError:   (e: ApiError) => toast.error(e.message),
     });
 
-    const fmt2 = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
+    const fmt2 = (n: number) => formatAmount(n);
 
     return (
         <Modal open title="Set Shipping" onClose={onClose}>
@@ -1076,7 +1077,7 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
             if (res.changed) {
                 const intlNote = res.is_international ? " - marked as international" : "";
                 const totalNote = res.new_total != null
-                    ? ` · New total: ${res.currency_code} ${(res.new_total as number).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`
+                    ? ` · New total: ${res.currency_code} ${formatAmount(res.new_total as number)}`
                     : "";
                 toast.success(`Currency updated to ${res.currency_code}${intlNote}${totalNote}`);
             } else {
@@ -1440,7 +1441,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
     // We use the stored tax_amount/total_amount ratio so it works with mixed per-product rates.
     const orderTaxRatio  = order.total_amount > 0 ? (order.tax_amount ?? 0) / order.total_amount : 0;
     const taxOnAmount    = !taxInclusive && orderTaxRatio > 0 ? Math.round(amount * orderTaxRatio * 100) / 100 : 0;
-    const fmt = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
+    const fmt = (n: number) => formatAmount(n);
 
     // ── M-Pesa STK Push ───────────────────────────────────────────────────────
     const initiateStkPush = async () => {
@@ -2303,12 +2304,12 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                                 </span>
                                                 <span style={{ flex: "0 0 24px", textAlign: "center" }}>{item.quantity}</span>
                                                 <span style={{ flex: "0 0 18px", textAlign: "center" }}>{taxCode}</span>
-                                                <span style={{ flex: "0 0 52px", textAlign: "right" }}>{subtotal.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                                <span style={{ flex: "0 0 52px", textAlign: "right" }}>{formatAmount(subtotal)}</span>
                                             </div>
                                             <div style={{ paddingLeft: "28px", fontSize: "9px", color: "#555" }}>
-                                                {item.quantity} × {(item.unit_price ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}
-                                                {item.discount_amount > 0 && ` · DISC: -${(item.discount_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`}
-                                                                        {(item as any).price_adjusted && (item as any).original_price && ` · ADJ from ${((item as any).original_price).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`}
+                                                {item.quantity} × {formatAmount(item.unit_price ?? 0)}
+                                                {item.discount_amount > 0 && ` · DISC: -${formatAmount(item.discount_amount)}`}
+                                                                        {(item as any).price_adjusted && (item as any).original_price && ` · ADJ from ${formatAmount((item as any).original_price)}`}
                                                 {item.is_production_item && " · Made-to-Order"}
                                             </div>
                                         </div>
@@ -2320,25 +2321,25 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
 
                             {/* Totals */}
                             <div style={{ fontSize: "11px" }}>
-                                <div style={rowStyle}><span>Subtotal</span><span>{(order.subtotal ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                <div style={rowStyle}><span>Subtotal</span><span>{formatAmount(order.subtotal ?? 0)}</span></div>
                                 {(order.discount_amount ?? 0) > 0 && (
-                                    <div style={rowStyle}><span>Discount</span><span>-{(order.discount_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                    <div style={rowStyle}><span>Discount</span><span>-{formatAmount(order.discount_amount)}</span></div>
                                 )}
                                 {(order.shipping_amount ?? 0) > 0 && (
                                     <div style={rowStyle}>
                                         <span>Shipping{order.shipping_method ? ` (${order.shipping_method})` : ""}</span>
-                                        <span>{(order.shipping_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                        <span>{formatAmount(order.shipping_amount)}</span>
                                     </div>
                                 )}
                                 {(order.tax_amount ?? 0) > 0 && (
                                     <div style={rowStyle}>
                                         <span>Tax{order.prices_include_tax ? " (incl.)" : ""}</span>
-                                        <span>{(order.tax_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                        <span>{formatAmount(order.tax_amount)}</span>
                                     </div>
                                 )}
                                 <div style={{ ...rowStyle, ...dashedBorder, fontWeight: "bold", fontSize: "13px" }}>
                                     <span>Totals</span>
-                                    <span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                    <span>{formatAmount(order.total_amount ?? 0)}</span>
                                 </div>
                             </div>
 
@@ -2351,30 +2352,30 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         <div key={i}>
                                             <div style={rowStyle}>
                                                 <span style={{ textTransform: "uppercase" }}>{(p.payment_method ?? "other").replace(/_/g, " ")}</span>
-                                                <span>{Number(p.amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                                <span>{formatAmount(p.amount)}</span>
                                             </div>
                                             {(p.payment_method === "mpesa" || p.payment_method === "m_pesa") && p.provider_reference && (
                                                 <div style={{ paddingLeft: "8px", fontSize: "9px", color: "#555" }}>
                                                     <div>TRN #: {p.provider_reference}</div>
                                                     {order.customer_phone && <div>Cell: {receiptMaskPhone(order.customer_phone)}</div>}
-                                                    <div>Amount: {Number(p.amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</div>
+                                                    <div>Amount: {formatAmount(p.amount)}</div>
                                                 </div>
                                             )}
                                             {p.payment_method === "cash" && p.cash_received > 0 && (
                                                 <div style={{ paddingLeft: "8px", fontSize: "10px" }}>
-                                                    <div style={rowStyle}><span>Tendered</span><span>{Number(p.cash_received).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                                    <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{Number(p.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                                    <div style={rowStyle}><span>Tendered</span><span>{formatAmount(p.cash_received)}</span></div>
+                                                    <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{formatAmount(p.change_given ?? 0)}</span></div>
                                                 </div>
                                             )}
                                         </div>
                                     ))
                                 ) : paidPayments[0] ? (
                                     <>
-                                        <div style={rowStyle}><span>Tendered</span><span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                        <div style={rowStyle}><span>Change</span><span>{(cashPayment?.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                        <div style={rowStyle}><span>Tendered</span><span>{formatAmount(order.total_amount ?? 0)}</span></div>
+                                        <div style={rowStyle}><span>Change</span><span>{formatAmount(cashPayment?.change_given ?? 0)}</span></div>
                                         <div style={{ ...rowStyle, marginTop: "2px" }}>
                                             <span style={{ textTransform: "uppercase" }}>{(paidPayments[0].payment_method ?? "").replace(/_/g, " ")}</span>
-                                            <span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                            <span>{formatAmount(order.total_amount ?? 0)}</span>
                                         </div>
                                     </>
                                 ) : (
@@ -2389,7 +2390,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         <div style={{ fontSize: "10px" }}>
                                             <div style={rowStyle}><span>TRN #</span><span style={{ fontWeight: "bold" }}>{mpesaPayments[0].provider_reference}</span></div>
                                             {order.customer_phone && <div style={rowStyle}><span>Cell</span><span>{receiptMaskPhone(order.customer_phone)}</span></div>}
-                                            <div style={rowStyle}><span>Amount</span><span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                            <div style={rowStyle}><span>Amount</span><span>{formatAmount(order.total_amount ?? 0)}</span></div>
                                         </div>
                                     </>
                                 )}
@@ -2398,15 +2399,15 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                 {!hasSplit && cashPayment && (cashPayment.cash_received ?? 0) > 0 && (
                                     <>
                                         <p style={dividerStyle} />
-                                        <div style={rowStyle}><span>Cash Received</span><span>{cc} {Number(cashPayment.cash_received).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{cc} {Number(cashPayment.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                        <div style={rowStyle}><span>Cash Received</span><span>{cc} {formatAmount(cashPayment.cash_received)}</span></div>
+                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{cc} {formatAmount(cashPayment.change_given ?? 0)}</span></div>
                                     </>
                                 )}
 
                                 {outstanding > 0.01 && (
                                     <>
                                         <p style={dividerStyle} />
-                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>BALANCE DUE</span><span>{cc} {outstanding.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>BALANCE DUE</span><span>{cc} {formatAmount(outstanding)}</span></div>
                                     </>
                                 )}
                                 {outstanding <= 0.01 && paidPayments.length > 0 && (
@@ -2436,8 +2437,8 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                     {taxBreakdown.map(({ code, vatable, vat }) => (
                                         <div key={code} style={{ display: "flex", gap: "4px" }}>
                                             <span style={{ flex: "0 0 20px" }}>{code}</span>
-                                            <span style={{ flex: 1, textAlign: "right" }}>{vatable.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
-                                            <span style={{ flex: "0 0 60px", textAlign: "right" }}>{vat.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                            <span style={{ flex: 1, textAlign: "right" }}>{formatAmount(vatable)}</span>
+                                            <span style={{ flex: "0 0 60px", textAlign: "right" }}>{formatAmount(vat)}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -2450,7 +2451,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         =========== PROMOTION ===========
                                     </p>
                                     <p style={{ ...centerStyle, fontSize: "10px", fontWeight: "bold", margin: "2px 0" }}>
-                                        You have SAVED {cc} {totalSavings.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
+                                        You have SAVED {cc} {formatAmount(totalSavings)}
                                     </p>
                                     <p style={{ ...centerStyle, borderBottom: "1px dashed #000", margin: "4px 0", fontSize: "10px" }}>
                                         =========== PROMOTION ===========
@@ -2541,13 +2542,13 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         )}
                                         {selectedPayment.cash_received > 0 && (
                                             <>
-                                                <div style={rowStyle}><span>Cash Received</span><span>{cc} {Number(selectedPayment.cash_received).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                                <div style={rowStyle}><span>Change Given</span><span>{cc} {Number(selectedPayment.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                                <div style={rowStyle}><span>Cash Received</span><span>{cc} {formatAmount(selectedPayment.cash_received)}</span></div>
+                                                <div style={rowStyle}><span>Change Given</span><span>{cc} {formatAmount(selectedPayment.change_given ?? 0)}</span></div>
                                             </>
                                         )}
                                         <div style={{ ...rowStyle, ...dashedBorder, fontWeight: "bold" }}>
                                             <span>AMOUNT PAID</span>
-                                            <span>{cc} {Number(selectedPayment.amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                            <span>{cc} {formatAmount(selectedPayment.amount)}</span>
                                         </div>
                                     </div>
                                     <p style={dividerStyle} />
@@ -3611,7 +3612,7 @@ function ReversePaymentModal({ order, payment, immediate, onClose, onDone }: {
     const [reason, setReason]   = useState("");
     const [restore, setRestore] = useState(true);
     const cc = order.currency_code || "KES";
-    const fmtMoney = (n: number) => `${cc} ${Number(n).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+    const fmtMoney = (n: number) => `${cc} ${formatAmount(n)}`;
     const autoAdvanced = ["processing", "confirmed"].includes(order.status);
 
     const mutation = useMutation({
@@ -3862,7 +3863,7 @@ export default function OrderDetailPage() {
         setPaymentLinkLoading(true);
         try {
             const r: any = await ordersApi.updateCurrency(order.id, currencyCheck.country);
-            toast.success(`Order moved to ${r.currency_code}${r.new_total != null ? ` · ${r.currency_code} ${Number(r.new_total).toLocaleString("en-KE", { minimumFractionDigits: 2 })}` : ""}`);
+            toast.success(`Order moved to ${r.currency_code}${r.new_total != null ? ` · ${r.currency_code} ${formatAmount(r.new_total)}` : ""}`);
             refresh();
         } catch (e: any) {
             toast.error(e.message ?? "Could not switch the currency");

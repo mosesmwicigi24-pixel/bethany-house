@@ -90,11 +90,11 @@ class OrderReceiptPdfTest extends TestCase
         // The screen's own figures (OrderController / Order::outstandingBalance) agree.
         $this->assertEquals($o->fresh()->outstandingBalance(), $data['balance_due']);
 
-        $this->assertStringContainsString('43,500.00', $html, 'balance due');
-        $this->assertStringContainsString('6,500.00', $html, 'total paid');
+        $this->assertStringContainsString('KES 43,500', $html, 'balance due');
+        $this->assertStringContainsString('KES 6,500', $html, 'total paid');
         $this->assertStringContainsString('Refund', $html, 'the refund is shown, not hidden');
-        $this->assertStringNotContainsString('10,000.00', $html, 'a payment awaiting approval is not money received');
-        $this->assertStringNotContainsString('3,000.00', $html, 'a failed payment is not money received');
+        $this->assertStringNotContainsString('KES 10,000', $html, 'a payment awaiting approval is not money received');
+        $this->assertStringNotContainsString('KES 3,000', $html, 'a failed payment is not money received');
         $this->assertStringNotContainsString('PAID IN FULL', $html);
         $this->assertStringContainsString('Bishop Gitahi', $html);
 
@@ -140,7 +140,7 @@ class OrderReceiptPdfTest extends TestCase
         $this->assertStringContainsString('Please pay the amount due', $html);
         $this->assertStringContainsString($o->order_number, $html);
         $this->assertStringContainsString('No payment received yet.', $html);
-        $this->assertStringNotContainsString('4,000.00', $html, 'a failed payment is not listed as received');
+        $this->assertStringNotContainsString('KES 4,000', $html, 'a failed payment is not listed as received');
         $this->assertStringContainsString('Invoice', $html);
     }
 
@@ -158,8 +158,8 @@ class OrderReceiptPdfTest extends TestCase
         foreach ([[$inv, $invHtml], [$rec, $recHtml]] as [$data, $html]) {
             $this->assertSame(6_750.0, (float) $data['total_paid']);
             $this->assertSame(13_250.0, (float) $data['balance_due']);
-            $this->assertStringContainsString('13,250.00', $html);
-            $this->assertStringNotContainsString('5,000.00', $html, 'pending money is not received');
+            $this->assertStringContainsString('KES 13,250', $html);
+            $this->assertStringNotContainsString('KES 5,000', $html, 'pending money is not received');
         }
     }
 

@@ -41,6 +41,21 @@ final class CustomerMoney
             : self::whole($amount);
     }
 
+    /**
+     * An amount as a customer reads it (owner, 2026-10-30): "KES 4,500",
+     * not "KES 4,500.00". Cents are shown only when there are some — VAT
+     * inside a price (137.93), or an amount written before the whole-unit
+     * rule — so nothing is ever hidden by the display. Display only: the
+     * stored figure is untouched.
+     */
+    public static function format(float $amount, ?string $currency = null): string
+    {
+        $decimals = abs($amount - round($amount)) < 0.005 ? 0 : 2;
+        $text     = number_format($amount, $decimals);
+
+        return $currency !== null && $currency !== '' ? "{$currency} {$text}" : $text;
+    }
+
     /** whole(), passing NULL through. */
     public static function wholeOrNull(?float $amount): ?float
     {

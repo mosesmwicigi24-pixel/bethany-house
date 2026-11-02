@@ -50,9 +50,10 @@ class PdfService
         return $cached;
     }
 
+    /** "KES 4,500" — cents only when there are some (CustomerMoney::format). */
     protected static function money(float $amount, string $currency = 'KES'): string
     {
-        return $currency . ' ' . number_format($amount, 2);
+        return \App\Support\CustomerMoney::format($amount, $currency);
     }
 
     protected static function date(?string $date): string

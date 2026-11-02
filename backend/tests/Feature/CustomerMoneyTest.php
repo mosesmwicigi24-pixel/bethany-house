@@ -66,6 +66,16 @@ class CustomerMoneyTest extends TestCase
         $this->assertNull(CustomerMoney::wholeOrNull(null));
     }
 
+    public function test_a_customer_reads_whole_amounts_without_cents_and_real_cents_with_them(): void
+    {
+        $this->assertSame('KES 4,500', CustomerMoney::format(4500.0, 'KES'));
+        $this->assertSame('R 3,231', CustomerMoney::format(3231.0, 'R'));
+        $this->assertSame('137.93', CustomerMoney::format(137.93), 'VAT inside a price keeps its cents');
+        $this->assertSame('USD 72.80', CustomerMoney::format(72.80, 'USD'), 'an older amount with cents is never hidden');
+        $this->assertSame('0', CustomerMoney::format(0.0));
+        $this->assertSame('1,000,000', CustomerMoney::format(1000000.0));
+    }
+
     public function test_a_price_in_any_currency_but_the_shillings_is_saved_whole(): void
     {
         $this->currency('ZAR', 0.153846);
