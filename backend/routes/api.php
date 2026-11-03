@@ -708,6 +708,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('/runs/{id}/payout',                  [$pay, 'payoutFile'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
                 Route::get('/runs/{id}/payout-readiness',        [$pay, 'payoutReadiness'])->whereNumber('id');
                 Route::get('/returns',                           [$pay, 'returns'])->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                // People & pay: salary, government deductions and last payment per person
+                Route::get('/people',                            [$pay, 'people']);
+                Route::post('/people/{user}/deductions',         [$pay, 'setDeductions'])->whereNumber('user')->middleware(['permission:payroll.run,sanctum', 'step.up']);
                 // Advances and loans (People PR 7)
                 $adv = \App\Http\Controllers\Api\AdvancesController::class;
                 Route::get('/advances',                          [$adv, 'index']);

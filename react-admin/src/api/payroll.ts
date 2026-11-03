@@ -18,7 +18,7 @@ export interface PayrollLine {
     user: { id: number; name?: string };
     hours: LineHours;
     items: PayslipItem[];
-    structure: { kind: StructureKind | null; base_amount: number | null; hourly_equivalent: number | null; service_fraction: number | null };
+    structure: { kind: StructureKind | null; base_amount: number | null; hourly_equivalent: number | null; service_fraction: number | null; /** False when government deductions did not apply. */ statutory?: boolean };
     payment_method: "mpesa" | "bank" | "cash" | null;
     payment_reference: string | null;
     paid_at: string | null;
@@ -90,6 +90,17 @@ export interface PayStructure {
     created_at: string | null;
 }
 
+/** One row of Payroll › People & pay. */
+export interface PayPerson {
+    id: number;
+    name: string;
+    salary: { kind: StructureKind; base_amount: number; effective_from: string } | null;
+    /** PAYE, NSSF, SHIF (SHA) and Housing Levy together — off unless accounts added them. */
+    deductions: { applies: boolean; since: string | null; reason: string | null; next: { applies: boolean; from: string } | null };
+    advances_owed: number;
+    last_paid: { net: number; paid_on: string; method: string | null; run: string | null } | null;
+}
+
 export const payrollApi = {
     runs: (year?: number) => get<RunsIndex>("/v1/admin/payroll/runs", { params: year ? { year: String(year) } : undefined }),
     draft: (periodId: number) => post<{ message: string; run: PayrollRun }>("/v1/admin/payroll/runs", { pay_period_id: periodId }),
@@ -98,7 +109,7 @@ export const payrollApi = {
     discard: (id: number) => del<{ message: string }>(`/v1/admin/payroll/runs/${id}`),
     /** The server asks for a step-up first. */
     approve: (id: number) => post<{ message: string; run: PayrollRun }>(`/v1/admin/payroll/runs/${id}/approve`),
-    pay: (id: number, lines: { line_id: number; payment_method: "mpesa" | "bank" | "cash"; payment_reference?: string }[]) =>
+    pay: (id: number, lines: { line_id: number; payment_method: "mpesa" | "bank" | "cash"; payment_reference?: string; paid_on?: string }[]) =>
         post<{ message: string; run: PayrollRun }>(`/v1/admin/payroll/runs/${id}/pay`, { lines }),
     payslipPdf: (runId: number, lineId: number) => get<Blob>(`/v1/admin/payroll/runs/${runId}/lines/${lineId}/payslip`, { responseType: "blob" }),
 
@@ -111,6 +122,12 @@ export const payrollApi = {
     structures: (userId: number) => get<{ data: PayStructure[]; can_edit: boolean }>(`/v1/admin/people/${userId}/pay`),
     addStructure: (userId: number, data: { effective_from: string; kind: StructureKind; base_amount: number; allowances?: Allowance[]; notes?: string }) =>
         post<{ message: string; structure: PayStructure }>(`/v1/admin/people/${userId}/pay`, data),
+
+    // ── People & pay: salary, government deductions and last payment per person ──
+    people: () => get<{ data: PayPerson[]; can_edit: boolean }>("/v1/admin/payroll/people"),
+    /** Add (applies) or stop every government deduction from a date. The server asks for a step-up first. */
+    setDeductions: (userId: number, data: { applies: boolean; effective_from: string; reason: string }) =>
+        post<{ message: string }>(`/v1/admin/payroll/people/${userId}/deductions`, data),
 
     // ── Me ──
     myPayslips: () => get<{ data: PayrollLine[] }>("/v1/admin/me/payslips"),
