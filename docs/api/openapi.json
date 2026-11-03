@@ -25185,6 +25185,125 @@
                 }
             }
         },
+        "/api/v1/admin/payroll/people": {
+            "get": {
+                "operationId": "get_v1_admin_payroll_people",
+                "summary": "People (Payroll)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/people/{user}/deductions": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_people_by_user_deductions",
+                "summary": "Set Deductions (Payroll)",
+                "tags": [
+                    "payroll"
+                ],
+                "parameters": [
+                    {
+                        "name": "user",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view",
+                    "payroll.run"
+                ],
+                "x-step-up": true,
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/payroll/rates": {
             "get": {
                 "operationId": "get_v1_admin_payroll_rates",

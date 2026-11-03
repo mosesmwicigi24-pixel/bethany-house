@@ -28,7 +28,9 @@ export function PayslipItems({ line, compact = false }: { line: PayrollLine; com
                 <p className="text-2xs text-surface-500 leading-relaxed">
                     Hours: regular {hm(line.hours.regular_minutes)}, overtime {hm(line.hours.overtime_minutes)}, rest days {hm(line.hours.rest_day_minutes)}, holidays {hm(line.hours.holiday_minutes)}
                     {" · "}paid leave {line.hours.paid_leave_days} d, unpaid {line.hours.unpaid_leave_days} d, days worked {line.hours.days_worked}.
-                    {" "}Taxable pay {kes(line.taxable)}. Employer NSSF {kes(line.nssf_employer)} and Housing Levy {kes(line.housing_employer)} are not deducted from you.
+                    {line.structure?.statutory === false
+                        ? " Government deductions (PAYE, NSSF, SHIF, Housing Levy) do not apply on this payslip."
+                        : <>{" "}Taxable pay {kes(line.taxable)}. Employer NSSF {kes(line.nssf_employer)} and Housing Levy {kes(line.housing_employer)} are not deducted from you.</>}
                 </p>
             )}
         </div>

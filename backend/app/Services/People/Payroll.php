@@ -84,8 +84,11 @@ class Payroll
         return [['label' => sprintf('Recognition %d point%s × %s', $points, $points === 1 ? '' : 's', number_format($value, 2)), 'amount' => round($points * $value, 2)]];
     }
 
-    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates, array $deductions = [], array $extras = []): array
+    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates, array $deductions = [], array $extras = [], ?bool $statutory = null): array
     {
+        // Government deductions apply only to someone accounts enrolled
+        // (StatutoryEnrolment, owner 2026-11-03: staff are on contracts).
+        $statutory ??= \App\Models\StatutoryEnrolment::applies((int) $user->id, $period->ends_on);
         $r2 = fn (float $v) => round($v, 2);
         $workingDays = self::workingDays($period);
         $stdHours = (float) $group->standard_hours_per_day;
@@ -142,8 +145,9 @@ class Payroll
 
         $gross = max(0.0, $r2($basic + $overtime + $rest + $holiday + $allowTotal - $unpaid));
 
-        // ── Statutory ──
-        $nssfC = $rates['nssf']?->config ?? null; $shifC = $rates['shif']?->config ?? null; $hlC = $rates['housing_levy']?->config ?? null; $payeC = $rates['paye']?->config ?? null;
+        // ── Statutory ── (none at all for someone not enrolled)
+        $nssfC = $statutory ? ($rates['nssf']?->config ?? null) : null; $shifC = $statutory ? ($rates['shif']?->config ?? null) : null;
+        $hlC   = $statutory ? ($rates['housing_levy']?->config ?? null) : null; $payeC = $statutory ? ($rates['paye']?->config ?? null) : null;
         $nssfEmp = $nssfC ? $r2(min($gross, (float) ($nssfC['tier2_limit'] ?? PHP_FLOAT_MAX)) * (float) $nssfC['employee_rate']) : 0.0;
         $nssfEr  = $nssfC ? $r2(min($gross, (float) ($nssfC['tier2_limit'] ?? PHP_FLOAT_MAX)) * (float) $nssfC['employer_rate']) : 0.0;
         $shif    = $shifC ? ($gross > 0 ? $r2(max((float) ($shifC['minimum'] ?? 0), $gross * (float) $shifC['rate'])) : 0.0) : 0.0;
@@ -151,9 +155,9 @@ class Payroll
         $hlEr    = $hlC ? $r2($gross * (float) $hlC['employer_rate']) : 0.0;
 
         $taxable = $gross - $allowNonTax;
-        if ($rates['nssf']?->reduces_taxable_pay) $taxable -= $nssfEmp;
-        if ($rates['shif']?->reduces_taxable_pay) $taxable -= $shif;
-        if ($rates['housing_levy']?->reduces_taxable_pay) $taxable -= $hlEmp;
+        if ($statutory && $rates['nssf']?->reduces_taxable_pay) $taxable -= $nssfEmp;
+        if ($statutory && $rates['shif']?->reduces_taxable_pay) $taxable -= $shif;
+        if ($statutory && $rates['housing_levy']?->reduces_taxable_pay) $taxable -= $hlEmp;
         $taxable = max(0.0, $r2($taxable));
 
         $paye = 0.0;
@@ -190,6 +194,7 @@ class Payroll
         return [
             'structure' => ['id' => $s->id, 'kind' => $s->kind, 'base_amount' => $base, 'allowances' => $s->allowances ?? [], 'effective_from' => $s->effective_from->toDateString(),
                 'hourly_equivalent' => $r2($hourly), 'working_days_in_period' => $workingDays, 'service_fraction' => $fraction,
+                'statutory' => $statutory,
                 'multipliers' => ['overtime' => (float) $group->overtime_multiplier, 'rest_day' => (float) $group->rest_day_multiplier, 'holiday' => (float) $group->holiday_multiplier]],
             'hours' => $hours,
             'items' => $items, 'deductions' => $taken,
@@ -282,12 +287,16 @@ class Payroll
             foreach ($payments as $p) {
                 $line = $run->lines()->whereKey($p['line_id'])->firstOrFail();
                 if ($line->paid_at) continue;
-                $line->update(['payment_method' => $p['payment_method'], 'payment_reference' => $p['payment_reference'] ?? null, 'paid_at' => now(), 'paid_by' => $by->id]);
+                // The day the money actually went out (owner, 2026-11-03), not
+                // the moment it was recorded; today when not given.
+                $paidOn = !empty($p['paid_on']) ? Carbon::parse($p['paid_on'])->setTimeFrom(now()) : now();
+                $line->update(['payment_method' => $p['payment_method'], 'payment_reference' => $p['payment_reference'] ?? null, 'paid_at' => $paidOn, 'paid_by' => $by->id]);
             }
             if ($run->lines()->whereNull('paid_at')->doesntExist()) {
-                $run->update(['status' => 'paid', 'paid_at' => now()]);
+                $lastPaid = Carbon::parse($run->lines()->max('paid_at'));
+                $run->update(['status' => 'paid', 'paid_at' => $lastPaid]);
                 if ($run->expense && $run->expense->status === 'approved') {
-                    $run->expense->update(['status' => 'paid', 'paid_by' => $by->id, 'paid_at' => now()]);
+                    $run->expense->update(['status' => 'paid', 'paid_by' => $by->id, 'paid_at' => $lastPaid]);
                 }
                 ActivityLogService::log('payroll_run_paid', $run, [], "{$by->first_name} recorded payroll {$run->reference} as fully paid");
             }

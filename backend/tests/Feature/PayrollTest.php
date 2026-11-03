@@ -98,6 +98,8 @@ class PayrollTest extends TestCase
 
     private function structure(User $u, string $kind, float $base, array $allowances = [], string $from = '2026-01-01'): PayStructure
     {
+        // Employees here are enrolled for government deductions (default is off).
+        \App\Models\StatutoryEnrolment::firstOrCreate(['user_id' => $u->id, 'effective_from' => '2020-01-01'], ['applies' => true, 'reason' => 'Permanent employee']);
         return PayStructure::create(['user_id' => $u->id, 'effective_from' => $from, 'kind' => $kind, 'base_amount' => $base, 'currency_code' => 'KES', 'allowances' => $allowances ?: null]);
     }
 

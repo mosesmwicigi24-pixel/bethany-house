@@ -8,6 +8,7 @@ use App\Models\PayPeriod;
 use App\Models\PayrollLine;
 use App\Models\PayrollRun;
 use App\Models\PayStructure;
+use App\Models\StatutoryEnrolment;
 use App\Models\StatutoryRateTable;
 use App\Models\User;
 use App\Notifications\InAppNotification;
@@ -116,6 +117,8 @@ class PayrollController extends Controller
             'lines.*.line_id'           => 'required|integer',
             'lines.*.payment_method'    => 'required|in:mpesa,bank,cash',
             'lines.*.payment_reference' => 'nullable|string|max:80',
+            // The day the money went out; not before the run was approved, never in the future.
+            'lines.*.paid_on'           => 'nullable|date|before_or_equal:today' . ($run->approved_at ? '|after_or_equal:' . $run->approved_at->toDateString() : ''),
         ]);
         $run = Payroll::pay($run, $request->user(), $v['lines']);
 
@@ -174,8 +177,10 @@ class PayrollController extends Controller
         $v = $request->validate(['month' => 'required|date_format:Y-m', 'kind' => 'required|in:paye,nssf,shif,housing_levy']);
         $start = Carbon::createFromFormat('Y-m', $v['month'])->startOfMonth(); $end = $start->copy()->endOfMonth();
         $runs = PayrollRun::whereIn('status', ['approved', 'paid'])->whereHas('period', fn ($q) => $q->whereBetween('ends_on', [$start->toDateString(), $end->toDateString()]))->pluck('id');
-        $lines = PayrollLine::with(['user.employeeProfile', 'run'])->whereIn('payroll_run_id', $runs)->orderBy('user_id')->get();
-        abort_if($lines->isEmpty(), 422, 'No approved run ends in that month.');
+        $lines = PayrollLine::with(['user.employeeProfile', 'run'])->whereIn('payroll_run_id', $runs)->orderBy('user_id')->get()
+            // Only people government deductions applied to are remitted for.
+            ->reject(fn ($l) => ($l->structure['statutory'] ?? true) === false)->values();
+        abort_if($lines->isEmpty(), 422, 'No approved run ends in that month with anyone on government deductions.');
         ActivityLogService::log('statutory_return_built', null, ['kind' => $v['kind'], 'month' => $v['month'], 'lines' => $lines->count()], "{$request->user()->first_name} built the {$v['kind']} return for {$v['month']}");
 
         $m = fn ($x) => number_format((float) $x, 2, '.', '');
@@ -264,6 +269,79 @@ class PayrollController extends Controller
         return response()->json(['message' => 'Pay structure saved.', 'structure' => $this->structure($s)], 201);
     }
 
+    // ── People & pay: everyone on payroll at a glance (owner, 2026-11-03) ──
+
+    /**
+     * GET /payroll/people (payroll.view): every active staff member with their
+     * salary in force today, whether government deductions apply (and since
+     * when), what they owe on advances, and their last payment.
+     */
+    public function people(Request $request): JsonResponse
+    {
+        $today  = now();
+        $staff  = User::where('user_type', 'staff')->where('status', 'active')->orderBy('first_name')->get(['id', 'first_name', 'last_name']);
+        $ids    = $staff->pluck('id')->all();
+        $pay    = PayStructure::whereIn('user_id', $ids)->where('effective_from', '<=', $today->toDateString())->orderByDesc('effective_from')->get()->unique('user_id')->keyBy('user_id');
+        $enrol  = StatutoryEnrolment::whereIn('user_id', $ids)->where('effective_from', '<=', $today->toDateString())->orderByDesc('effective_from')->get()->unique('user_id')->keyBy('user_id');
+        $next   = StatutoryEnrolment::whereIn('user_id', $ids)->where('effective_from', '>', $today->toDateString())->orderBy('effective_from')->get()->unique('user_id')->keyBy('user_id');
+        $owed   = \App\Models\StaffAdvance::whereIn('user_id', $ids)->where('status', 'paid')->groupBy('user_id')->selectRaw('user_id, SUM(balance) AS owed')->pluck('owed', 'user_id');
+        $paid   = PayrollLine::with('run:id,reference')->whereIn('user_id', $ids)->whereNotNull('paid_at')->orderByDesc('paid_at')->get(['id', 'user_id', 'payroll_run_id', 'net', 'paid_at', 'payment_method'])->unique('user_id')->keyBy('user_id');
+
+        return response()->json([
+            'data' => $staff->map(fn (User $u) => [
+                'id'        => $u->id,
+                'name'      => trim("{$u->first_name} {$u->last_name}"),
+                'salary'    => ($s = $pay[$u->id] ?? null) ? ['kind' => $s->kind, 'base_amount' => (float) $s->base_amount, 'effective_from' => $s->effective_from->toDateString()] : null,
+                'deductions' => [
+                    'applies' => (bool) ($enrol[$u->id]->applies ?? false),
+                    'since'   => ($e = $enrol[$u->id] ?? null) ? $e->effective_from->toDateString() : null,
+                    'reason'  => $e?->reason,
+                    'next'    => ($n = $next[$u->id] ?? null) ? ['applies' => $n->applies, 'from' => $n->effective_from->toDateString()] : null,
+                ],
+                'advances_owed' => round((float) ($owed[$u->id] ?? 0), 2),
+                'last_paid' => ($l = $paid[$u->id] ?? null) ? ['net' => (float) $l->net, 'paid_on' => $l->paid_at->toDateString(), 'method' => $l->payment_method, 'run' => $l->run?->reference] : null,
+            ])->values(),
+            'can_edit' => $request->user()->can('payroll.run'),
+        ]);
+    }
+
+    /**
+     * POST /payroll/people/{user}/deductions {applies, effective_from, reason}
+     * (payroll.run + step.up). Adds — or stops — every government deduction
+     * from a date: a new dated row, so earlier payslips keep what applied.
+     */
+    public function setDeductions(Request $request, int $user): JsonResponse
+    {
+        $person = User::where('user_type', 'staff')->findOrFail($user);
+        $v = $request->validate([
+            'applies'        => 'required|boolean',
+            'effective_from' => 'required|date',
+            'reason'         => 'required|string|min:3|max:500',
+        ]);
+        $current = StatutoryEnrolment::inForce($person->id, Carbon::parse($v['effective_from']));
+        if ((bool) ($current?->applies) === (bool) $v['applies']) {
+            return response()->json(['message' => $v['applies'] ? 'Government deductions already apply from that date.' : 'Government deductions already do not apply from that date.'], 422);
+        }
+        if (StatutoryEnrolment::where('user_id', $person->id)->where('effective_from', $v['effective_from'])->exists()) {
+            return response()->json(['message' => 'A change already starts on that date; pick another date.'], 422);
+        }
+        // A period already paid from must not be rewritten.
+        $paidAfter = PayrollLine::where('user_id', $person->id)->whereHas('run', fn ($q) => $q->whereIn('status', ['approved', 'paid'])
+            ->whereHas('period', fn ($p) => $p->where('ends_on', '>=', $v['effective_from'])))->exists();
+        if ($paidAfter) {
+            return response()->json(['message' => 'An approved pay run already covers that date. Choose a date after the last approved run.'], 422);
+        }
+
+        $row = StatutoryEnrolment::create($v + ['user_id' => $person->id, 'created_by' => $request->user()->id]);
+        ActivityLogService::log($row->applies ? 'statutory_deductions_added' : 'statutory_deductions_stopped', $person,
+            ['effective_from' => $row->effective_from->toDateString(), 'reason' => $row->reason],
+            "{$request->user()->first_name} " . ($row->applies ? 'added' : 'stopped') . " government deductions for {$person->first_name} from {$row->effective_from->toDateString()}");
+
+        return response()->json(['message' => $row->applies
+            ? "Government deductions apply to {$person->first_name} from {$row->effective_from->format('j M Y')}."
+            : "Government deductions stop for {$person->first_name} from {$row->effective_from->format('j M Y')}."], 201);
+    }
+
     // ── Statutory rate tables ───────────────────────────────────────────────
 
     /** GET /payroll/rates (payroll.view) */
@@ -336,7 +414,9 @@ class PayrollController extends Controller
         <tr class="tot"><td>Net pay</td><td class="r">' . $kes($l->net) . '</td></tr></table>
         <div class="box">Hours: regular ' . $this->hm($l->hours['regular_minutes'] ?? 0) . ', overtime ' . $this->hm($l->hours['overtime_minutes'] ?? 0) . ', rest days ' . $this->hm($l->hours['rest_day_minutes'] ?? 0) . ', holidays ' . $this->hm($l->hours['holiday_minutes'] ?? 0)
         . '; paid leave ' . (float) ($l->hours['paid_leave_days'] ?? 0) . ' d; unpaid leave ' . (float) ($l->hours['unpaid_leave_days'] ?? 0) . ' d; days worked ' . (int) ($l->hours['days_worked'] ?? 0) . '.<br>
-        Taxable pay ' . $kes($l->taxable) . '. Employer contributions (not deducted from you): NSSF ' . $kes($l->nssf_employer) . ', Housing Levy ' . $kes($l->housing_employer) . '.'
+        ' . ((($l->structure['statutory'] ?? true) === false)
+            ? 'Government deductions (PAYE, NSSF, SHIF, Housing Levy) do not apply to you on this payslip.'
+            : 'Taxable pay ' . $kes($l->taxable) . '. Employer contributions (not deducted from you): NSSF ' . $kes($l->nssf_employer) . ', Housing Levy ' . $kes($l->housing_employer) . '.')
         . ($l->paid_at ? '<br>Paid ' . e($l->paid_at->format('j M Y')) . ' by ' . e($l->payment_method) . ($l->payment_reference ? ' · ' . e($l->payment_reference) : '') : '<br>Not yet paid.') . '</div>
         <p class="muted" style="margin-top:18px">Computed from the approved timesheet and the pay structure in force on ' . e($p->ends_on->format('j M Y')) . '; statutory rates as recorded on run ' . e($run->reference) . '.</p>
         </body></html>';
@@ -372,7 +452,7 @@ class PayrollController extends Controller
     {
         $out = [
             'id' => $l->id, 'user' => $l->relationLoaded('user') && $l->user ? ['id' => $l->user->id, 'name' => trim("{$l->user->first_name} {$l->user->last_name}")] : ['id' => $l->user_id],
-            'hours' => $l->hours, 'items' => $l->items, 'deductions' => $l->deductions ?? [], 'structure' => ['kind' => $l->structure['kind'] ?? null, 'base_amount' => $l->structure['base_amount'] ?? null, 'hourly_equivalent' => $l->structure['hourly_equivalent'] ?? null, 'service_fraction' => $l->structure['service_fraction'] ?? null],
+            'hours' => $l->hours, 'items' => $l->items, 'deductions' => $l->deductions ?? [], 'structure' => ['kind' => $l->structure['kind'] ?? null, 'base_amount' => $l->structure['base_amount'] ?? null, 'hourly_equivalent' => $l->structure['hourly_equivalent'] ?? null, 'service_fraction' => $l->structure['service_fraction'] ?? null, 'statutory' => $l->structure['statutory'] ?? true],
             'payment_method' => $l->payment_method, 'payment_reference' => $l->payment_reference, 'paid_at' => $l->paid_at?->toIso8601String(), 'notes' => $l->notes,
         ];
         foreach (PayrollLine::MONEY as $c) $out[$c] = (float) $l->{$c};

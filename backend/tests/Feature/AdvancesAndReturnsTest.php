@@ -81,6 +81,8 @@ class AdvancesAndReturnsTest extends TestCase
         Timesheet::create(['pay_period_id' => $p->id, 'user_id' => $u->id, 'status' => 'approved', 'approved_at' => now(), 'snapshot' => true,
             'regular_minutes' => 25 * 480, 'overtime_minutes' => 0, 'rest_day_minutes' => 0, 'holiday_minutes' => 0, 'paid_leave_days' => 0, 'unpaid_leave_days' => 0, 'days_worked' => 25]);
         PayStructure::create(['user_id' => $u->id, 'effective_from' => '2026-01-01', 'kind' => 'monthly', 'base_amount' => $monthly, 'currency_code' => 'KES']);
+        // Enrolled for government deductions (default is off).
+        \App\Models\StatutoryEnrolment::firstOrCreate(['user_id' => $u->id, 'effective_from' => '2020-01-01'], ['applies' => true, 'reason' => 'Permanent employee']);
     }
 
     private function paidAdvance(User $u, float $amount, string $kind = 'advance', ?float $instalment = null): StaffAdvance
