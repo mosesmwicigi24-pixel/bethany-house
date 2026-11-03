@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { payrollApi, kes, KIND_LABEL, type PayPerson } from "@/api/payroll";
 import { Modal } from "@/components/ui/Modal";
+import { Icon, type IconName } from "@/components/people/fileKit";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToastStore } from "@/store/toast.store";
 import type { ApiError } from "@/types";
@@ -42,11 +43,14 @@ export function PeopleAndPay() {
             <div className="space-y-2 md:hidden">
                 {rows.map(p => (
                     <div key={p.id} className="card"><div className="card-body space-y-2">
-                        <div className="flex items-baseline justify-between gap-2">
+                        <div className="flex items-center justify-between gap-2">
                             <Link to={`/people/${p.id}`} className="font-semibold text-surface-900">{p.name}</Link>
-                            <span className="text-sm tabular-nums">{p.salary ? `KES ${kes(p.salary.base_amount)}` : <span className="text-2xs text-warning-dark">No salary set</span>}</span>
+                            <div className="flex items-center gap-1">
+                                <span className="text-sm tabular-nums">{p.salary ? `KES ${kes(p.salary.base_amount)}` : <span className="text-2xs text-warning-dark">No salary set</span>}</span>
+                                <RowMenu p={p} canEdit={data.can_edit} onDeductions={setActing} />
+                            </div>
                         </div>
-                        <Deductions p={p} canEdit={data.can_edit} onAct={setActing} />
+                        <Deductions p={p} />
                         <p className="text-2xs text-surface-500">
                             {p.last_paid ? <>Last paid KES {kes(p.last_paid.net)} · {fmtDate(p.last_paid.paid_on)}</> : "Not paid yet"}
                             {p.advances_owed > 0 && <> · owes KES {kes(p.advances_owed)}</>}
@@ -65,6 +69,7 @@ export function PeopleAndPay() {
                                 <th className="px-3 py-2 text-left">Government deductions</th>
                                 <th className="px-3 py-2 text-right">Advances owed</th>
                                 <th className="px-3 py-2 text-left">Last paid</th>
+                                <th className="px-2 py-2"><span className="sr-only">Actions</span></th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-line">
@@ -78,16 +83,17 @@ export function PeopleAndPay() {
                                             ? <><span className="font-medium">KES {kes(p.salary.base_amount)}</span> <span className="text-2xs text-surface-500">{KIND_LABEL[p.salary.kind].toLowerCase()} · from {fmtDate(p.salary.effective_from)}</span></>
                                             : <Link to={`/people/${p.id}`} className="text-2xs text-warning-dark hover:underline">No salary set — set it on their file</Link>}
                                     </td>
-                                    <td className="px-3 py-2.5"><Deductions p={p} canEdit={data.can_edit} onAct={setActing} /></td>
+                                    <td className="px-3 py-2.5"><Deductions p={p} /></td>
                                     <td className="px-3 py-2.5 text-right tabular-nums">{p.advances_owed > 0 ? kes(p.advances_owed) : <span className="text-surface-400">—</span>}</td>
                                     <td className="px-3 py-2.5 text-2xs text-surface-600">
                                         {p.last_paid
                                             ? <><span className="font-semibold text-surface-800 tabular-nums">KES {kes(p.last_paid.net)}</span> · {fmtDate(p.last_paid.paid_on)}{p.last_paid.method ? ` · ${p.last_paid.method}` : ""}{p.last_paid.run ? ` · ${p.last_paid.run}` : ""}</>
                                             : <span className="text-surface-400">Not paid yet</span>}
                                     </td>
+                                    <td className="px-2 py-2.5 text-right"><RowMenu p={p} canEdit={data.can_edit} onDeductions={setActing} /></td>
                                 </tr>
                             ))}
-                            {rows.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-surface-500">No staff match.</td></tr>}
+                            {rows.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-surface-500">No staff match.</td></tr>}
                         </tbody>
                     </table>
                 </div>
@@ -98,7 +104,7 @@ export function PeopleAndPay() {
     );
 }
 
-function Deductions({ p, canEdit, onAct }: { p: PayPerson; canEdit: boolean; onAct: (p: PayPerson) => void }) {
+function Deductions({ p }: { p: PayPerson }) {
     return (
         <div className="flex flex-wrap items-center gap-2">
             <span className={clsx("inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-semibold",
@@ -108,13 +114,75 @@ function Deductions({ p, canEdit, onAct }: { p: PayPerson; canEdit: boolean; onA
             {p.deductions.next && (
                 <span className="text-2xs text-info">{p.deductions.next.applies ? "Start" : "Stop"} {fmtDate(p.deductions.next.from)}</span>
             )}
-            {canEdit && (
-                <button type="button" onClick={() => onAct(p)}
-                    className={clsx("btn-sm", p.deductions.applies ? "btn-ghost text-surface-600" : "btn-secondary")}>
-                    {p.deductions.applies ? "Stop" : "+ Add government deductions"}
-                </button>
-            )}
         </div>
+    );
+}
+
+/**
+ * The row's ⋯ menu: every action on a person lives here, so the table stays
+ * a clean read of salary, deductions and payments. Positioned fixed so the
+ * table's horizontal scroll never clips it.
+ */
+function RowMenu({ p, canEdit, onDeductions }: { p: PayPerson; canEdit: boolean; onDeductions: (p: PayPerson) => void }) {
+    const navigate = useNavigate();
+    const [at, setAt] = useState<{ top: number; right: number } | null>(null);
+    const btn = useRef<HTMLButtonElement>(null);
+    const menu = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!at) return;
+        const off = (e: MouseEvent) => { if (!menu.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node)) setAt(null); };
+        const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { setAt(null); btn.current?.focus(); } };
+        const close = () => setAt(null);
+        document.addEventListener("mousedown", off);
+        document.addEventListener("keydown", esc);
+        window.addEventListener("scroll", close, true);
+        window.addEventListener("resize", close);
+        menu.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+        return () => {
+            document.removeEventListener("mousedown", off); document.removeEventListener("keydown", esc);
+            window.removeEventListener("scroll", close, true); window.removeEventListener("resize", close);
+        };
+    }, [at]);
+
+    const items: { label: string; icon: IconName; run: () => void; tone?: "danger" }[] = [
+        ...(canEdit ? [p.deductions.applies
+            ? { label: "Stop government deductions", icon: "x" as IconName, run: () => onDeductions(p), tone: "danger" as const }
+            : { label: "Add government deductions", icon: "plus" as IconName, run: () => onDeductions(p) }] : []),
+        { label: p.salary ? "Change salary" : "Set salary", icon: "wallet", run: () => navigate(`/people/${p.id}#pay`) },
+        { label: "Open employee file", icon: "user", run: () => navigate(`/people/${p.id}`) },
+    ];
+
+    const toggle = () => {
+        if (at) { setAt(null); return; }
+        const r = btn.current!.getBoundingClientRect();
+        setAt({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    };
+
+    return (
+        <>
+            <button ref={btn} type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={!!at} aria-label={`Actions for ${p.name}`}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-surface-500 hover:bg-surface-100 hover:text-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
+                <Icon name="dots" className="w-5 h-5" strokeWidth={2.4} />
+            </button>
+            {at && (
+                <div ref={menu} role="menu" style={{ position: "fixed", top: at.top, right: at.right }}
+                    className="z-50 w-60 card-raised py-1.5 animate-slide-down"
+                    onKeyDown={e => {
+                        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+                        e.preventDefault();
+                        const all = [...(menu.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? [])];
+                        const i = all.indexOf(document.activeElement as HTMLElement);
+                        all[(i + (e.key === "ArrowDown" ? 1 : all.length - 1)) % all.length]?.focus();
+                    }}>
+                    {items.map(it => (
+                        <button key={it.label} role="menuitem" type="button" onClick={() => { setAt(null); it.run(); }}
+                            className={clsx("dropdown-item", it.tone === "danger" && "text-danger")}>
+                            <Icon name={it.icon} className="w-4 h-4" />{it.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </>
     );
 }
 
