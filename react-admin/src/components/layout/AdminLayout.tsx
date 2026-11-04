@@ -9,6 +9,7 @@ import { CommandPalette } from '@/components/ui/CommandPalette'
 import { useAuthStore } from '@/store/auth.store'
 import { subscribeToUserChannel, subscribeToAttention, onEchoConnected, getEcho } from '@/lib/echo'
 import MessageNotices from '@/components/comms/MessageNotices'
+import { MessagePopoutHost } from '@/components/comms/MessagePopout'
 import { refreshAttention, onAttentionAnnounced, isViewing } from '@/lib/commsAttention'
 import { primeAudio, messageAlert } from '@/lib/alertSound'
 import { DownloadApprovalDialog } from '@/components/downloads/DownloadApprovalDialog'
@@ -296,6 +297,8 @@ export function AdminLayout() {
 
             {/* ── Floating message notices (top-right; stay until acted on) ── */}
             <MessageNotices />
+            {/* ── Keep-on-top message window + system banner housekeeping ── */}
+            <MessagePopoutHost />
 
             {/* ── Command palette — global search/nav (⌘K / Ctrl+K) ── */}
             <CommandPalette />

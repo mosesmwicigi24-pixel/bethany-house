@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { MessageAlertButtons, BannersPrompt } from "@/components/comms/MessagePopout";
 import { useVisualViewport } from "@/lib/useVisualViewport";
 import { AssistSheet } from "@/components/comms/AssistRail";
 import { useParams, useNavigate } from "react-router-dom";
@@ -3743,6 +3744,7 @@ function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage,
                 <div className="flex items-center justify-between">
                     <h2 className="text-[26px] sm:text-lg font-bold text-surface-900 tracking-tight">Messages</h2>
                     <div className="hidden sm:flex items-center gap-1">
+                        <MessageAlertButtons />
                         <button onClick={onNewMessage} title="New message" aria-label="New message"
                             className="w-8 h-8 rounded-full flex items-center justify-center text-surface-500 hover:text-brand-600 hover:bg-brand-50 transition-colors">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -3755,6 +3757,7 @@ function ChatList({ channels, activeId, onSelect, currentUserName, onNewMessage,
                             className="w-8 h-8 rounded-full flex items-center justify-center text-surface-500 hover:text-brand-600 hover:bg-brand-50 transition-colors text-base font-bold">/</button>
                     </div>
                 </div>
+                <BannersPrompt />
                 <label className="mt-2.5 flex items-center gap-2 rounded-xl bg-surface-100 px-3 py-2 sm:py-1.5 text-[14px] sm:text-xs text-surface-500 focus-within:bg-white focus-within:ring-1 focus-within:ring-brand-300">
                     <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="7"/><path strokeLinecap="round" d="M20 20l-3.5-3.5"/></svg>
                     <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search people, spaces, orders, messages"

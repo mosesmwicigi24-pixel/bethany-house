@@ -5,8 +5,9 @@ import clsx from "clsx";
 import { channelApi, type AttentionChannel } from "@/api/channels";
 import {
     useAttention, useActiveChannel, refreshAttention, announceAttention,
-    hideNoticeLocally, waited, ago,
+    hideNoticeLocally, waited, ago, usePopout,
 } from "@/lib/commsAttention";
+import { canKeepOnTop, openKeepOnTop } from "@/components/comms/MessagePopout";
 import { avatarGradient, initialsOf } from "@/lib/commsAvatar";
 import { useToastStore } from "@/store/toast.store";
 
@@ -50,13 +51,15 @@ export default function MessageNotices() {
     const visible  = useDocumentVisible();
     const now      = useMinuteTick();
     const [expanded, setExpanded] = useState(false);
+    const popoutOpen = usePopout((s) => !!s.win);
 
     const cards = (data?.channels ?? []).filter((c) =>
         c.notice && !(visible && activeId === c.channel_id));
 
     useEffect(() => { if (cards.length <= VISIBLE) setExpanded(false); }, [cards.length]);
 
-    if (cards.length === 0) return null;
+    // The keep-on-top window shows the same cards; one place at a time.
+    if (cards.length === 0 || popoutOpen) return null;
 
     const shown  = expanded ? cards : cards.slice(0, VISIBLE);
     const hidden = cards.length - shown.length;
@@ -74,7 +77,7 @@ export default function MessageNotices() {
             <div className={clsx("flex flex-col gap-2", expanded && "max-h-[70vh] overflow-y-auto overscroll-contain pr-0.5")}>
                 {shown.map((c) => <NoticeCard key={c.channel_id} item={c} now={now} />)}
             </div>
-            {(hidden > 0 || expanded || cards.length > 1) && (
+            {(hidden > 0 || expanded || cards.length > 1 || canKeepOnTop()) && (
                 <StackFooter
                     total={cards.length}
                     hidden={hidden}
@@ -104,7 +107,14 @@ function StackFooter({ total, hidden, expanded, onToggle, channels }: {
                     className="font-medium text-surface-700 hover:text-surface-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded px-1">
                     {expanded ? "Show fewer" : `${hidden} more conversation${hidden === 1 ? "" : "s"}`}
                 </button>
-            ) : <span>{total} conversations</span>}
+            ) : <span>{total} conversation{total === 1 ? "" : "s"}</span>}
+            {canKeepOnTop() && (
+                <button type="button" onClick={() => { openKeepOnTop().catch(() => undefined); }}
+                    title="Keep messages in a small window above other programs"
+                    className="ml-auto mr-2 font-medium text-brand-700 hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded px-1">
+                    Keep on top
+                </button>
+            )}
             <button type="button" onClick={dismissAll}
                 className="hover:text-surface-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded px-1">
                 Dismiss all
@@ -113,7 +123,7 @@ function StackFooter({ total, hidden, expanded, onToggle, channels }: {
     );
 }
 
-function NoticeCard({ item, now }: { item: AttentionChannel; now: number }) {
+export function NoticeCard({ item, now, inPopout = false }: { item: AttentionChannel; now: number; inPopout?: boolean }) {
     const qc       = useQueryClient();
     const navigate = useNavigate();
     const toast    = useToastStore();
@@ -144,6 +154,8 @@ function NoticeCard({ item, now }: { item: AttentionChannel; now: number }) {
     const open = () => {
         hideNoticeLocally(qc, item.channel_id);
         navigate(`/comms/${item.channel_id}`);
+        // From the keep-on-top window: bring the hub's own window forward.
+        if (inPopout) { try { window.focus(); } catch { /* the browser decides */ } }
     };
 
     const send = async () => {
