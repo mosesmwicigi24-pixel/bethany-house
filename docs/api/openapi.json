@@ -55842,6 +55842,66 @@
                 }
             }
         },
+        "/api/v1/push-actions/channels/{id}/{action}": {
+            "post": {
+                "operationId": "post_v1_push_actions_channels_by_id_by_action",
+                "summary": "Push Action (Channel)",
+                "tags": [
+                    "push-actions"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "action",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "x-signed-url": true,
+                "x-throttle": [
+                    "60,1"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/quote/{token}": {
             "get": {
                 "operationId": "get_v1_quote_by_token",
@@ -58091,6 +58151,9 @@
         },
         {
             "name": "push"
+        },
+        {
+            "name": "push-actions"
         },
         {
             "name": "quotations"

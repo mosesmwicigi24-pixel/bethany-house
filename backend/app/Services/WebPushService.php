@@ -128,6 +128,12 @@ class WebPushService
             $adminUrl = '/admin' . $adminUrl;
         }
 
+        // A chat message's banner stays until it is acted on and carries its
+        // own Acknowledge / dismiss links (Comms\PushActions) — web only.
+        if (!empty($data['channel_message_id']) && !empty($data['channel_id'])) {
+            $data['actions'] = \App\Services\Comms\PushActions::links($userId, (int) $data['channel_id'], (int) $data['channel_message_id']);
+        }
+
         $payload = json_encode([
             'title' => $title,
             'body'  => $body,

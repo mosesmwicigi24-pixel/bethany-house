@@ -27,6 +27,11 @@ export const useActiveChannel = create<ActiveChannelState>((set) => ({
     set: (id) => set({ id }),
 }));
 
+/** The keep-on-top message window, while it is open (components/comms/MessagePopout). */
+export type PipWindow = Window & typeof globalThis;
+interface PopoutState { win: PipWindow | null; set: (w: PipWindow | null) => void }
+export const usePopout = create<PopoutState>((set) => ({ win: null, set: (win) => set({ win }) }));
+
 /** True when this conversation is the one on screen (tab visible). */
 export function isViewing(channelId: number | null | undefined): boolean {
     return !!channelId

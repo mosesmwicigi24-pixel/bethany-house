@@ -499,9 +499,10 @@ class ChannelController extends Controller
      * Move a member's read pointer to the newest message, never backwards.
      * Returns whether it moved. Shared by markRead, a reply and "handled".
      */
-    private function advanceRead(int $id, int $userId): bool
+    private function advanceRead(int $id, int $userId, ?int $upTo = null): bool
     {
         $lastMessageId = ChannelMessage::where('channel_id', $id)
+            ->when($upTo, fn ($q, $mid) => $q->where('id', '<=', $mid))
             ->orderByDesc('id')
             ->value('id');
 
@@ -552,20 +553,27 @@ class ChannelController extends Controller
         $this->findAccessible($id, $request->user()->id);
         $validated = $request->validate(['message_id' => 'sometimes|nullable|integer']);
 
+        $upTo = $this->dismissNoticeUpTo((int) $id, $request->user()->id, $validated['message_id'] ?? null);
+
+        return response()->json(['dismissed_up_to' => $upTo ?: null]);
+    }
+
+    private function dismissNoticeUpTo(int $id, int $userId, ?int $messageId): int
+    {
         $upTo = (int) ChannelMessage::where('channel_id', $id)
-            ->when($validated['message_id'] ?? null, fn ($q, $mid) => $q->where('id', '<=', $mid))
+            ->when($messageId, fn ($q, $mid) => $q->where('id', '<=', $mid))
             ->max('id');
 
         $moved = $upTo > 0 && DB::table('channel_members')
-            ->where('channel_id', $id)->where('user_id', $request->user()->id)
+            ->where('channel_id', $id)->where('user_id', $userId)
             ->where(fn ($q) => $q->whereNull('notice_dismissed_message_id')->orWhere('notice_dismissed_message_id', '<', $upTo))
             ->update(['notice_dismissed_message_id' => $upTo]) > 0;
 
         if ($moved) {
-            \App\Events\MessageAttentionChanged::send($request->user()->id, (int) $id, 'dismissed');
+            \App\Events\MessageAttentionChanged::send($userId, $id, 'dismissed');
         }
 
-        return response()->json(['dismissed_up_to' => $upTo ?: null]);
+        return $upTo;
     }
 
     // ── POST /channels/{id}/acknowledge ───────────────────────────────────────
@@ -577,17 +585,51 @@ class ChannelController extends Controller
     {
         $this->findAccessible($id, $request->user()->id);
 
-        $upTo = (int) ChannelMessage::where('channel_id', $id)->max('id');
+        $upTo = $this->acknowledgeUpTo((int) $id, $request->user()->id, null);
+
+        return response()->json(['acknowledged_up_to' => $upTo ?: null]);
+    }
+
+    /** Handled through $messageId (or the newest), and read that far. */
+    private function acknowledgeUpTo(int $id, int $userId, ?int $messageId): int
+    {
+        $upTo = (int) ChannelMessage::where('channel_id', $id)
+            ->when($messageId, fn ($q, $mid) => $q->where('id', '<=', $mid))
+            ->max('id');
         if ($upTo > 0) {
             DB::table('channel_members')
-                ->where('channel_id', $id)->where('user_id', $request->user()->id)
+                ->where('channel_id', $id)->where('user_id', $userId)
                 ->where(fn ($q) => $q->whereNull('acknowledged_message_id')->orWhere('acknowledged_message_id', '<', $upTo))
                 ->update(['acknowledged_message_id' => $upTo]);
         }
-        $this->advanceRead((int) $id, $request->user()->id);
-        \App\Events\MessageAttentionChanged::send($request->user()->id, (int) $id, 'acknowledged');
+        $this->advanceRead($id, $userId, $messageId);
+        \App\Events\MessageAttentionChanged::send($userId, $id, 'acknowledged');
 
-        return response()->json(['acknowledged_up_to' => $upTo ?: null]);
+        return $upTo;
+    }
+
+    // ── POST /push-actions/channels/{id}/{action} (signed, no session) ────────
+    //
+    // The buttons on a message banner outside the hub (owner, 2026-11-04): the
+    // banner shows over WhatsApp Web or a document, and Acknowledge / ✕ act
+    // without opening the hub. The service worker holds no login, so each
+    // banner carries links signed for ONE person, ONE conversation and ONE
+    // message, valid 24 hours (App\Services\Comms\PushActions). They act only
+    // up to that message: anything newer is not handled unseen.
+    public function pushAction(Request $request, int $id, string $action)
+    {
+        $userId    = (int) $request->query('user');
+        $messageId = (int) $request->query('message');
+        $user      = User::find($userId);
+        abort_if(!$user || $user->status !== 'active' || $messageId < 1, 403, 'This link no longer works.');
+        $this->findAccessible($id, $userId);
+        abort_unless(ChannelMessage::where('channel_id', $id)->where('id', $messageId)->exists(), 404);
+
+        $upTo = $action === 'acknowledge'
+            ? $this->acknowledgeUpTo($id, $userId, $messageId)
+            : $this->dismissNoticeUpTo($id, $userId, $messageId);
+
+        return response()->json(['ok' => true, 'up_to' => $upTo ?: null]);
     }
 
     // ── POST /channels/{id}/dismiss ───────────────────────────────────────────

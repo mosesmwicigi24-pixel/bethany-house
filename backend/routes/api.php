@@ -163,6 +163,13 @@ Route::prefix('v1')->group(function () {
         Route::post('/{token}/paystack-verify', [PublicPaymentController::class, 'verifyPaystack']);
     });
 
+    // ═══ MESSAGE BANNER BUTTONS (owner, 2026-11-04) ═════════════════════════
+    // Acknowledge / dismiss from the system banner, with no session: the link
+    // is signed for one person, conversation and message (Comms\PushActions).
+    Route::post('/push-actions/channels/{id}/{action}', [\App\Http\Controllers\Api\ChannelController::class, 'pushAction'])
+        ->whereNumber('id')->whereIn('action', ['acknowledge', 'dismiss'])
+        ->middleware(['signed:relative', 'throttle:60,1'])->name('push-actions.channel');
+
     // ═══ SIGNED ATTACHMENT LINKS (role hardening 4D) ═════════════════════════
     // Issued for ≤5 minutes by the console's attachment endpoints AFTER their
     // parent-record check (App\Support\SignedFiles). The signature is the only
