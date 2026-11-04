@@ -147,6 +147,7 @@ return [
         \App\Models\PayStructure::class,
         \App\Models\StatutoryRateTable::class,
         \App\Models\StatutoryEnrolment::class,
+        \App\Models\StaffCommission::class,
         \App\Models\PayrollRun::class,
         \App\Models\PayrollLine::class,
         \App\Models\StaffAdvance::class,

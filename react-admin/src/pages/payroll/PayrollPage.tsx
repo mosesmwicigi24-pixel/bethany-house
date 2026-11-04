@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { payrollApi, advancesApi, kes, saveBlob, RUN_TONE, RUN_LABEL, RATE_LABEL, type PayrollRun, type PayrollLine, type RateTable, type RateCode } from "@/api/payroll";
 import { AdvancesPanel, ReturnsPanel } from "@/components/people/AdvancesPanel";
 import { PeopleAndPay } from "@/components/people/PeopleAndPay";
+import { CommissionsPanel } from "@/components/people/CommissionsPanel";
 import { PayslipItems } from "@/components/people/PayslipItems";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
@@ -20,7 +21,7 @@ type Method = "mpesa" | "bank" | "cash";
  */
 export default function PayrollPage() {
     const [params, setParams] = useSearchParams();
-    const tab = (["runs", "people", "advances", "returns", "rates"].includes(params.get("tab") ?? "") ? params.get("tab") : "runs") as "runs" | "people" | "advances" | "returns" | "rates";
+    const tab = (["runs", "people", "commissions", "advances", "returns", "rates"].includes(params.get("tab") ?? "") ? params.get("tab") : "runs") as "runs" | "people" | "commissions" | "advances" | "returns" | "rates";
     const setTab = (t: string) => setParams(t === "runs" ? {} : { tab: t });
     const [open, setOpen] = useState<number | null>(null);
     return (
@@ -31,11 +32,12 @@ export default function PayrollPage() {
                     <p className="text-sm text-surface-500">Pay runs from locked timesheets. Approving posts the labour cost to Expenses.</p>
                 </div>
                 <div className="flex max-w-full overflow-x-auto no-scrollbar whitespace-nowrap rounded-xl border border-line bg-surface-50 p-0.5 text-xs font-semibold">
-                    {([["runs", "Runs"], ["people", "People & pay"], ["advances", "Advances & loans"], ["returns", "Returns"], ["rates", "Statutory rates"]] as const).map(([t, label]) => <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 rounded-lg", tab === t ? "bg-white shadow-sm text-surface-900" : "text-surface-500")}>{label}</button>)}
+                    {([["runs", "Runs"], ["people", "People & pay"], ["commissions", "Commissions"], ["advances", "Advances & loans"], ["returns", "Returns"], ["rates", "Statutory rates"]] as const).map(([t, label]) => <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 rounded-lg", tab === t ? "bg-white shadow-sm text-surface-900" : "text-surface-500")}>{label}</button>)}
                 </div>
             </div>
             {tab === "runs" && <Runs onOpen={setOpen} />}
             {tab === "people" && <PeopleAndPay />}
+            {tab === "commissions" && <CommissionsPanel />}
             {tab === "advances" && <AdvancesPanel />}
             {tab === "returns" && <ReturnsPanel />}
             {tab === "rates" && <Rates />}

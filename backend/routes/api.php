@@ -711,6 +711,13 @@ Route::prefix('v1')->group(function () {
                 // People & pay: salary, government deductions and last payment per person
                 Route::get('/people',                            [$pay, 'people']);
                 Route::post('/people/{user}/deductions',         [$pay, 'setDeductions'])->whereNumber('user')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                // Commission on top of salary: finance records, a super admin approves, the pay run pays
+                $com = \App\Http\Controllers\Api\CommissionsController::class;
+                Route::get('/commissions',                       [$com, 'index']);
+                Route::post('/commissions',                      [$com, 'store'])->middleware('permission:payroll.run,sanctum');
+                Route::post('/commissions/paye',                 [$com, 'setPaye'])->middleware('step.up');
+                Route::post('/commissions/{id}/approve',         [$com, 'approve'])->whereNumber('id')->middleware('step.up');
+                Route::post('/commissions/{id}/void',            [$com, 'void'])->whereNumber('id')->middleware('permission:payroll.run,sanctum');
                 // Advances and loans (People PR 7)
                 $adv = \App\Http\Controllers\Api\AdvancesController::class;
                 Route::get('/advances',                          [$adv, 'index']);
