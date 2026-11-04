@@ -23,6 +23,7 @@ import { get, post } from "@/api/client";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
 import { businessToday } from "@/lib/businessDate";
+import { foreignLine, type CurrencyLine } from "@/lib/moneyByCurrency";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,10 @@ interface EodOrder {
     amount_paid: number;
     balance: number;
     payment_status: string;
+    /** The order's own currency; the summary totals are KES at the reporting rate. */
+    currency_code?: string;
+    /** False for a cart (not confirmed, nothing settled): listed, not in the totals. */
+    counts_as_sale?: boolean;
     created_at: string;
     eod_note?: string | null;
 }
@@ -56,6 +61,10 @@ export interface EodSummary {
     total_sales: number;
     total_paid: number;
     total_balance: number;
+    /** KES at each order's reporting rate; the native figures per currency beside it. */
+    sales_by_currency?: CurrencyLine[];
+    paid_by_currency?: CurrencyLine[];
+    balance_by_currency?: CurrencyLine[];
     orders: EodOrder[];
     existing_report?: {
         id: number;
@@ -422,19 +431,19 @@ export default function UserEodModal({
                                         },
                                         {
                                             label: "Total Sales",
-                                            value: `KES ${fmtNum(stats!.totalSales)}`,
+                                            value: `KES ${fmtNum(stats!.totalSales)}${foreignLine(summary?.sales_by_currency, " · ")}`,
                                             color: "text-brand-700",
                                             bg: "bg-brand-50",
                                         },
                                         {
                                             label: "Total Paid",
-                                            value: `KES ${fmtNum(stats!.totalPaid)}`,
+                                            value: `KES ${fmtNum(stats!.totalPaid)}${foreignLine(summary?.paid_by_currency, " · ")}`,
                                             color: "text-success",
                                             bg: "bg-success-light",
                                         },
                                         {
                                             label: "Balance",
-                                            value: `KES ${fmtNum(stats!.totalBalance)}`,
+                                            value: `KES ${fmtNum(stats!.totalBalance)}${foreignLine(summary?.balance_by_currency, " · ")}`,
                                             color: stats!.totalBalance > 0 ? "text-warning" : "text-surface-400",
                                             bg: "bg-surface-50",
                                         },
@@ -507,11 +516,15 @@ export default function UserEodModal({
 
                                                         <div className="text-right shrink-0">
                                                             <p className="text-xs font-bold text-surface-900">
-                                                                KES {fmtNum(order.total_amount)}
+                                                                {order.currency_code ?? "KES"} {fmtNum(order.total_amount)}
                                                             </p>
-                                                            {hasBal ? (
+                                                            {order.counts_as_sale === false ? (
+                                                                <span className="text-2xs text-surface-400 font-medium">
+                                                                    Cart · not a sale
+                                                                </span>
+                                                            ) : hasBal ? (
                                                                 <span className="text-2xs text-warning font-medium">
-                                                                    Bal: KES {fmtNum(order.balance)}
+                                                                    Bal: {order.currency_code ?? "KES"} {fmtNum(order.balance)}
                                                                 </span>
                                                             ) : (
                                                                 <span className="text-2xs text-success font-medium">
@@ -566,11 +579,11 @@ export default function UserEodModal({
                                                                             )}
                                                                             {" — "}
                                                                             <span className="text-surface-500">
-                                                                                KES {fmtNum(item.unit_price)} each
+                                                                                {order.currency_code ?? "KES"} {fmtNum(item.unit_price)} each
                                                                             </span>
                                                                         </span>
                                                                         <span className="text-surface-900 font-medium shrink-0">
-                                                                            KES {fmtNum(item.total_price)}
+                                                                            {order.currency_code ?? "KES"} {fmtNum(item.total_price)}
                                                                         </span>
                                                                     </div>
                                                                 ))}
@@ -581,19 +594,19 @@ export default function UserEodModal({
                                                                 <div className="flex justify-between text-surface-600">
                                                                     <span>Total</span>
                                                                     <span className="font-semibold text-surface-900">
-                                                                        KES {fmtNum(order.total_amount)}
+                                                                        {order.currency_code ?? "KES"} {fmtNum(order.total_amount)}
                                                                     </span>
                                                                 </div>
                                                                 <div className="flex justify-between text-surface-600">
                                                                     <span>Paid</span>
                                                                     <span className="font-semibold text-success">
-                                                                        KES {fmtNum(order.amount_paid)}
+                                                                        {order.currency_code ?? "KES"} {fmtNum(order.amount_paid)}
                                                                     </span>
                                                                 </div>
                                                                 {hasBal && (
                                                                     <div className="flex justify-between border-t border-line pt-1 font-semibold text-warning">
                                                                         <span>Balance</span>
-                                                                        <span>KES {fmtNum(order.balance)}</span>
+                                                                        <span>{order.currency_code ?? "KES"} {fmtNum(order.balance)}</span>
                                                                     </div>
                                                                 )}
                                                             </div>

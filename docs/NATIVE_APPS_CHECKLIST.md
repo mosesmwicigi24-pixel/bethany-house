@@ -71,8 +71,8 @@ Step 3: UNKNOWN — NEEDS VERIFICATION against an Xcode build.
 | F1 | `POST production-orders/{id}/qc` validates `images[]` but never stores them: QC photos are dropped silently. | `ProductionController::qualityCheck` | QC screen directs photos to batch images, which persist. |
 | F2 | POS payment modal sends the M-PESA verification code under `code`; the server validates `transaction_code` (the order-detail path sends the right key). | `react-admin/src/pages/pos/components/PaymentModal.tsx`, `PaymentController::verifyMpesa` | Apps send `transaction_code`. Confirmed 2026-10-29: the receipt was never checked from the till or the order page, and a failed check recorded the payment unasked. Fixed in the console: the receipt goes through `ordersApi.verifyMpesa`, "asked Safaricom" shows as waiting, and an unconfirmed code is recorded only on the cashier's explicit choice (then the M-Pesa method's approval rule applies). Pinned by `MpesaVerifyOnResultTest`. |
 | F3 | `GET suppliers/export` answers JSON with a `// TODO: Generate Excel/CSV`. | `SupplierController` | Saved as `.json`. |
-| F4 | `pos/reports/eod-admin/{id}` detail totals are raw sums across currencies while the list uses `MoneyByCurrency`. | `PosController` | Shown as plain figures with a caption. Same defect family as the Step 5 currency fixes. |
-| F5 | `pos/reports/user-eod` totals carry no currency key. | `PosController` | Labelled in the outlet's currency. |
+| F4 | `pos/reports/eod-admin/{id}` detail totals were raw sums across currencies, counted carts as sales and used a hand-written paid rule, so the list and the detail stated the same day differently. | `PosController` | Fixed 2026-11-04: the list, the detail and the cashier's screen share `PosController::eodDayOrders` (SettledPayment net of refunds, recognised sales, `MoneyByCurrency`). Carts stay listed with their notes, marked not a sale. Pinned by `EodReportDetailTest`. Console and both apps label each order in its own currency. |
+| F5 | `pos/reports/user-eod` totals carried no currency key and had the F4 defect (found by the 2026-11-04 alignment check). | `PosController` | Fixed with F4: the cashier submits the same figures her supervisor reviews (`EodReportDetailTest`). |
 | F6 | `GET orders/export` is gated `orders.view` + step-up only; the console's CSV button is a no-op (backlog Q-5). | `routes/api.php` | Native export works through the same route. |
 | F7 | Supplier document rows carry no download URL. | `SupplierController::documents` | Listed, not opened. |
 | F8 | `/auth/me` sends `first_name` and `last_name`, not `name`; `Me(json:)` required `name` and threw, so sign-in would fail against the real backend. Found by the Android live render check (2026-10-28). | `AuthController::me` payload | Fixed: display name built from first and last name as the console does, `name` kept as a fallback; contract test added. Swift unverified until an Xcode build. |
@@ -88,6 +88,35 @@ Step 3: UNKNOWN — NEEDS VERIFICATION against an Xcode build.
 | #531 | Customer documents show "KES 4,500", not "KES 4,500.00" | Done: `Money.customerFormatted()` on the till receipt (screen and printed) and the order page, both apps; staff screens keep cents. |
 | #530 | Message notices, reply accountability (`GET channels/attention`, dismiss) | Not in the apps yet: existing message calls unchanged; the new notices are console only. |
 | #532 | Payroll statutory enrolment per person, real paid date, People & pay | Not in the apps yet: `paid_on` is optional, so paying a run still works; the per-person deductions screen is console only. |
+
+## Alignment check (2026-11-04)
+
+A read-only sweep of the backend's money paths, the two apps against the
+server's rules, and the docs against the code. What it found, beyond F4/F5
+(fixed above), is recorded here so nothing is lost; none of it is fixed yet.
+Each row was reported with its file and line by the sweep; only F5 has been
+re-checked by hand so far, and AL1's public pay and tracking pages (verified:
+`status = 'paid'` only, no approval clause, no refund netting). The rest are
+UNKNOWN — NEEDS VERIFICATION before a fix is proposed.
+
+| # | Finding | Where | Kind |
+|---|---|---|---|
+| AL1 | "Paid" written by hand (`status = 'paid'`, no approval clause, no refund netting) instead of `SettledPayment` / `Order::totalPaid()` | `PublicPaymentController:47`, `PublicOrderController:49-51, 136-137` (customer pay and tracking pages), `OrderController:949, 971, 993, 1567` (completion guards), `ProductionController:2556-2559`, `TillReversals:240`, `DocumentPdfController:312`, `PaymentController::transactionAnalytics` | money |
+| AL2 | Native sums across currencies in a share-of-revenue denominator | `MetricEngine::computeInstitutionalAccounts` (~4710) | money |
+| AL3 | Corridor KES figures converted at today's rate, not each order's stored rate | `MetricEngine` (~4947) | money |
+| AL4 | Legacy Livewire admin still sums across currencies and uses its own status rules (backlog Q-2) | `Livewire/Admin/Pos/EndOfDay`, `Pos/SalesHistory`, `Payments/Transactions`, `Customers/CustomerGroups` | money |
+| AL5 | M-Pesa callback: the audit's "needs both secrets" (B10) is wrong; the payer learns the checkout id from `initiate`. Backlog finding #1 | `PublicPaymentController:180-196, 349-352` | security |
+| AL6 | Money returned as strings in nested report rows (B12) | `ReportController` 1130-1136, 1177, 1996, 2090-2096, 2565 | contract |
+| AL7 | Apps cannot bill a customer in a currency they asked for (`currency_code` + `reason`, owner 2026-10-29) | Android `OrderSheets.kt:403`, Apple `SalesOrderSheets.swift:411` | parity |
+| AL8 | Apple sends typed amounts as binary floats; Android sends exact decimals | Apple `SharedUI.swift:301`, `ModuleSupport.swift:171` | contract |
+| AL9 | Mocked location: server flags, never refuses; Android refuses, iOS never flags | `TimeClockController:120-122`, Android `MeClock.kt:241`, Apple `MeFeatureClock.swift:295` | policy |
+| AL10 | Till "maker ≠ checker" narrower in the apps (opened_by only) than on the server (opened_by and closed_by) | `TillController:172`, Android `TillsFeature.kt:211`, Apple `TillsFeature.swift:180` | UX (server refuses) |
+| AL11 | Docs out of date: audit §6/§8 still list B1–B3, B6, B9, B11 and owner questions Q1–Q4 as open though later work answered them; Q-5/B7 CSV export partly working; cross-reference and date slips | `NATIVE_APPS_AUDIT.md`, `SYSTEM_AUDIT_AND_ROADMAP.md`, `AUDIT_BACKLOG_2026-08-08.md`, `NATIVE_APPS_ANDROID.md` | docs |
+
+Confirmed consistent: every app write call sampled (about 25) sends the
+keys the server validates, Android and Apple send the same keys, and the
+permission gates sampled match `routes/api.php`. No native work went
+beyond the plan; everything left out is recorded below.
 
 ## Deliberately not ported
 

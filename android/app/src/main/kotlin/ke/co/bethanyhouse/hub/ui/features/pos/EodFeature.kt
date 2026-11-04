@@ -149,10 +149,7 @@ private fun EodReportRow(row: JsonElement, onClick: () -> Unit) {
                     "${row["report_date"].str ?: ""} · ${row["order_count"].int ?: 0} orders · ${row["note_count"].int ?: 0} notes${if (row["has_sentiments"].bool == true) " · has a write-up" else ""}",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary,
                 )
-                val by = row["sales_by_currency"].records
-                if (by.size > 1 || (by.isNotEmpty() && by.first()["currency_code"].str != "KES")) {
-                    Text(by.joinToString(" · ") { "${it["currency_code"].str ?: ""} ${Money.from(it["amount"], it["currency_code"].str ?: "KES")?.formatted() ?: ""}" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
-                }
+                eodCurrencyLines(row["sales_by_currency"])?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary) }
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 MoneyText(Money.from(row["total_sales"], "KES"))
@@ -167,9 +164,20 @@ private fun EodReportRow(row: JsonElement, onClick: () -> Unit) {
 // ── Report detail (eod-admin/{id}, acknowledge, comments) ────────────────────
 
 /**
- * docs/NATIVE_APPS_CHECKLIST.md F4: the detail's totals are raw sums across
- * currencies while the list uses MoneyByCurrency. They are shown as plain
- * figures with a caption, never converted.
+ * The native figures per currency beside a KES total (`*_by_currency` from
+ * MoneyByCurrency), or null when the day is shillings only. Never summed here.
+ */
+internal fun eodCurrencyLines(by: JsonElement?): String? {
+    val rows = by.records
+    if (rows.isEmpty() || (rows.size == 1 && rows.first()["currency_code"].str == "KES")) return null
+    return rows.joinToString(" · ") { Money.from(it["amount"], it["currency_code"].str ?: "KES")?.formatted() ?: "" }
+}
+
+/**
+ * The supervisor's view of one cashier's day. Since F4 (2026-11-04) the Hub
+ * states it as the list does: totals in KES at each order's reporting rate
+ * with the native figures beside them; each order in its own currency; a
+ * cart listed with its note but not counted.
  */
 @Composable
 private fun EodReportDetailSheet(id: Int, onDismiss: () -> Unit, onChanged: () -> Unit) {
@@ -179,9 +187,6 @@ private fun EodReportDetailSheet(id: Int, onDismiss: () -> Unit, onChanged: () -
     var comment by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     LaunchedEffect(report) { report.load() }
-
-    /** A server figure with no currency stated by the endpoint: shown as sent, never converted. */
-    fun plainFigure(v: JsonElement?): String = v?.let { Money.from(it, "") }?.let { posPlainAmount(it) } ?: "—"
 
     suspend fun acknowledge() {
         busy = true
@@ -216,11 +221,12 @@ private fun EodReportDetailSheet(id: Int, onDismiss: () -> Unit, onChanged: () -
                 }
                 TileGrid(minWidth = 140.dp) {
                     StatTile("Orders", r["order_count"].str ?: "0", modifier = TileModifier)
-                    StatTile("Sales", plainFigure(r["total_sales"]), modifier = TileModifier)
-                    StatTile("Paid", plainFigure(r["total_paid"]), modifier = TileModifier)
-                    StatTile("Balance", plainFigure(r["total_balance"]), modifier = TileModifier)
+                    StatTile("Sales", Money.from(r["total_sales"], "KES")?.formatted() ?: "—", modifier = TileModifier)
+                    StatTile("Paid", Money.from(r["total_paid"], "KES")?.formatted() ?: "—", modifier = TileModifier)
+                    StatTile("Balance", Money.from(r["total_balance"], "KES")?.formatted() ?: "—", modifier = TileModifier)
                 }
-                CaptionText("Figures as the Hub returns them for this report, in the orders' own currency. The list shows the shilling figure at the reporting rate.")
+                eodCurrencyLines(r["sales_by_currency"])?.let { CaptionText("Sales by currency: $it") }
+                CaptionText(r["money_basis"].str ?: "KES at the reporting rate")
                 val orders = r["orders"].records
                 if (orders.isNotEmpty()) SectionCard("Orders") {
                     orders.forEach { o ->
@@ -228,10 +234,11 @@ private fun EodReportDetailSheet(id: Int, onDismiss: () -> Unit, onChanged: () -
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                                 Text(o["order_number"].str ?: "", style = MaterialTheme.typography.bodyMedium)
                                 Text(o["customer_name"].str ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary, modifier = Modifier.weight(1f))
-                                StatusBadge(o["payment_status"].str)
-                                Text(plainFigure(o["total_amount"]), style = MaterialTheme.typography.bodyMedium)
+                                if (o["counts_as_sale"].bool == false) StatusBadge("cart · not a sale", StatusTone.NEUTRAL) else StatusBadge(o["payment_status"].str)
+                                MoneyText(Money.from(o["total_amount"], o["currency_code"].str ?: "KES"))
                             }
-                            Text("paid ${plainFigure(o["amount_paid"])} · balance ${plainFigure(o["balance"])}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+                            val cur = o["currency_code"].str ?: "KES"
+                            Text("paid ${Money.from(o["amount_paid"], cur)?.formatted() ?: "—"} · balance ${Money.from(o["balance"], cur)?.formatted() ?: "—"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
                             o["eod_note"].str?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.labelSmall, fontStyle = FontStyle.Italic) }
                         }
                     }
