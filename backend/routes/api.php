@@ -675,7 +675,8 @@ Route::prefix('v1')->group(function () {
             Route::post('/me/timesheet/submit', [\App\Http\Controllers\Api\TimesheetController::class, 'submit']);
 
             // ── Timesheets, team side (People PR 5) ─────────────────────────
-            Route::middleware('permission:attendance.view_team,sanctum')->group(function () {
+            // Finance reaches them with timesheets.lock alone, to lock pay periods (owner, 2026-11-04).
+            Route::middleware('permission:attendance.view_team|timesheets.lock,sanctum')->group(function () {
                 $ts = \App\Http\Controllers\Api\TimesheetController::class;
                 Route::get('/timesheets',                        [$ts, 'index']);
                 Route::get('/timesheets/export',                 [$ts, 'export'])->middleware(['permission:timesheets.lock,sanctum', 'step.up']);

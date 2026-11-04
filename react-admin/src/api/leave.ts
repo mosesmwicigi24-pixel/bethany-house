@@ -33,6 +33,8 @@ export interface LeaveRequest {
     ends_on: string;
     days: number;
     reason: string | null;
+    /** The reason exists but is only for the person, their approver and the super admin. */
+    reason_hidden?: boolean;
     status: LeaveStatus;
     evidence_document_id: number | null;
     decided_by: string | null;

@@ -1022,7 +1022,7 @@ export default function App() {
                         <Route
                             path="/timesheets"
                             element={
-                                <ProtectedRoute permission="attendance.view_team">
+                                <ProtectedRoute anyOf={["attendance.view_team", "timesheets.lock"]}>
                                 <Suspense fallback={<PageLoader />}>
                                     <TimesheetsPage />
                                 </Suspense>
