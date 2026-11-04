@@ -181,6 +181,9 @@ class TimeClockPhoneTest extends TestCase
 
     public function test_auto_clock_out_closes_at_the_cutoff_and_flags(): void
     {
+        // A fixed afternoon (Nairobi): run after 22:00, today's 30-minute-old
+        // shift is past the cut-off too, and the counts below change.
+        \Carbon\Carbon::setTestNow('2026-03-03 15:00:00');
         \App\Support\AttendanceRules::save(['auto_clock_out_time' => '22:00', 'auto_clock_out_after_hours' => 0, 'daily_limit_hours' => 0]);
         $user = $this->staff();
         $yesterday = now()->subDay()->setTime(8, 0);
@@ -203,9 +206,7 @@ class TimeClockPhoneTest extends TestCase
         $this->assertSame(600, $e->total_break_minutes);
         $this->assertSame(240, $e->worked_minutes);
         $this->assertNotNull($e->auto_closed_at);
-        if (now()->format('H:i') < '22:00') {
-            $this->assertSame('active', $fresh->fresh()->status);
-        }
+        $this->assertSame('active', $fresh->fresh()->status);
 
         // Idempotent.
         Artisan::call('attendance:auto-clock-out');
