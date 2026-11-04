@@ -285,6 +285,8 @@ class PayrollController extends Controller
         $enrol  = StatutoryEnrolment::whereIn('user_id', $ids)->where('effective_from', '<=', $today->toDateString())->orderByDesc('effective_from')->get()->unique('user_id')->keyBy('user_id');
         $next   = StatutoryEnrolment::whereIn('user_id', $ids)->where('effective_from', '>', $today->toDateString())->orderBy('effective_from')->get()->unique('user_id')->keyBy('user_id');
         $owed   = \App\Models\StaffAdvance::whereIn('user_id', $ids)->where('status', 'paid')->groupBy('user_id')->selectRaw('user_id, SUM(balance) AS owed')->pluck('owed', 'user_id');
+        $comm   = \App\Models\StaffCommission::whereIn('user_id', $ids)->whereIn('status', ['recorded', 'approved'])->groupBy('user_id', 'status')
+            ->selectRaw('user_id, status, SUM(amount) AS total')->get()->groupBy('user_id');
         $paid   = PayrollLine::with('run:id,reference')->whereIn('user_id', $ids)->whereNotNull('paid_at')->orderByDesc('paid_at')->get(['id', 'user_id', 'payroll_run_id', 'net', 'paid_at', 'payment_method'])->unique('user_id')->keyBy('user_id');
 
         return response()->json([
@@ -299,6 +301,11 @@ class PayrollController extends Controller
                     'next'    => ($n = $next[$u->id] ?? null) ? ['applies' => $n->applies, 'from' => $n->effective_from->toDateString()] : null,
                 ],
                 'advances_owed' => round((float) ($owed[$u->id] ?? 0), 2),
+                // Commission balance: approved and not yet paid; and what waits for approval.
+                'commission' => [
+                    'owed'    => round((float) ($comm[$u->id] ?? collect())->firstWhere('status', 'approved')?->total, 2),
+                    'pending' => round((float) ($comm[$u->id] ?? collect())->firstWhere('status', 'recorded')?->total, 2),
+                ],
                 'last_paid' => ($l = $paid[$u->id] ?? null) ? ['net' => (float) $l->net, 'paid_on' => $l->paid_at->toDateString(), 'method' => $l->payment_method, 'run' => $l->run?->reference] : null,
             ])->values(),
             'can_edit' => $request->user()->can('payroll.run'),

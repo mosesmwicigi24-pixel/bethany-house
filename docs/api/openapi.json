@@ -25185,6 +25185,315 @@
                 }
             }
         },
+        "/api/v1/admin/payroll/commissions": {
+            "get": {
+                "operationId": "get_v1_admin_payroll_commissions",
+                "summary": "Index (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            },
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions",
+                "summary": "Store (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view",
+                    "payroll.run"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/commissions/paye": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions_paye",
+                "summary": "Set Paye (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-step-up": true,
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/commissions/{id}/approve": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions_by_id_approve",
+                "summary": "Approve (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-step-up": true,
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/commissions/{id}/void": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions_by_id_void",
+                "summary": "Void (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view",
+                    "payroll.run"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/payroll/people": {
             "get": {
                 "operationId": "get_v1_admin_payroll_people",

@@ -11,7 +11,7 @@ class PayrollLine extends Model
 
     protected $guarded = ['id'];
 
-    protected $casts = ['structure' => 'array', 'hours' => 'array', 'items' => 'array', 'deductions' => 'array', 'paid_at' => 'datetime',
+    protected $casts = ['structure' => 'array', 'hours' => 'array', 'items' => 'array', 'deductions' => 'array', 'commissions' => 'array', 'paid_at' => 'datetime',
         'basic' => 'decimal:2', 'overtime_pay' => 'decimal:2', 'rest_day_pay' => 'decimal:2', 'holiday_pay' => 'decimal:2', 'allowances' => 'decimal:2',
         'unpaid_deduction' => 'decimal:2', 'gross' => 'decimal:2', 'taxable' => 'decimal:2', 'paye' => 'decimal:2', 'nssf_employee' => 'decimal:2',
         'nssf_employer' => 'decimal:2', 'shif' => 'decimal:2', 'housing_employee' => 'decimal:2', 'housing_employer' => 'decimal:2',
