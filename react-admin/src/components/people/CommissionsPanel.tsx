@@ -12,7 +12,8 @@ import type { ApiError } from "@/types";
 
 /**
  * Payroll › Commissions (owner, 2026-11-03/04). Finance records a commission
- * against a transaction; a super admin approves it; the next pay run adds it
+ * against a transaction and it waits for a super admin; a super admin's own
+ * entry is approved at once. The next pay run adds it
  * on top of salary; paying that payslip marks it paid and the balance goes
  * back to zero. PAYE on commission is one switch, a super admin's — off for now.
  */
@@ -178,7 +179,7 @@ export function RecordCommissionDialog({ person, onClose }: { person?: { id: num
                 <label className="block text-xs text-surface-500">Note (optional)
                     <input className="input mt-1" maxLength={500} value={f.note} onChange={e => setF(s => ({ ...s, note: e.target.value }))} />
                 </label>
-                <p className="text-2xs text-surface-500">A super admin approves it; it is then paid on top of salary on the next pay run.</p>
+                <p className="text-2xs text-surface-500">Recorded by finance, it waits for a super admin to approve it. Recorded by a super admin, it is approved at once. Approved commission is paid on top of salary on the next pay run.</p>
             </div>
         </Modal>
     );

@@ -13,8 +13,12 @@ use Illuminate\Support\Facades\DB;
 /**
  * Commission on top of salary (owner, 2026-11-03/04).
  *
- *   finance records   POST /payroll/commissions            (payroll.run)
- *   super admin       POST /payroll/commissions/{id}/approve (never their own; step-up)
+ *   finance records   POST /payroll/commissions            (payroll.run) — waits for a super admin
+ *   super admin       records and approves in one step (owner, 2026-11-04: a
+ *                     super admin does not wait for another account), or
+ *                     approves finance's: POST /payroll/commissions/{id}/approve (step-up)
+ *                     A commission paid to the super admin themselves still
+ *                     needs another super admin.
  *   either voids      POST /payroll/commissions/{id}/void   (with a reason, until it is on a payslip)
  *   the pay run pays  approved commissions ride the next run; paying the line pays them
  *
@@ -71,15 +75,28 @@ class CommissionsController extends Controller
         // A hub order number links the commission to its order.
         $orderId = DB::table('orders')->whereRaw('upper(order_number) = ?', [mb_strtoupper($ref)])->value('id');
 
+        // A super admin's own entry is approved as it is recorded — behind the
+        // same step-up an approval asks for — unless it is their own commission.
+        $me = $request->user();
+        $selfApproved = $me->isSuperAdmin() && $person->id !== $me->id;
+        if ($selfApproved) {
+            app(\App\Services\Auth\StepUp::class)->ensure($request);
+        }
+
         $c = StaffCommission::create([
             'user_id' => $person->id, 'transaction_ref' => $ref, 'order_id' => $orderId,
             'amount' => round((float) $v['amount'], 2), 'earned_on' => $v['earned_on'], 'note' => $v['note'] ?? null,
-            'status' => 'recorded', 'created_by' => $request->user()->id,
+            'status' => $selfApproved ? 'approved' : 'recorded', 'created_by' => $me->id,
+            'approved_by' => $selfApproved ? $me->id : null, 'approved_at' => $selfApproved ? now() : null,
         ]);
-        ActivityLogService::log('commission_recorded', $person, ['commission_id' => $c->id, 'transaction_ref' => $ref, 'amount' => (string) $c->amount],
-            "{$request->user()->first_name} recorded a commission of KES {$c->amount} for {$person->first_name} on {$ref}");
+        ActivityLogService::log($selfApproved ? 'commission_approved' : 'commission_recorded', $person,
+            ['commission_id' => $c->id, 'transaction_ref' => $ref, 'amount' => (string) $c->amount, 'recorded_and_approved' => $selfApproved],
+            "{$me->first_name} " . ($selfApproved ? 'recorded and approved' : 'recorded') . " a commission of KES {$c->amount} for {$person->first_name} on {$ref}");
 
-        return response()->json(['message' => 'Commission recorded. A super admin approves it before it is paid.', 'commission' => $this->row($c->fresh(['user', 'creator', 'order']), $request->user())], 201);
+        return response()->json(['message' => $selfApproved
+            ? 'Commission recorded and approved. It is added to the next pay run.'
+            : 'Commission recorded. A super admin approves it before it is paid.',
+            'commission' => $this->row($c->fresh(['user', 'creator', 'approver', 'order']), $me)], 201);
     }
 
     /** POST /payroll/commissions/{id}/approve (super admin + step-up; not one they recorded) */
@@ -89,8 +106,7 @@ class CommissionsController extends Controller
         abort_if(!$me->isSuperAdmin(), 403, 'Only a super admin approves commission.');
         $c = StaffCommission::findOrFail($id);
         abort_if($c->status !== 'recorded', 422, 'Only a recorded commission can be approved.');
-        abort_if($c->created_by === $me->id, 403, 'You recorded this commission; another super admin approves it.');
-        abort_if($c->user_id === $me->id, 403, 'Your own commission is approved by someone else.');
+        abort_if($c->user_id === $me->id, 403, 'Your own commission is approved by another super admin.');
 
         $c->update(['status' => 'approved', 'approved_by' => $me->id, 'approved_at' => now()]);
         ActivityLogService::log('commission_approved', $c->user, ['commission_id' => $c->id, 'amount' => (string) $c->amount],
@@ -150,7 +166,7 @@ class CommissionsController extends Controller
             'run'             => $c->line?->run?->reference,
             'paid_on'         => $c->paid_at?->toDateString(),
             'void_reason'     => $c->void_reason,
-            'can_approve'     => $c->status === 'recorded' && $me->isSuperAdmin() && $c->created_by !== $me->id && $c->user_id !== $me->id,
+            'can_approve'     => $c->status === 'recorded' && $me->isSuperAdmin() && $c->user_id !== $me->id,
             'can_void'        => in_array($c->status, ['recorded', 'approved'], true) && $c->payroll_line_id === null && $me->can('payroll.run'),
         ];
     }

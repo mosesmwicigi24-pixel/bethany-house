@@ -129,6 +129,7 @@ class CommissionsTest extends TestCase
     private function record(User $fin, User $who, string $ref, float $amount, string $on = '2026-03-20'): int
     {
         Sanctum::actingAs($fin);
+        if ($fin->isSuperAdmin()) $this->stepUp($fin);
         return (int) $this->postJson('/api/v1/admin/payroll/commissions', ['user_id' => $who->id, 'transaction_ref' => $ref, 'amount' => $amount, 'earned_on' => $on])
             ->assertCreated()->json('commission.id');
     }
@@ -140,7 +141,7 @@ class CommissionsTest extends TestCase
         $this->postJson("/api/v1/admin/payroll/commissions/{$id}/approve")->assertOk();
     }
 
-    public function test_finance_records_and_only_another_super_admin_approves(): void
+    public function test_finance_waits_for_a_super_admin_but_a_super_admin_does_not_wait(): void
     {
         $fin = $this->staff(['payroll.view', 'payroll.run']);
         $boss = $this->superAdmin(); $boss2 = $this->superAdmin();
@@ -148,21 +149,31 @@ class CommissionsTest extends TestCase
         DB::table('orders')->insert(['order_number' => 'ORD-7781', 'status' => 'pending', 'payment_status' => 'pending', 'currency_code' => 'KES',
             'subtotal' => 0, 'total_amount' => 0, 'created_at' => now(), 'updated_at' => now()]);
 
+        // Finance records: it waits, and finance cannot approve it.
         $id = $this->record($fin, $u, 'ord-7781', 5000);
+        $this->assertSame('recorded', StaffCommission::find($id)->status);
         $this->assertNotNull(StaffCommission::find($id)->order_id, 'a hub order number links to its order');
         $this->postJson('/api/v1/admin/payroll/commissions', ['user_id' => $u->id, 'transaction_ref' => 'ORD-7781', 'amount' => 900, 'earned_on' => '2026-03-21'])
             ->assertStatus(422);                                                   // same transaction twice
-
         $this->stepUp($fin);
-        $this->postJson("/api/v1/admin/payroll/commissions/{$id}/approve")->assertStatus(403);   // finance cannot approve
-
-        $own = $this->record($boss, $u, 'QX91AB', 1000);                           // a super admin may record too…
-        Sanctum::actingAs($boss); $this->stepUp($boss);
-        $this->postJson("/api/v1/admin/payroll/commissions/{$own}/approve")->assertStatus(403);  // …but not approve their own
-
-        $this->approveAs($boss2, $own);
+        $this->postJson("/api/v1/admin/payroll/commissions/{$id}/approve")->assertStatus(403);
         $this->approveAs($boss, $id);
         $this->assertSame('approved', StaffCommission::find($id)->status);
+
+        // A super admin records and it is approved at once — behind a step-up.
+        Sanctum::actingAs($boss2);
+        $this->postJson('/api/v1/admin/payroll/commissions', ['user_id' => $u->id, 'transaction_ref' => 'QX91AB', 'amount' => 1000, 'earned_on' => '2026-03-20'])
+            ->assertStatus(403)->assertJsonPath('code', 'step_up_required');
+        $this->stepUp($boss2);
+        $own = $this->postJson('/api/v1/admin/payroll/commissions', ['user_id' => $u->id, 'transaction_ref' => 'QX91AB', 'amount' => 1000, 'earned_on' => '2026-03-20'])
+            ->assertCreated()->assertJsonPath('commission.status', 'approved')->json('commission.id');
+        $this->assertSame($boss2->id, StaffCommission::find($own)->approved_by);
+
+        // A commission paid to the super admin themselves still needs another super admin.
+        $mine = $this->record($boss, $boss, 'SELF-1', 800);
+        $this->assertSame('recorded', StaffCommission::find($mine)->status);
+        $this->postJson("/api/v1/admin/payroll/commissions/{$mine}/approve")->assertStatus(403);
+        $this->approveAs($boss2, $mine);
         $this->assertDatabaseHas('activity_log', ['event' => 'commission_approved']);
     }
 
