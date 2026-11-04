@@ -42,6 +42,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -65,6 +66,7 @@ import ke.co.bethanyhouse.hub.core.str
 import ke.co.bethanyhouse.hub.ui.Palette
 import ke.co.bethanyhouse.hub.ui.Space
 import ke.co.bethanyhouse.hub.ui.StatusTone
+import ke.co.bethanyhouse.hub.ui.components.LocalCustomerMoney
 import ke.co.bethanyhouse.hub.ui.components.DateText
 import ke.co.bethanyhouse.hub.ui.components.DocumentButton
 import ke.co.bethanyhouse.hub.ui.components.MoneyText
@@ -130,7 +132,7 @@ internal fun ReceiptSheet(session: PosSession, sale: PosSale, onDismiss: () -> U
 
 /** The receipt lines as the server returned them. */
 @Composable
-internal fun ReceiptBody(sale: PosSale, outlet: PosOutlet?) {
+internal fun ReceiptBody(sale: PosSale, outlet: PosOutlet?) = CompositionLocalProvider(LocalCustomerMoney provides true) {
     Column(Modifier.fillMaxWidth().background(MaterialTheme.hub.card, MaterialTheme.shapes.small).padding(Space.l), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(outlet?.name ?: sale.json["outlet_name"].str ?: "Bethany House", style = MaterialTheme.typography.titleMedium)
         Text("${sale.orderNumber} · ${sale.json["cashier_name"].str ?: ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
@@ -140,13 +142,13 @@ internal fun ReceiptBody(sale: PosSale, outlet: PosOutlet?) {
         sale.items.forEach { i ->
             val variant = i["variant_name"].str ?: ""
             val title = if (variant.isEmpty()) (i["product_name"].str ?: "Item") else "${i["product_name"].str ?: "Item"} · $variant"
-            val unit = Money.from(i["unit_price"], sale.currency)?.formatted() ?: "—"
+            val unit = Money.from(i["unit_price"], sale.currency)?.customerFormatted() ?: "—"
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(title, style = MaterialTheme.typography.bodySmall)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("${i["quantity"].int ?: 0} × $unit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
-                        Money.from(i["discount_amount"], sale.currency)?.takeIf { !it.isZero }?.let { Text("less ${it.formatted()}", style = MaterialTheme.typography.labelSmall, color = Palette.pink) }
+                        Money.from(i["discount_amount"], sale.currency)?.takeIf { !it.isZero }?.let { Text("less ${it.customerFormatted()}", style = MaterialTheme.typography.labelSmall, color = Palette.pink) }
                         if (i["is_production"].bool == true) StatusBadge("made to order", StatusTone.ACCENT)
                     }
                 }
@@ -186,7 +188,7 @@ internal object ReceiptHtml {
     fun esc(s: String): String = s.replace("&", "&amp;").replace("<", "&lt;")
 
     fun render(sale: PosSale, outlet: PosOutlet?): String {
-        fun m(v: JsonElement?, cur: String? = null): String = v?.let { Money.from(it, cur ?: sale.currency) }?.formatted() ?: "—"
+        fun m(v: JsonElement?, cur: String? = null): String = v?.let { Money.from(it, cur ?: sale.currency) }?.customerFormatted() ?: "—"
         val h = StringBuilder("<html><body style='font-family:Helvetica,sans-serif;font-size:12px;width:280px'>")
         h.append("<h3 style='margin:0'>${esc(outlet?.name ?: "Bethany House")}</h3>")
         outlet?.raw["address"].str?.let { h.append("<div>${esc(it)}</div>") }
@@ -199,7 +201,7 @@ internal object ReceiptHtml {
         }
         h.append("</table><hr><table width='100%'>")
         h.append("<tr><td>Subtotal</td><td align='right'>${m(sale.json["subtotal"])}</td></tr>")
-        sale.money("discount_amount")?.takeIf { !it.isZero }?.let { h.append("<tr><td>Discount</td><td align='right'>${it.formatted()}</td></tr>") }
+        sale.money("discount_amount")?.takeIf { !it.isZero }?.let { h.append("<tr><td>Discount</td><td align='right'>${it.customerFormatted()}</td></tr>") }
         h.append("<tr><td>Tax</td><td align='right'>${m(sale.json["tax_amount"])}</td></tr>")
         h.append("<tr><td><b>Total</b></td><td align='right'><b>${m(sale.json["total"])}</b></td></tr>")
         for (p in sale.payments) {
@@ -207,7 +209,7 @@ internal object ReceiptHtml {
             p["cash_received"]?.takeUnless { it.isNull }?.let { h.append("<tr><td>Cash received</td><td align='right'>${m(it)}</td></tr>") }
             p["change_given"]?.takeUnless { it.isNull }?.let { h.append("<tr><td>Change</td><td align='right'>${m(it)}</td></tr>") }
         }
-        sale.money("outstanding")?.takeIf { !it.isZero }?.let { h.append("<tr><td>Outstanding</td><td align='right'>${it.formatted()}</td></tr>") }
+        sale.money("outstanding")?.takeIf { !it.isZero }?.let { h.append("<tr><td>Outstanding</td><td align='right'>${it.customerFormatted()}</td></tr>") }
         h.append("</table><hr><div style='text-align:center'>Thank you</div></body></html>")
         return h.toString()
     }

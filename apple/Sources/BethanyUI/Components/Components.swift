@@ -23,10 +23,22 @@ public struct StatusBadge: View {
     }
 }
 
+private struct CustomerMoneyKey: EnvironmentKey { static let defaultValue = false }
+
+public extension EnvironmentValues {
+    /// True on what a customer reads (the receipt, the order page): money
+    /// shows as "KES 4,500" rather than "KES 4,500.00" (Money.customerFormatted).
+    var customerMoney: Bool {
+        get { self[CustomerMoneyKey.self] }
+        set { self[CustomerMoneyKey.self] = newValue }
+    }
+}
+
 /// Money exactly as the server sent it; never computed here.
 public struct MoneyText: View {
     let money: Money?
     let emphasis: Bool
+    @Environment(\.customerMoney) private var customer
 
     public init(_ money: Money?, emphasis: Bool = false) {
         self.money = money
@@ -34,7 +46,7 @@ public struct MoneyText: View {
     }
 
     public var body: some View {
-        Text(money?.formatted() ?? "—")
+        Text(money.map { customer ? $0.customerFormatted() : $0.formatted() } ?? "—")
             .font(emphasis ? Theme.Font.sectionTitle : Theme.Font.body)
             .monospacedDigit()
             .foregroundStyle(money?.isNegative == true ? Theme.Palette.danger : Theme.text)
