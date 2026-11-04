@@ -22976,7 +22976,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-staff-only": true,
                 "x-throttle": [
@@ -23022,6 +23023,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "hr.edit"
                 ],
                 "x-staff-only": true,
@@ -23093,6 +23095,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "hr.edit"
                 ],
                 "x-staff-only": true,
@@ -23234,7 +23237,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-step-up": true,
                 "x-staff-only": true,
@@ -49045,7 +49049,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-staff-only": true,
                 "x-throttle": [
@@ -49151,7 +49156,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-staff-only": true,
                 "x-throttle": [
@@ -49209,6 +49215,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "attendance.manage"
                 ],
                 "x-staff-only": true,
@@ -49280,6 +49287,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "attendance.manage"
                 ],
                 "x-staff-only": true,

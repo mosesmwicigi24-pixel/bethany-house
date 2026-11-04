@@ -98,7 +98,7 @@ export const NAV: NavGroup[] = [
             { label: "Attendance", href: "/settings/attendance", icon: "attendance", permission: "attendance.view_team" },
             { label: "Checklists", href: "/people/forms", icon: "approvals", permission: "forms.manage" },
             { label: "Roster", href: "/roster", icon: "calendar", permission: "attendance.view_team" },
-            { label: "Timesheets", href: "/timesheets", icon: "clock", permission: "attendance.view_team" },
+            { label: "Timesheets", href: "/timesheets", icon: "clock", anyOfPermissions: ["attendance.view_team", "timesheets.lock"] },
             { label: "Leave", href: "/leave", icon: "calendar", permission: "attendance.view_team" },
             { label: "Employee files", href: "/people", icon: "people", permission: "hr.view" },
             { label: "Payroll", href: "/payroll", icon: "expenses", permission: "payroll.view" },

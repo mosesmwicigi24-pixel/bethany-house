@@ -34,7 +34,7 @@ class PeopleRequestsController extends Controller
 
         $leave = LeaveRequest::with(['user:id,first_name,last_name', 'type:id,name'])->where('status', 'pending')->orderBy('starts_on')->get()
             ->filter(fn ($r) => $r->user && Leave::mayDecide($u, $r->user))
-            ->map(fn ($r) => ['kind' => 'leave', 'id' => $r->id, 'person' => $this->name($r->user), 'summary' => ($r->type?->name ?? 'Leave') . " · {$r->starts_on->format('j M')} – {$r->ends_on->format('j M')} · {$r->days} day(s)", 'note' => $r->reason ?? null, 'asked_at' => $r->created_at?->toIso8601String(), 'href' => '/leave'])->values();
+            ->map(fn ($r) => ['kind' => 'leave', 'id' => $r->id, 'person' => $this->name($r->user), 'summary' => ($r->type?->name ?? 'Leave') . " · {$r->starts_on->format('j M')} – {$r->ends_on->format('j M')} · {$r->days} day(s)", 'note' => LeaveController::mayReadReason($r, $request->user()) ? ($r->reason ?? null) : null, 'asked_at' => $r->created_at?->toIso8601String(), 'href' => '/leave'])->values();
 
         $swaps = $u->can('roster.manage')
             ? $inScope(ShiftSwapRequest::with(['shift.outlet:id,name', 'fromUser:id,first_name,last_name', 'toUser:id,first_name,last_name'])->where('status', 'pending'), 'from_user_id')->orderBy('created_at')->get()

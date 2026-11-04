@@ -41,7 +41,7 @@ class LeaveController extends Controller
         return response()->json([
             'year'      => $year,
             'balances'  => array_map(fn ($b) => $this->balance($b), Leave::balances($me, $year)),
-            'requests'  => $requests->map(fn ($r) => $this->leaveRequest($r))->values(),
+            'requests'  => $requests->map(fn ($r) => $this->leaveRequest($r, $request->user()))->values(),
             'types'     => LeaveType::where('is_active', true)->orderBy('sort_order')->get()->map(fn ($t) => $this->type($t))->values(),
             'approvers' => Leave::approversFor($me)->map(fn ($u) => trim("{$u->first_name} {$u->last_name}"))->values(),
         ]);
@@ -85,7 +85,7 @@ class LeaveController extends Controller
         }
 
         return response()->json(['message' => $approvers->isNotEmpty() ? 'Your request is with ' . $approvers->map(fn ($u) => $u->first_name)->join(', ', ' and ') . '.' : 'Your request is recorded; nobody is set to approve it yet.',
-            'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']))], 201);
+            'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']), $request->user())], 201);
     }
 
     /** DELETE /me/leave/{id} — cancel my pending request, or my approved leave before it starts. */
@@ -97,7 +97,7 @@ class LeaveController extends Controller
         abort_if($r->status === 'approved' && $r->starts_on->lte(now()->startOfDay()), 422, 'Leave that has started can only be changed by your manager.');
         $r->update(['status' => 'cancelled', 'cancelled_at' => now(), 'cancelled_by' => $request->user()->id]);
 
-        return response()->json(['message' => 'Request cancelled.', 'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']))]);
+        return response()->json(['message' => 'Request cancelled.', 'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']), $request->user())]);
     }
 
     // ── Team ────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ class LeaveController extends Controller
         $rows = $q->limit(200)->get();
         $me = $request->user();
 
-        return response()->json(['data' => $rows->map(fn ($r) => $this->leaveRequest($r) + [
+        return response()->json(['data' => $rows->map(fn ($r) => $this->leaveRequest($r, $request->user()) + [
             'can_decide'  => $r->status === 'pending' && Leave::mayDecide($me, $r->user),
             'roster_clash'=> $r->status === 'pending' ? $this->rosterClash($r) : [],
         ])->values()]);
@@ -132,7 +132,7 @@ class LeaveController extends Controller
             ->orderBy('starts_on')->get();
 
         return response()->json(['from' => $from->toDateString(), 'to' => $to->toDateString(),
-            'data' => $rows->map(fn ($r) => $this->leaveRequest($r))->values()]);
+            'data' => $rows->map(fn ($r) => $this->leaveRequest($r, $request->user()))->values()]);
     }
 
     /** POST /leave/requests/{id}/approve {note?} */
@@ -163,7 +163,7 @@ class LeaveController extends Controller
         if ($r instanceof JsonResponse) return $r;
         $this->tell($person, 'Leave recorded for you', "{$r->type->name}: " . $this->span($r) . " · {$r->days} day(s), entered by {$request->user()->first_name}.", $r);
 
-        return response()->json(['message' => 'Leave recorded.', 'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']))], 201);
+        return response()->json(['message' => 'Leave recorded.', 'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']), $request->user())], 201);
     }
 
     /** DELETE /leave/requests/{id} — a manager cancels approved or pending leave (balance returns). */
@@ -176,7 +176,7 @@ class LeaveController extends Controller
         $r->update(['status' => 'cancelled', 'cancelled_at' => now(), 'cancelled_by' => $request->user()->id, 'decision_note' => $note]);
         $this->tell($r->user, 'Leave cancelled', "{$r->type->name} " . $this->span($r) . ' was cancelled by ' . $request->user()->first_name . ($note ? ": {$note}" : '.'), $r);
 
-        return response()->json(['message' => 'Leave cancelled.', 'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']))]);
+        return response()->json(['message' => 'Leave cancelled.', 'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']), $request->user())]);
     }
 
     /** GET /people/{user}/leave?year= (hr.view) */
@@ -191,7 +191,7 @@ class LeaveController extends Controller
         return response()->json([
             'year'        => $year,
             'balances'    => array_map(fn ($b) => $this->balance($b), Leave::balances($person, $year)),
-            'requests'    => $rows->map(fn ($r) => $this->leaveRequest($r))->values(),
+            'requests'    => $rows->map(fn ($r) => $this->leaveRequest($r, $request->user()))->values(),
             'adjustments' => $adj->map(fn ($a) => ['id' => $a->id, 'type' => $a->type?->name, 'days' => (float) $a->days, 'reason' => $a->reason, 'created_at' => $a->created_at?->toIso8601String()])->values(),
             'can_adjust'  => $request->user()->can('hr.edit'),
             'can_record'  => Leave::mayDecide($request->user(), $person),
@@ -291,7 +291,7 @@ class LeaveController extends Controller
             "{$r->type->name} " . $this->span($r) . ($note ? " — {$note}" : '.'), $r);
 
         return response()->json(['message' => $status === 'approved' ? 'Approved.' : 'Declined.',
-            'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy'])), 'roster_clash' => $status === 'approved' ? $this->rosterClash($r) : []]);
+            'request' => $this->leaveRequest($r->fresh(['type', 'decidedBy']), $request->user()), 'roster_clash' => $status === 'approved' ? $this->rosterClash($r) : []]);
     }
 
     /** Published shifts of the person inside the leave span: the manager re-rosters them. */
@@ -345,8 +345,23 @@ class LeaveController extends Controller
             'adjusted' => $b['adjusted'], 'available' => $b['available']];
     }
 
-    private function leaveRequest(LeaveRequest $r): array
+    /**
+     * The reason someone gives for leave (a medical note, a funeral) is seen
+     * only by them, by whoever may decide it (their manager, the shop's leave
+     * approver) and by the super admin (owner, 2026-11-04). Everyone else with
+     * the list sees the dates and the type.
+     */
+    public static function mayReadReason(LeaveRequest $r, ?User $viewer): bool
     {
+        if (!$viewer || !$r->reason) return true;
+        if ((int) $r->user_id === (int) $viewer->id) return true;
+        $person = $r->relationLoaded('user') && $r->user ? $r->user : User::find($r->user_id);
+        return $person ? \App\Services\People\Leave::mayDecide($viewer, $person) : $viewer->isSuperAdmin();
+    }
+
+    private function leaveRequest(LeaveRequest $r, ?User $viewer = null): array
+    {
+        $canRead = self::mayReadReason($r, $viewer);
         return [
             'id'         => $r->id,
             'user'       => $r->relationLoaded('user') && $r->user ? ['id' => $r->user->id, 'name' => trim("{$r->user->first_name} {$r->user->last_name}")] : null,
@@ -354,7 +369,8 @@ class LeaveController extends Controller
             'starts_on'  => $r->starts_on->toDateString(),
             'ends_on'    => $r->ends_on->toDateString(),
             'days'       => (float) $r->days,
-            'reason'     => $r->reason,
+            'reason'     => $canRead ? $r->reason : null,
+            'reason_hidden' => !$canRead,
             'status'     => $r->status,
             'evidence_document_id' => $r->evidence_document_id,
             'decided_by' => $r->relationLoaded('decidedBy') && $r->decidedBy ? trim("{$r->decidedBy->first_name} {$r->decidedBy->last_name}") : null,

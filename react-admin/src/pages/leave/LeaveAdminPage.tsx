@@ -84,6 +84,7 @@ export default function LeaveAdminPage() {
                                                     <Link to={`/people/${r.user?.id}`} className="hover:underline">{r.user?.name}</Link> · {r.type?.name} · {fmtSpan(r)} <span className="font-normal text-surface-400">· {r.days} day{r.days === 1 ? "" : "s"}</span>
                                                 </p>
                                                 {r.reason && <p className="text-xs text-surface-500">“{r.reason}”</p>}
+                                                {r.reason_hidden && <p className="text-2xs text-surface-400 italic">Reason kept private: only their approver and the super admin see it</p>}
                                                 {!!r.roster_clash?.length && <p className="text-xs text-warning">Rostered {r.roster_clash.map(s => `${s.date} ${s.starts_at}–${s.ends_at}`).join(", ")} inside this leave.</p>}
                                                 {r.decided_by && <p className="text-2xs text-surface-400">{r.status} by {r.decided_by}{r.decision_note ? ` — ${r.decision_note}` : ""}</p>}
                                             </div>

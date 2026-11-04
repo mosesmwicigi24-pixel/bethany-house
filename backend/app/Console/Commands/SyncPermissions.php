@@ -590,10 +590,8 @@ class SyncPermissions extends Command
             'production.configure_auto_assignees',
             // The production report page; no files (reports.export withheld).
             'reports.production',
-            // Rosters the floor: sees who is in, drafts and publishes the week (People PR 3).
-            'attendance.view_team', 'roster.manage',
-            // Decides the floor's leave (People PR 4).
-            'leave.approve',
+            // No People pages (owner, 2026-11-04): who is in, rosters and
+            // leave are the outlet manager's and the super admin's.
         ],
 
         // The procurement checker: approves POs, returns and stock movements
@@ -619,8 +617,9 @@ class SyncPermissions extends Command
             '@self', '@workspace',
             // Reads employee files and, behind step-up, the pay details payroll needs (People PR 2).
             'hr.view', 'hr.view_sensitive',
-            // Locks pay periods and exports the approved hours (People PR 5).
-            'attendance.view_team', 'timesheets.lock',
+            // Locks pay periods and exports the approved hours (People PR 5) —
+            // Timesheets only: no other People page (owner, 2026-11-04).
+            'timesheets.lock',
             // Runs payroll from locked periods; approval and payment behind step-up (People PR 6).
             'payroll.view', 'payroll.run',
             // Payments - full approval authority + view transactions ledger
@@ -671,7 +670,7 @@ class SyncPermissions extends Command
             'users.view', 'users.create', 'users.edit',
             'outlets.view', 'outlets.create', 'outlets.edit',
             'roles.view',
-            'attendance.view_team', 'attendance.manage',
+            // No People pages (owner, 2026-11-04): staff accounts, not their attendance or leave.
             'setup.technical',
         ],
 
@@ -741,7 +740,12 @@ class SyncPermissions extends Command
             // No report files (Phase 3A).
             'reports.export', 'reports.export_supply',
         ],
-        'finance_manager'     => ['expenses.create', 'expenses.edit', 'expenses.delete'],
+        // People pages are the super admin's, admin's and outlet manager's
+        // (owner, 2026-11-04): finance keeps employee files, payroll and
+        // Timesheets (for locking); the floor and the platform keep none.
+        'finance_manager'     => ['expenses.create', 'expenses.edit', 'expenses.delete', 'attendance.view_team', 'attendance.manage', 'roster.manage', 'leave.approve'],
+        'production_manager'  => ['attendance.view_team', 'attendance.manage', 'roster.manage', 'leave.approve'],
+        'system_admin'        => ['attendance.view_team', 'attendance.manage', 'roster.manage', 'leave.approve'],
         'procurement_officer' => ['procurement.approve', 'inventory.approve', 'payments.view', 'expenses.view'],
         'outlet_manager'      => ['inventory.approve', 'expenses.delete', 'outlets.edit',
                                   // No report files (Phase 3A).
