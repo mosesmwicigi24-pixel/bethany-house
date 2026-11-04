@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,7 @@ import ke.co.bethanyhouse.hub.core.toRecords
 import ke.co.bethanyhouse.hub.ui.Palette
 import ke.co.bethanyhouse.hub.ui.Space
 import ke.co.bethanyhouse.hub.ui.StatusTone
+import ke.co.bethanyhouse.hub.ui.components.LocalCustomerMoney
 import ke.co.bethanyhouse.hub.ui.components.DateStyle
 import ke.co.bethanyhouse.hub.ui.components.DateText
 import ke.co.bethanyhouse.hub.ui.components.DetailRow
@@ -101,6 +103,8 @@ fun OrderDetailScreen(orderId: Int) {
     var paymentLink by remember { mutableStateOf<String?>(null) }
     val reload = { resource.load() }
 
+    // The order page shows what the customer is billed: "KES 4,500" (#531).
+    CompositionLocalProvider(LocalCustomerMoney provides true) {
     Page(resource.value?.string("order_number") ?: "Order", refresh = { resource.reload() }) {
         LoadableView(resource.state, retry = reload) { order ->
             OrderHeader(order)
@@ -152,6 +156,7 @@ fun OrderDetailScreen(orderId: Int) {
             is OrderSheet.Reverse -> ReversePaymentSheet(order, which.payment, done, close)
             is OrderSheet.Revise -> RevisePaymentSheet(order, which.payment, done, close)
         }
+    }
     }
 }
 
@@ -322,7 +327,7 @@ private fun PaymentRow(p: Record, o: Record, canReverse: Boolean, onSheet: (Orde
                 SalesSecondary(method.humanized.uppercase() + reference)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     DateText(p.date("paid_at") ?: p.date("created_at"))
-                    if (p["tax_inclusive"].bool == false) p.money("tax_amount_collected", currency)?.let { SalesCaption("tax collected ${it.formatted()}", MaterialTheme.hub.textTertiary) }
+                    if (p["tax_inclusive"].bool == false) p.money("tax_amount_collected", currency)?.let { SalesCaption("tax collected ${it.customerFormatted()}", MaterialTheme.hub.textTertiary) }
                 }
                 if (!verification.isNull) {
                     val state = verification["state"].str ?: ""
@@ -332,7 +337,7 @@ private fun PaymentRow(p: Record, o: Record, canReverse: Boolean, onSheet: (Orde
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 MoneyText(p.money("amount", currency))
-                p.money("refund_amount", currency)?.takeIf { !it.isZero }?.let { SalesCaption("−${it.formatted()} refunded", Palette.danger) }
+                p.money("refund_amount", currency)?.takeIf { !it.isZero }?.let { SalesCaption("−${it.customerFormatted()} refunded", Palette.danger) }
                 p["reporting_rate_to_kes"].str?.let { rate -> if (currency != "KES") SalesCaption("reporting rate $rate KES/$currency", MaterialTheme.hub.textTertiary) }
             }
         }

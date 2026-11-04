@@ -26,8 +26,19 @@ data class Money(val amount: BigDecimal, val currency: String = "KES") {
     /** "KES 1,234.50" — the currency code first, as every Hub document prints it. */
     fun formatted(decimals: Int = 2): String {
         val symbols = DecimalFormatSymbols(Locale.US)
-        val f = DecimalFormat("#,##0.${"0".repeat(decimals)}", symbols)
+        val f = DecimalFormat(if (decimals > 0) "#,##0.${"0".repeat(decimals)}" else "#,##0", symbols)
         return "$currency ${f.format(amount.setScale(decimals, java.math.RoundingMode.HALF_UP))}"
+    }
+
+    /**
+     * As a customer reads it (owner, 2026-10-30): "KES 4,500", not
+     * "KES 4,500.00"; cents only when there are some (VAT inside a price,
+     * an older amount), so nothing is hidden. Display only. Mirrors
+     * `App\Support\CustomerMoney::format` and the console's customerMoney.ts.
+     */
+    fun customerFormatted(): String {
+        val cents = amount.setScale(2, java.math.RoundingMode.HALF_UP)
+        return formatted(if (cents.remainder(BigDecimal.ONE).signum() == 0) 0 else 2)
     }
 
     companion object {

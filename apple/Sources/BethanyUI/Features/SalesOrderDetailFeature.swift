@@ -91,6 +91,8 @@ struct OrderDetailView: View {
                 sheetView(which, order: order)
             }
         }
+        // The order page shows what the customer is billed: "KES 4,500" (#531).
+        .environment(\.customerMoney, true)
     }
 
     private func reload() { resource?.load() }
@@ -306,7 +308,7 @@ struct OrderDetailView: View {
                     Text(method.humanized.uppercased() + reference).font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
                     HStack(spacing: 6) {
                         DateText(p.date("paid_at") ?? p.date("created_at"))
-                        if p["tax_inclusive"]?.bool == false, let t = p.money("tax_amount_collected") { Text("tax collected \(t.formatted())").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
+                        if p["tax_inclusive"]?.bool == false, let t = p.money("tax_amount_collected") { Text("tax collected \(t.customerFormatted())").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
                     }
                     if let v = verification {
                         if v["state"]?.string == "pending" || v["state"]?.string == "querying" {
@@ -320,7 +322,7 @@ struct OrderDetailView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     MoneyText(p.money("amount", currency: p.string("currency_code") ?? o.string("currency_code")))
                     if let r = p.money("refund_amount", currency: p.string("currency_code") ?? o.string("currency_code")), !r.isZero {
-                        Text("−\(r.formatted()) refunded").font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger)
+                        Text("−\(r.customerFormatted()) refunded").font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger)
                     }
                 }
             }

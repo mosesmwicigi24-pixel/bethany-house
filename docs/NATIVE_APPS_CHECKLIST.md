@@ -77,6 +77,18 @@ Step 3: UNKNOWN — NEEDS VERIFICATION against an Xcode build.
 | F7 | Supplier document rows carry no download URL. | `SupplierController::documents` | Listed, not opened. |
 | F8 | `/auth/me` sends `first_name` and `last_name`, not `name`; `Me(json:)` required `name` and threw, so sign-in would fail against the real backend. Found by the Android live render check (2026-10-28). | `AuthController::me` payload | Fixed: display name built from first and last name as the console does, `name` kept as a fallback; contract test added. Swift unverified until an Xcode build. |
 
+## Server changes since the ports (checked 2026-11-04, #523–#532)
+
+| PR | Change | Native apps |
+|---|---|---|
+| #523 | Rejecting a return no longer answers 500 | Same request and reply; nothing to change. |
+| #524, #525 | Mukuru, Western Union / MoneyGram, I&M payment methods | Payment methods are read from the Hub; nothing to change. |
+| #527 | Customer prices, discounts, shipping and VAT on top are whole units | Decided on the server; the apps show what the Hub returns (till totals come from the order). Nothing to change. |
+| #528 | Sales roles see customer contacts in full | Already carried in the receipt screens. |
+| #531 | Customer documents show "KES 4,500", not "KES 4,500.00" | Done: `Money.customerFormatted()` on the till receipt (screen and printed) and the order page, both apps; staff screens keep cents. |
+| #530 | Message notices, reply accountability (`GET channels/attention`, dismiss) | Not in the apps yet: existing message calls unchanged; the new notices are console only. |
+| #532 | Payroll statutory enrolment per person, real paid date, People & pay | Not in the apps yet: `paid_on` is optional, so paying a run still works; the per-person deductions screen is console only. |
+
 ## Deliberately not ported
 
 - Kiosk mode on Mac and phone: a door device is a tablet. The iPad and Android tablet kiosks (Step 7) need the backend's own kiosk lifetime (#519, `KIOSK_TOKEN_DAYS`, default 90); before it a kiosk token died under the manager's 30-minute idle limit.

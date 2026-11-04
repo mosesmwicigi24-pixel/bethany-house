@@ -392,7 +392,7 @@ struct ShippingFeeSheet: View {
             Picker("Shipping method", selection: $methodId) {
                 Text("Type an amount").tag("")
                 ForEach(methods) { m in
-                    Text("\(m.string("name") ?? "") — \(m["fee"].flatMap { Money(json: $0, currency: m.string("fee_currency") ?? order.string("currency_code") ?? "KES") }?.formatted() ?? "no pricing rate")").tag(m.id)
+                    Text("\(m.string("name") ?? "") — \(m["fee"].flatMap { Money(json: $0, currency: m.string("fee_currency") ?? order.string("currency_code") ?? "KES") }?.customerFormatted() ?? "no pricing rate")").tag(m.id)
                 }
             }
             if chosen == nil {

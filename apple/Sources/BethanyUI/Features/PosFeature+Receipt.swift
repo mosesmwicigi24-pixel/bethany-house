@@ -76,13 +76,13 @@ struct ReceiptBody: View {
             ForEach(Array(sale.items.enumerated()), id: \.offset) { _, i in
                 let variant = i["variant_name"]?.string ?? ""
                 let title = variant.isEmpty ? (i["product_name"]?.string ?? "Item") : "\(i["product_name"]?.string ?? "Item") · \(variant)"
-                let unit = Money(json: i["unit_price"] ?? .null, currency: sale.currency)?.formatted() ?? "—"
+                let unit = Money(json: i["unit_price"] ?? .null, currency: sale.currency)?.customerFormatted() ?? "—"
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title).font(Theme.Font.secondary)
                         HStack(spacing: 4) {
                             Text("\(i["quantity"]?.int ?? 0) × \(unit)").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                            if let d = Money(json: i["discount_amount"] ?? .null, currency: sale.currency), !d.isZero { Text("less \(d.formatted())").font(Theme.Font.caption).foregroundStyle(Theme.Palette.pink) }
+                            if let d = Money(json: i["discount_amount"] ?? .null, currency: sale.currency), !d.isZero { Text("less \(d.customerFormatted())").font(Theme.Font.caption).foregroundStyle(Theme.Palette.pink) }
                             if i["is_production"]?.bool == true { StatusBadge("made to order", tone: .accent) }
                         }
                     }
@@ -117,6 +117,7 @@ struct ReceiptBody: View {
             }
         }
         .padding(Theme.Space.l).background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.field))
+        .environment(\.customerMoney, true)
     }
 
     private func line(_ label: String, _ m: Money?) -> some View {
@@ -129,7 +130,7 @@ struct ReceiptBody: View {
 enum ReceiptHTML {
     static func render(sale: PosSale, outlet: PosOutlet?) -> String {
         func esc(_ s: String) -> String { s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;") }
-        func m(_ v: JSONValue?, _ cur: String? = nil) -> String { v.flatMap { Money(json: $0, currency: cur ?? sale.currency) }?.formatted() ?? "—" }
+        func m(_ v: JSONValue?, _ cur: String? = nil) -> String { v.flatMap { Money(json: $0, currency: cur ?? sale.currency) }?.customerFormatted() ?? "—" }
         var h = "<html><body style='font-family:-apple-system,Helvetica;font-size:12px;width:280px'>"
         h += "<h3 style='margin:0'>\(esc(outlet?.name ?? "Bethany House"))</h3>"
         if let a = outlet?.raw["address"]?.string { h += "<div>\(esc(a))</div>" }
@@ -142,7 +143,7 @@ enum ReceiptHTML {
         }
         h += "</table><hr><table width='100%'>"
         h += "<tr><td>Subtotal</td><td align='right'>\(m(sale.json["subtotal"]))</td></tr>"
-        if let d = sale.money("discount_amount"), !d.isZero { h += "<tr><td>Discount</td><td align='right'>\(d.formatted())</td></tr>" }
+        if let d = sale.money("discount_amount"), !d.isZero { h += "<tr><td>Discount</td><td align='right'>\(d.customerFormatted())</td></tr>" }
         h += "<tr><td>Tax</td><td align='right'>\(m(sale.json["tax_amount"]))</td></tr>"
         h += "<tr><td><b>Total</b></td><td align='right'><b>\(m(sale.json["total"]))</b></td></tr>"
         for p in sale.payments {
@@ -150,7 +151,7 @@ enum ReceiptHTML {
             if let cr = p["cash_received"], !cr.isNull { h += "<tr><td>Cash received</td><td align='right'>\(m(cr))</td></tr>" }
             if let cg = p["change_given"], !cg.isNull { h += "<tr><td>Change</td><td align='right'>\(m(cg))</td></tr>" }
         }
-        if let out = sale.money("outstanding"), !out.isZero { h += "<tr><td>Outstanding</td><td align='right'>\(out.formatted())</td></tr>" }
+        if let out = sale.money("outstanding"), !out.isZero { h += "<tr><td>Outstanding</td><td align='right'>\(out.customerFormatted())</td></tr>" }
         h += "</table><hr><div style='text-align:center'>Thank you</div></body></html>"
         return h
     }

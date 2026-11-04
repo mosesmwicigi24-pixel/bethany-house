@@ -67,11 +67,11 @@ struct OrderItemsSection: View {
                     }
                     .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                     HStack(spacing: 6) {
-                        Text("\(item.string("quantity") ?? "1") × \(item.money("unit_price", currency: currency)?.formatted() ?? "—")")
+                        Text("\(item.string("quantity") ?? "1") × \(item.money("unit_price", currency: currency)?.customerFormatted() ?? "—")")
                         if item["price_adjusted"]?.bool == true, let orig = item.money("original_price", currency: currency) {
-                            Text("was \(orig.formatted())").strikethrough().foregroundStyle(Theme.textTertiary)
+                            Text("was \(orig.customerFormatted())").strikethrough().foregroundStyle(Theme.textTertiary)
                         }
-                        if let d = item.money("discount_amount", currency: currency), !d.isZero { Text("− \(d.formatted()) discount").foregroundStyle(Theme.Palette.pink) }
+                        if let d = item.money("discount_amount", currency: currency), !d.isZero { Text("− \(d.customerFormatted()) discount").foregroundStyle(Theme.Palette.pink) }
                         if let rate = item["tax_rate"]?.string { Text("tax \(rate)%").foregroundStyle(Theme.textTertiary) }
                     }
                     .font(Theme.Font.caption)
@@ -222,7 +222,7 @@ struct OrderLineEditor: View {
             let r = try await env.session.client.put("/v1/admin/orders/\(order.id)/items", json: .object(body))
             let j = r.json
             var msg = j?["message"]?.string ?? "Lines updated"
-            if let over = j?["overpaid"].flatMap({ Money(json: $0, currency: currency) }), !over.isZero { msg += " — overpaid by \(over.formatted())" }
+            if let over = j?["overpaid"].flatMap({ Money(json: $0, currency: currency) }), !over.isZero { msg += " — overpaid by \(over.customerFormatted())" }
             env.toasts.show(msg)
             onDone()
         } catch let e as APIError {
@@ -279,7 +279,7 @@ struct ProductPickerSheet: View {
                         }
                         Spacer()
                         if let bp = p["base_price"], let reg = (bp["sale_price"] ?? bp["regular_price"]).flatMap({ Money(json: $0, currency: "KES") }) {
-                            Text(reg.formatted()).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                            Text(reg.customerFormatted()).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                         }
                         if picked?.id == p.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.Palette.brand) }
                     }
