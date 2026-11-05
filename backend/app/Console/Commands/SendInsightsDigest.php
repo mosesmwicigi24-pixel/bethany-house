@@ -80,18 +80,21 @@ class SendInsightsDigest extends Command
         }
         // The Engine Room strip, compacted: one headline number per revenue
         // engine, only when at least one engine has something to say.
-        foreach ($this->engineRoomLines() as $line) {
+        $engineRoom = $this->engineRoom();
+        foreach ($this->engineRoomLines($engineRoom) as $line) {
             $lines[] = $line;
         }
 
         $lines[] = 'Every number above is computed from live records — open Reports in the portal to drill into the rows behind it.';
         $body = implode("\n", $lines);
 
+        // The email is the designed brief (owner, 2026-11-05) with the plain
+        // text beside it for clients that want text; WhatsApp keeps the text.
+        $mail = new \App\Mail\InsightsDigestMail($subject, $items, $engineRoom, $body,
+            rtrim((string) config('audit.console_url'), '/'));
         foreach ($recipients as $address) {
             try {
-                Mail::raw($body, function ($m) use ($address, $subject) {
-                    $m->to($address)->subject($subject);
-                });
+                Mail::to($address)->send(clone $mail);
                 $this->info("Sent to {$address}");
             } catch (\Exception $e) {
                 Log::error("Insights digest failed for {$address}: {$e->getMessage()}");
@@ -121,8 +124,8 @@ class SendInsightsDigest extends Command
     }
 
     /**
-     * The compact ENGINE ROOM block — the same six summaries the Overview
-     * strip renders (GET /reports/engine-room), one headline number each.
+     * The ENGINE ROOM — the same six summaries the Overview strip renders
+     * (GET /reports/engine-room), one headline number each.
      *
      * Every engine is computed independently with the endpoint's try/catch
      * degrade (a broken engine is skipped, never a broken digest), and the
@@ -131,9 +134,9 @@ class SendInsightsDigest extends Command
      * when every engine is null or has nothing to report, so the digest
      * stays noise-free on quiet days.
      *
-     * @return string[] block lines, engines paired two-per-line to stay short
+     * @return list<array{icon:string, label:string, value:string, suffix:string, link:string}>
      */
-    private function engineRoomLines(): array
+    private function engineRoom(): array
     {
         $engine = MetricEngine::unscoped();
         $safe = static function (callable $compute) {
@@ -166,34 +169,52 @@ class SendInsightsDigest extends Command
         }
 
         $kes = static fn ($v): string => 'KES ' . number_format(round((float) $v));
+        $tile = static fn (string $icon, string $label, string $value, string $suffix = '', string $link = '/reports')
+            => compact('icon', 'label', 'value', 'suffix', 'link');
 
-        $parts = [];
+        $tiles = [];
         if ($collections !== null) {
-            $parts[] = '💰 On the table: ' . $kes($collections['money_on_table']);
+            $tiles[] = $tile('💰', 'On the table', $kes($collections['money_on_table']), '', '/reports/sales?tab=collections');
         }
         if ($stockout !== null) {
-            $parts[] = '📉 Bleeding: ' . $kes($stockout['est_daily_loss_now']) . '/day';
+            $tiles[] = $tile('📉', 'Bleeding', $kes($stockout['est_daily_loss_now']), '/day', '/reports/inventory?tab=intelligence');
         }
         if ($winback !== null) {
-            $parts[] = '🔄 At risk: ' . $kes($winback['annual_value_at_risk']);
+            $tiles[] = $tile('🔄', 'At risk', $kes($winback['annual_value_at_risk']), '', '/reports/customers');
         }
         if ($attach !== null) {
-            $parts[] = '🛒 Missed attach: ' . $kes($attach['missed_revenue_estimate_total']);
+            $tiles[] = $tile('🛒', 'Missed attach', $kes($attach['missed_revenue_estimate_total']), '', '/reports/sales');
         }
         if ($replenishment !== null) {
-            $parts[] = '🎯 Radar due: ' . (int) $replenishment['due_pairs']
-                . ' (' . $kes($replenishment['expected_revenue']) . ')';
+            $tiles[] = $tile('🎯', 'Radar due', (string) (int) $replenishment['due_pairs'],
+                ' (' . $kes($replenishment['expected_revenue']) . ')', '/reports/customers');
         }
         if ($seasonal !== null && ($next = $seasonal['next_season'] ?? null) !== null) {
             $days = max(0, (int) round(now()->startOfDay()->diffInDays(
                 \Carbon\Carbon::parse($next['start'])->startOfDay(), false,
             )));
             $gap = (float) $seasonal['total_gap_value'];
-            $parts[] = "⛪ {$next['label']} in {$days}d, gap "
-                . ($gap > 0 ? $kes($gap) : 'KES —');
+            $tiles[] = $tile('⛪', "{$next['label']} in {$days}d", $gap > 0 ? $kes($gap) : 'KES —', '', '/reports/procurement?tab=seasonal')
+                + ['text' => "⛪ {$next['label']} in {$days}d, gap " . ($gap > 0 ? $kes($gap) : 'KES —')];
         }
 
-        // Two engines per line keeps the block under ~4 short lines.
+        return $tiles;
+    }
+
+    /**
+     * The compact ENGINE ROOM text block (WhatsApp and the email's text part),
+     * engines paired two per line to stay short.
+     *
+     * @param  list<array<string,string>>  $tiles
+     * @return string[]
+     */
+    private function engineRoomLines(array $tiles): array
+    {
+        if (!$tiles) {
+            return [];
+        }
+        $parts = array_map(static fn (array $t): string => $t['text'] ?? "{$t['icon']} {$t['label']}: {$t['value']}{$t['suffix']}", $tiles);
+
         $lines = ['ENGINE ROOM'];
         foreach (array_chunk($parts, 2) as $pair) {
             $lines[] = implode(' · ', $pair);
