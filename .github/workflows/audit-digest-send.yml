@@ -8,7 +8,9 @@ name: Send the morning briefing now
 #
 # "07:30 morning brief" sends the insights brief to the owner ONLY
 # (insights:digest --owner-only): no other recipient, no WhatsApp, and the
-# real 07:30 send is not affected. The date applies to the 06:30 briefing.
+# real 07:30 send is not affected. "all email recipients" re-sends today's
+# brief by email to every EoD recipient (insights:digest --force
+# --email-only), never WhatsApp. The date applies to the 06:30 briefing.
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +20,7 @@ on:
         options:
           - "06:30 briefing (audit)"
           - "07:30 morning brief (owner only)"
+          - "07:30 morning brief (all email recipients, no WhatsApp)"
         default: "06:30 briefing (audit)"
       date:
         description: "Day to report, YYYY-MM-DD (empty = yesterday, as the 06:30 email)"
@@ -65,11 +68,13 @@ jobs:
         run: |
           if [ "$WHICH" = "07:30 morning brief (owner only)" ]; then
             CMD="php artisan insights:digest --owner-only"
+          elif [ "$WHICH" = "07:30 morning brief (all email recipients, no WhatsApp)" ]; then
+            CMD="php artisan insights:digest --force --email-only"
           else
             CMD="php artisan audit:daily-digest"
             [ -n "$DAY" ] && CMD="$CMD --date=$DAY"
           fi
           ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
             -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
-            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel $CMD 2>&1 | sed -E 's/ sent to .*/ sent to the owner./; s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[address]/g' | grep -E '^(Digest for|No owner email|Test brief sent|Nothing needs attention|Failed for)'"
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel $CMD 2>&1 | sed -E 's/ sent to .*/ sent to the owner./; s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[address]/g' | grep -E '^(Digest for|No owner email|Test brief sent|Sent to|Nothing needs attention|No EoD|Failed for)'"
         timeout-minutes: 10

@@ -129,4 +129,26 @@ class InsightsDigestEmailTest extends TestCase
         $this->artisan('insights:digest --owner-only')->assertSuccessful();
         $this->assertSame('2000-01-01', DB::table('system_settings')->where('key', 'insights_digest_last_sent')->value('value'));
     }
+
+    public function test_an_email_only_resend_reaches_every_email_recipient_and_no_whatsapp(): void
+    {
+        Mail::fake();
+        \Illuminate\Support\Facades\Http::fake();
+        DB::table('production_orders')->insert([
+            'order_number' => 'PRD-LATE', 'product_id' => Product::factory()->create()->id, 'quantity' => 5,
+            'status' => 'in_progress', 'due_date' => now()->subDays(4)->format('Y-m-d'), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('system_settings')->upsert(
+            ['key' => 'eod_delivery', 'value' => json_encode([
+                'email_enabled' => true, 'email_recipients' => 'owner@sonalux.test, manager@sonalux.test',
+                'whatsapp_enabled' => true, 'whatsapp_recipients' => '+254712345678',
+            ]), 'updated_at' => now()],
+            ['key'], ['value', 'updated_at'],
+        );
+
+        $this->artisan('insights:digest --force --email-only')->assertSuccessful();
+
+        Mail::assertSent(InsightsDigestMail::class, 2);
+        \Illuminate\Support\Facades\Http::assertNothingSent();
+    }
 }

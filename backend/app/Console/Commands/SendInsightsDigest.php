@@ -25,7 +25,8 @@ use Illuminate\Support\Facades\Mail;
 class SendInsightsDigest extends Command
 {
     protected $signature = 'insights:digest {--force : Ignore the already-sent-today guard}
-        {--owner-only : A test: email only the owner (audit.owner_email); no WhatsApp, the daily guard untouched}';
+        {--owner-only : A test: email only the owner (audit.owner_email); no WhatsApp, the daily guard untouched}
+        {--email-only : Email the EoD recipients but send no WhatsApp (a re-send of today\'s brief by email)}';
 
     protected $description = 'Email the morning insights digest (attention feed) to EoD recipients';
 
@@ -42,6 +43,11 @@ class SendInsightsDigest extends Command
 
         $recipients = !empty($settings['email_enabled']) ? $split($settings['email_recipients'] ?? '') : [];
         $waNumbers  = !empty($settings['whatsapp_enabled']) ? $split($settings['whatsapp_recipients'] ?? '') : [];
+
+        // A re-send by email (owner, 2026-11-05): the WhatsApp rail already has today's text.
+        if ($this->option('email-only')) {
+            $waNumbers = [];
+        }
 
         // A test (owner, 2026-11-05): the owner alone sees it, nobody else is
         // sent a second brief, and the real 07:30 send is not affected.

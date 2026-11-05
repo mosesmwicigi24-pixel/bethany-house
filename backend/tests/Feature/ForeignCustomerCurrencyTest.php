@@ -279,6 +279,26 @@ class ForeignCustomerCurrencyTest extends TestCase
         $this->assertEqualsWithDelta(30600, (float) $other->fresh()->total_amount, 0.01);
     }
 
+    public function test_a_payment_waiting_for_approval_blocks_a_switch_however_long_it_has_waited(): void
+    {
+        // Order #1158 (2026-11-05): USD 25 recorded on 2 Nov awaiting approval;
+        // two days later the order went to rand and the 25 was counted as ZAR.
+        $order = $this->legacyBotswanaOrder();
+        $this->staff(['orders.view', 'orders.edit']);
+        DB::table('payments')->insert([
+            'order_id' => $order->id, 'payment_number' => 'PAY-' . uniqid(), 'amount' => 1000, 'currency_code' => 'KES',
+            'status' => 'pending', 'payment_method' => 'other', 'requires_approval' => true, 'approval_status' => 'pending_review',
+            'created_at' => now()->subDays(2), 'updated_at' => now()->subDays(2),
+        ]);
+
+        $this->postJson("/api/v1/admin/orders/{$order->id}/update-currency", ['country_code' => 'BW'])->assertStatus(422);
+        $this->assertSame('KES', $order->fresh()->currency_code);
+
+        // Once rejected it is no longer money on the order: the switch may go ahead.
+        DB::table('payments')->where('order_id', $order->id)->update(['approval_status' => 'rejected', 'status' => 'failed']);
+        $this->postJson("/api/v1/admin/orders/{$order->id}/update-currency", ['country_code' => 'BW'])->assertOk();
+    }
+
     // ── the payment link ────────────────────────────────────────────────────
 
     public function test_the_payment_link_stops_a_foreign_order_in_kes_until_it_is_switched_or_kept_with_a_reason(): void
