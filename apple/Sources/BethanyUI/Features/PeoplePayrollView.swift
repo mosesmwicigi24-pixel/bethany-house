@@ -207,22 +207,31 @@ struct PayrollRunSheet: View {
     }
 }
 
-/// POST /payroll/runs/{id}/pay {lines: [{line_id, payment_method, payment_reference}]} — step-up.
+/// POST /payroll/runs/{id}/pay {lines: [{line_id, payment_method, payment_reference, paid_on}]} — step-up.
+/// `paid_on` is the day the money actually went out (#532): it goes on the
+/// payslip, the run and the Salaries expense, so a payment recorded late keeps
+/// its real date. Not after today, not before the run was approved.
 struct PayRunSheet: View {
     @Environment(AppEnvironment.self) private var env
     let run: JSONValue
     let done: () -> Void
     @State private var methods: [String: String] = [:]
     @State private var refs: [String: String] = [:]
+    @State private var paidOn = Day.today()
+
+    private var approvedOn: String? { run["approved_at"]?.date.map(Day.string) }
+    private var dateOk: Bool { paidOn <= Day.today() && (approvedOn.map { paidOn >= $0 } ?? true) }
 
     var body: some View {
         let lines = run["lines"]?.records ?? []
-        EditSheet("Record payments", saveLabel: "Mark paid", canSave: lines.allSatisfy { methods[$0.id] != nil }, save: {
-            let body = J.obj([("lines", .array(lines.map { l in J.obj([("line_id", J.i(l.int("id"))), ("payment_method", .string(methods[l.id] ?? "cash")), ("payment_reference", J.sOpt(refs[l.id]))]) }))])
+        EditSheet("Record payments", saveLabel: "Mark paid", canSave: dateOk && lines.allSatisfy { methods[$0.id] != nil }, save: {
+            let body = J.obj([("lines", .array(lines.map { l in J.obj([("line_id", J.i(l.int("id"))), ("payment_method", .string(methods[l.id] ?? "cash")), ("payment_reference", J.sOpt(refs[l.id])), ("paid_on", .string(paidOn))]) }))])
             let r = try await env.session.client.post("/v1/admin/payroll/runs/\(run["id"]?.int ?? 0)/pay", json: body)
             toastResult(env, r); done()
         }) { e in
             Text("How each person was paid. Marking paid closes the run; you will be asked to confirm it is you.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            DayField("Date paid", $paidOn)
+            if !dateOk { Text("The date paid can't be after today\(approvedOn.map { " or before the run was approved (\($0))" } ?? "").").font(Theme.Font.caption).foregroundStyle(Theme.Palette.warning) }
             ForEach(lines) { l in
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading) { Text(l["user"]?["name"]?.string ?? "").font(Theme.Font.secondary); MoneyText(kes(l["net"])) }.frame(minWidth: 150, alignment: .leading)

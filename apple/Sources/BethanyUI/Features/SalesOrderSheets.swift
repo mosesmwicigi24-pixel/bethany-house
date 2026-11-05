@@ -62,6 +62,9 @@ struct RecordPaymentSheet: View {
     @State private var notes = ""
     @State private var proof: SalesPickedFile?
     @State private var pushing = false
+    /// A receipt Safaricom did not confirm: recorded only on the explicit choice below.
+    @State private var unconfirmed: String?
+    @State private var recording = false
 
     private var currency: String { order.string("currency_code") ?? "KES" }
     private var selected: Record? { methods.first { $0.string("code") == method } }
@@ -69,6 +72,11 @@ struct RecordPaymentSheet: View {
     private var effectiveMethod: String { isOther ? "other" : method }
     private var requiresApproval: Bool { isOther ? true : (selected?["requires_approval"]?.bool ?? !["cash", "mpesa", "card", "card_paystack", "card_flutterwave", "paystack"].contains(effectiveMethod)) }
     private var referenceRequired: Bool { effectiveMethod == "bank_transfer" || isOther }
+    /// An M-Pesa receipt is checked with Safaricom first (OrderDetailPage.tsx,
+    /// #522); a code it does not confirm, or with no M-Pesa request on the
+    /// order to check against, is recorded only on an explicit choice, and
+    /// then follows the method's approval rule.
+    private var checkFirst: Bool { effectiveMethod == "mpesa" && !reference.trimmingCharacters(in: .whitespaces).isEmpty }
     private var canSubmit: Bool {
         Sales.amountJSON(amount) != nil && !method.isEmpty
             && (!referenceRequired || !reference.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -76,21 +84,19 @@ struct RecordPaymentSheet: View {
     }
 
     var body: some View {
-        SheetFrame(title: "Record payment", submitLabel: requiresApproval ? "Submit for approval" : "Record", canSubmit: canSubmit, onCancel: onCancel, onSubmit: {
-            guard let amt = Sales.amountJSON(amount) else { return }
-            var body: [String: JSONValue] = ["method": .string(effectiveMethod), "amount": amt, "tax_inclusive": .bool(taxInclusive)]
-            if !reference.trimmingCharacters(in: .whitespaces).isEmpty { body["reference"] = .string(reference) }
-            if !phone.trimmingCharacters(in: .whitespaces).isEmpty { body["phone"] = .string(phone) }
-            if !notes.trimmingCharacters(in: .whitespaces).isEmpty { body["notes"] = .string(notes) }
-            if isOther { body["custom_method_name"] = .string(customName) }
-            let r = try await env.session.client.post("/v1/admin/orders/\(order.id)/payments", json: .object(body))
-            if let proof, let pid = r.json?["payment"]?["id"]?.string {
-                _ = try await env.session.client.send(.init(.post, "/v1/admin/payments/\(pid)/upload-proof", body: .multipart([proof.part(named: "proof")])))
-            }
-            let needs = r.json?["requires_approval"]?.bool ?? requiresApproval
-            env.toasts.show(needs ? "Payment submitted — awaiting approval before it takes effect" : "Payment recorded")
-            onDone()
+        SheetFrame(title: "Record payment", submitLabel: checkFirst ? "Check with Safaricom" : (requiresApproval ? "Submit for approval" : "Record"), canSubmit: canSubmit, onCancel: onCancel, onSubmit: {
+            if checkFirst { try await checkWithSafaricom() } else { try await record() }
         }) {
+            if checkFirst, let code = unconfirmed, code == reference.trimmingCharacters(in: .whitespaces) {
+                Button(recording ? "Recording…" : "Record \(code) without Safaricom confirmation") {
+                    recording = true
+                    Task {
+                        defer { recording = false }
+                        do { try await record() } catch { env.toasts.error(error) }
+                    }
+                }
+                .buttonStyle(.bordered).disabled(recording)
+            }
             DetailRow("Order total") { MoneyText(order.money("total_amount")) }
             DetailRow("Payment status", order.string("payment_status")?.humanized)
             if methods.isEmpty {
@@ -144,6 +150,40 @@ struct RecordPaymentSheet: View {
                 if method.isEmpty { method = methods.first?.string("code") ?? "" }
             } catch { env.toasts.error(error) }
         }
+    }
+
+    private func record() async throws {
+        guard let amt = Sales.amountJSON(amount) else { return }
+        var payload: [String: JSONValue] = ["method": .string(effectiveMethod), "amount": amt, "tax_inclusive": .bool(taxInclusive)]
+        if !reference.trimmingCharacters(in: .whitespaces).isEmpty { payload["reference"] = .string(reference) }
+        if !phone.trimmingCharacters(in: .whitespaces).isEmpty { payload["phone"] = .string(phone) }
+        if !notes.trimmingCharacters(in: .whitespaces).isEmpty { payload["notes"] = .string(notes) }
+        if isOther { payload["custom_method_name"] = .string(customName) }
+        let r = try await env.session.client.post("/v1/admin/orders/\(order.id)/payments", json: .object(payload))
+        if let proof, let pid = r.json?["payment"]?["id"]?.string {
+            _ = try await env.session.client.send(.init(.post, "/v1/admin/payments/\(pid)/upload-proof", body: .multipart([proof.part(named: "proof")])))
+        }
+        let needs = r.json?["requires_approval"]?.bool ?? requiresApproval
+        env.toasts.show(needs ? "Payment submitted — awaiting approval before it takes effect" : "Payment recorded")
+        onDone()
+    }
+
+    private func checkWithSafaricom() async throws {
+        let code = reference.trimmingCharacters(in: .whitespaces)
+        unconfirmed = nil
+        guard let pending = (order["payments"]?.array ?? []).first(where: { $0["status"]?.string == "pending" && $0["payment_method"]?.string == "mpesa" }),
+              let pid = pending["id"]?.string ?? pending["id"]?.int.map(String.init) else {
+            unconfirmed = code
+            throw APIError.transport("There is no M-Pesa request on this order to check the code against.")
+        }
+        let r: APIClient.Response
+        do {
+            r = try await env.session.client.post("/v1/admin/orders/\(order.id)/payments/\(pid)/verify-mpesa", json: .object(["transaction_code": .string(code)]))
+        } catch { unconfirmed = code; throw error }
+        let waiting = r.status == 202 || r.json?["pending"]?.bool == true
+        // 202: Safaricom took the question; the payment settles when they answer.
+        env.toasts.show(r.json?["message"]?.string ?? (waiting ? "Asked Safaricom — the payment updates when they answer" : "Safaricom confirmed the payment"), tone: waiting ? .info : .success)
+        onDone()
     }
 }
 
