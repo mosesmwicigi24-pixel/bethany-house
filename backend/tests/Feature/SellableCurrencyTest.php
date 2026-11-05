@@ -116,9 +116,16 @@ class SellableCurrencyTest extends TestCase
 
     private function pendingOrder(array $extra): \Illuminate\Testing\TestResponse
     {
+        // Abroad the till sends the price in the customer's currency and says so
+        // (TillPriceCurrencyTest): KES 1,000 at 0.01 = USD 10. This helper used
+        // to send the shilling 1,000 on a dollar sale, which billed USD 1,000.
+        $abroad = ($extra['customer_country_code'] ?? 'KE') !== 'KE';
+        $line   = ['product_id' => $this->product()->id, 'quantity' => 1, 'unit_price' => $abroad ? 10 : 1000]
+            + ($abroad ? ['price_currency' => 'USD'] : []);
+
         return $this->postJson('/api/v1/admin/pos/pending-order', $extra + [
             'outlet_id' => $this->outlet->id,
-            'items'     => [['product_id' => $this->product()->id, 'quantity' => 1, 'unit_price' => 1000]],
+            'items'     => [$line],
         ]);
     }
 

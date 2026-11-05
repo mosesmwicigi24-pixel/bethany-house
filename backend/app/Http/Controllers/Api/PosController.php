@@ -729,6 +729,7 @@ class PosController extends Controller
             'items.*.product_id'     => 'nullable|exists:products,id',
             'items.*.quantity'       => 'required|integer|min:1',
             'items.*.unit_price'     => 'required|numeric|min:0',
+            'items.*.price_currency' => 'nullable|string|size:3',
             'items.*.discount_type'  => 'nullable|in:none,flat,percent',
             'items.*.discount_value' => 'nullable|numeric|min:0',
             'cart_discount_type'     => 'nullable|in:none,flat,percent',
@@ -855,6 +856,10 @@ class PosController extends Controller
         $currencyAsked = \App\Support\SellableCurrency::chosen($validated['currency_code'] ?? null, $customerCountryCode, $validated['currency_reason'] ?? null, 'currency_reason');
         if ($currencyAsked !== null) {
             $currencyCode = $currencyAsked;
+        }
+
+        if ($refusal = $this->refuseLinesPricedInAnotherCurrency($validated, $currencyCode, $outlet)) {
+            return $refusal;
         }
 
         // Phase 2 — tax mode from global setting; per-item rates resolved by TaxCalculationService
@@ -2808,6 +2813,46 @@ class PosController extends Controller
 
 
     /**
+     * A till prices its own lines (the cashier's price stands), so on a sale
+     * in a currency other than the outlet's every line must say which
+     * currency its price is in, and it must be the sale's. Otherwise a
+     * shilling price is charged as dollars: a KES 2,500 dress billed USD
+     * 2,500 (found 2026-11-05 on the native apps, which priced in shillings;
+     * the console could leave a stale price when a cart's repricing failed).
+     * A client that does not state it is refused on such a sale, never
+     * trusted; a sale in the outlet's own currency is unaffected.
+     */
+    private function refuseLinesPricedInAnotherCurrency(array $validated, string $currency, Outlet $outlet): ?JsonResponse
+    {
+        $currency = strtoupper($currency);
+        if ($currency === strtoupper($this->resolveCurrency($outlet))) {
+            return null;
+        }
+
+        $wrong = [];
+        foreach (['items', 'production_items'] as $key) {
+            foreach ($validated[$key] ?? [] as $line) {
+                if (!array_key_exists('unit_price', $line) || $line['unit_price'] === null) {
+                    continue;   // a made-to-order line without a price is priced by the hub
+                }
+                if (strtoupper((string) ($line['price_currency'] ?? '')) !== $currency) {
+                    $wrong[] = $line;
+                }
+            }
+        }
+        if ($wrong === []) {
+            return null;
+        }
+
+        return response()->json([
+            'message'       => "This sale is billed in {$currency}, but some prices in the cart are not in {$currency}. Remove those items and add them again so their {$currency} prices load. If the app cannot sell in {$currency}, update it or use the console.",
+            'reason'        => 'prices_not_in_sale_currency',
+            'currency_code' => $currency,
+            'lines'         => count($wrong),
+        ], 422);
+    }
+
+    /**
      * Resolve the currency code for an outlet.
      * The outlets table does not have a currency_code column;
      * we derive it from country_code instead.
@@ -3107,6 +3152,7 @@ class PosController extends Controller
             'items.*.product_id'                   => 'nullable|exists:products,id',
             'items.*.quantity'                     => 'required|integer|min:1',
             'items.*.unit_price'                   => 'required|numeric|min:0',
+            'items.*.price_currency'               => 'nullable|string|size:3',
             'items.*.discount_type'                => 'nullable|in:none,flat,percent',
             'items.*.discount_value'               => 'nullable|numeric|min:0',
             'cart_discount_type'                   => 'nullable|in:none,flat,percent',
@@ -3119,6 +3165,7 @@ class PosController extends Controller
             'production_items.*.product_id'        => 'required_with:production_items|exists:products,id',
             'production_items.*.quantity'          => 'required_with:production_items|integer|min:1',
             'production_items.*.unit_price'        => 'nullable|numeric|min:0',
+            'production_items.*.price_currency'    => 'nullable|string|size:3',
             'production_items.*.production_notes'  => 'nullable|string|max:1000',
             // FIX 4: accept structured measurement values per MTO item
             'production_items.*.measurement_values' => 'nullable|array',
@@ -3142,6 +3189,10 @@ class PosController extends Controller
         $currencyAsked = \App\Support\SellableCurrency::chosen($validated['currency_code'] ?? null, $customerCountryCode, $validated['currency_reason'] ?? null, 'currency_reason');
         if ($currencyAsked !== null) {
             $resolvedCurrency = $currencyAsked;
+        }
+
+        if ($refusal = $this->refuseLinesPricedInAnotherCurrency($validated, $resolvedCurrency, Outlet::findOrFail($outletId))) {
+            return $refusal;
         }
 
         DB::beginTransaction();
@@ -3549,6 +3600,7 @@ class PosController extends Controller
             'items.*.product_id'                   => 'nullable|exists:products,id',
             'items.*.quantity'                     => 'required|integer|min:1',
             'items.*.unit_price'                   => 'required|numeric|min:0',
+            'items.*.price_currency'               => 'nullable|string|size:3',
             'items.*.discount_type'                => 'nullable|in:none,flat,percent',
             'items.*.discount_value'               => 'nullable|numeric|min:0',
             'cart_discount_type'                   => 'nullable|in:none,flat,percent',
@@ -3563,6 +3615,7 @@ class PosController extends Controller
             'production_items.*.product_id'        => 'required_with:production_items|exists:products,id',
             'production_items.*.quantity'          => 'required_with:production_items|integer|min:1',
             'production_items.*.unit_price'        => 'nullable|numeric|min:0',
+            'production_items.*.price_currency'    => 'nullable|string|size:3',
             'production_items.*.production_notes'  => 'nullable|string|max:1000',
             // FIX 4: accept structured measurement values per MTO item
             'production_items.*.measurement_values' => 'nullable|array',
@@ -3632,6 +3685,9 @@ class PosController extends Controller
         // unit_price is exactly how KES figures ended up wearing a USD label.
         $channel   = $validated['channel'] ?? 'pos';
         $hubPrices = $channel !== 'pos';
+        if (!$hubPrices && ($refusal = $this->refuseLinesPricedInAnotherCurrency($validated, $currencyCode, $outlet))) {
+            return $refusal;
+        }
         // Same resolver the website charges from, so an agent-taken order and a
         // web order for the same item come to the same money.
         $promoService  = new \App\Services\PromotionService();

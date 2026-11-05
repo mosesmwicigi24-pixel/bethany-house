@@ -88,6 +88,13 @@ interface AttachedCustomer {
 // Cart item extended with production flag and order-specific notes
 interface ExtCartItem extends CartItem {
     is_production?: boolean;   // true → raise draft production order at checkout
+    /**
+     * The currency `price` was loaded in. Sent with every line: on a sale in
+     * another currency than the outlet's the server refuses a line priced in
+     * anything else (TillPriceCurrencyTest), so a stale shilling price left
+     * in a dollar cart is caught, never charged.
+     */
+    price_currency?: string;
     product_id?: number;
     /** Human-readable tax category name(s) for display on receipt e.g. "VAT", "VAT + Tourism Levy" */
     tax_name?: string | null;
@@ -2302,6 +2309,7 @@ export default function PosPage() {
                         variant_name: variant.variant_name,
                         sku: variant.sku,
                         price: variant.price as number,   // guarded by unpriced() above
+                        price_currency: variant.currency,
                         quantity: 1,
                         discount_type: "none",
                         discount_value: 0,
@@ -2531,7 +2539,7 @@ export default function PosPage() {
                         dropped.push(item.product_name);
                         return [];
                     }
-                    return [{ ...item, price: v.price as number }];
+                    return [{ ...item, price: v.price as number, price_currency: v.currency }];
                 }
                 return [item];
             }));
@@ -2695,6 +2703,7 @@ export default function PosPage() {
                     product_id:         i.product_id,
                     quantity:           i.quantity,
                     unit_price:         i.price,
+                    ...(i.price_currency ? { price_currency: i.price_currency } : {}),
                             original_price:     i.original_price ?? null,
                             price_adjusted:     i.price_adjusted ?? false,
                     production_notes:   notes || undefined,
@@ -2728,6 +2737,7 @@ export default function PosPage() {
                     variant_id: i.variant_id || null,
                     ...(i.product_id ? { product_id: i.product_id } : {}),
                     quantity: i.quantity, unit_price: i.price, original_price: i.original_price ?? null, price_adjusted: i.price_adjusted ?? false,
+                    ...(i.price_currency ? { price_currency: i.price_currency } : {}),
                     discount_type: i.discount_type, discount_value: i.discount_value,
                 })),
             cart_discount_type:  cartDiscType,
@@ -3970,6 +3980,7 @@ export default function PosPage() {
                                 variant_name:       item.variant_name,
                                 sku:                item.sku,
                                 price:              item.unit_price,
+                                price_currency:     (sale as any).currency_code ?? undefined,
                                                 original_price:     (item as any).original_price ?? null,
                                                 price_adjusted:     (item as any).price_adjusted ?? false,
                                 quantity:           item.quantity,

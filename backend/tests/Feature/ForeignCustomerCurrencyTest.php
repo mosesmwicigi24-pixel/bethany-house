@@ -203,7 +203,7 @@ class ForeignCustomerCurrencyTest extends TestCase
         $this->assertSame('KES', Order::find($id)->currency_code);
 
         // The till re-asks the price list in the customer's currency (sale_currency) and sends those prices.
-        $usd = array_map(fn ($i) => ['unit_price' => $i['unit_price'] / 100] + $i, $items);
+        $usd = array_map(fn ($i) => ['unit_price' => $i['unit_price'] / 100, 'price_currency' => 'USD'] + $i, $items);
         $this->patchJson("/api/v1/admin/pos/pending-order/{$id}", [
             'outlet_id' => $this->outlet->id, 'customer_country_code' => 'BW', 'items' => $usd,
         ])->assertSuccessful();
