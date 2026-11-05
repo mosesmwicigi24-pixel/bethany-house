@@ -946,7 +946,7 @@ class OrderController extends Controller
             // Intelligence #5 — auto-draft production orders for producible items.
             // Still gated on full payment: confirming a sale is cheap to undo,
             // but cutting cloth for an unpaid order is not.
-            $totalPaid = $order->payments->where('status', 'paid')->sum('amount');
+            $totalPaid = $order->payments->where('status', 'paid')->sum('counted_amount');
             if ($totalPaid >= $order->total_amount - 0.01) {
                 try {
                     $order->loadMissing('items');
@@ -968,7 +968,7 @@ class OrderController extends Controller
             }
 
             // ── Guard: cannot complete if not fully paid ──────────────────────
-            $totalPaid = $order->payments->where('status', 'paid')->sum('amount');
+            $totalPaid = $order->payments->where('status', 'paid')->sum('counted_amount');
             if ($totalPaid < $order->total_amount - 0.01) {
                 return response()->json([
                     'message'     => 'Cannot complete this order - it has not been fully paid.',
@@ -990,7 +990,7 @@ class OrderController extends Controller
                 ], 422);
             }
 
-            $totalPaid = $order->payments->where('status', 'paid')->sum('amount');
+            $totalPaid = $order->payments->where('status', 'paid')->sum('counted_amount');
             if ($totalPaid < $order->total_amount - 0.01) {
                 return response()->json([
                     'message'     => 'Cannot ship - the order has an outstanding balance.',
@@ -1295,13 +1295,18 @@ class OrderController extends Controller
                 if ($remaining <= 0.01) {
                     break;
                 }
-                $lineRefundable = (float) $payment->amount - (float) $payment->refund_amount;
+                // $remaining is in the ORDER's currency; a payment made in another
+                // currency (PaymentCredit) takes its share back in its own.
+                $lineRefundable = $payment->countedNet();
                 if ($lineRefundable <= 0) {
                     continue;
                 }
                 $take = min($lineRefundable, $remaining);
+                $own  = $payment->order_currency_code !== null && (float) $payment->order_amount > 0
+                    ? round($take * (float) $payment->amount / (float) $payment->order_amount, 2)
+                    : $take;
                 $payment->update([
-                    'refund_amount' => (float) $payment->refund_amount + $take,
+                    'refund_amount' => min((float) $payment->amount, (float) $payment->refund_amount + $own),
                     'refunded_at'   => now(),
                 ]);
                 $remaining -= $take;
@@ -1453,7 +1458,7 @@ class OrderController extends Controller
         // so they count toward the order total even before admin approves them.
         $alreadyCommitted = $order->payments
             ->whereIn('status', ['paid', 'pending'])
-            ->sum('amount');
+            ->sum('counted_amount');   // in the order's currency (PaymentCredit)
         $remainingBalance = (float) $order->total_amount - (float) $alreadyCommitted;
 
         if ($remainingBalance <= 0) {
@@ -1499,7 +1504,7 @@ class OrderController extends Controller
             // Take a row lock and re-verify against the DB before inserting.
             DB::table('orders')->where('id', $order->id)->lockForUpdate()->first();
             $committedNow = (float) Payment::where('order_id', $order->id)
-                ->whereIn('status', ['paid', 'pending'])->sum('amount');
+                ->whereIn('status', ['paid', 'pending'])->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
             if ($collectedAmount > (float) $order->total_amount - $committedNow + 0.01) {
                 DB::rollBack();
                 return response()->json([
@@ -1563,8 +1568,8 @@ class OrderController extends Controller
             } else {
                 // For pending-approval payments: keep order in current status
                 // but update payment_status to reflect pending-approval state
-                $pendingApprovalTotal = $order->payments->whereIn('status', ['pending'])->sum('amount');
-                $paidTotal = $order->payments->where('status', 'paid')->sum('amount');
+                $pendingApprovalTotal = $order->payments->whereIn('status', ['pending'])->sum('counted_amount');
+                $paidTotal = $order->payments->where('status', 'paid')->sum('counted_amount');
                 if ($pendingApprovalTotal > 0 && $paidTotal == 0) {
                     $order->update(['payment_status' => 'pending_approval']);
                 }
@@ -2310,6 +2315,58 @@ class OrderController extends Controller
             'changed'          => $r['changed'],
         ], fn ($v) => $v !== null));
     }
+    // =========================================================================
+    // POST /admin/orders/{id}/bill-currency {currency_code, reason?}
+    // =========================================================================
+
+    /**
+     * The "Bill in" dropdown (owner, 2026-11-05): a customer abroad is billed in
+     * US dollars or their own currency. Before payment: anyone who edits
+     * orders. After payment: the super admin only, behind step-up — each
+     * payment keeps what it was paid in and counts its share in the new
+     * currency (OrderCurrencySwitch::restampPayments).
+     */
+    public function billCurrency(Request $request, $id)
+    {
+        $order = Order::with(['items'])->findOrFail($id);
+        $country = (string) $order->customer_country_code;
+        $choices = \App\Support\SellableCurrency::billChoices($country);
+        $validated = $request->validate([
+            'currency_code' => ['required', 'string', \Illuminate\Validation\Rule::in($choices)],
+            'reason'        => 'nullable|string|max:300',
+        ], ['currency_code.in' => $choices ? 'Bill this customer in ' . implode(' or ', $choices) . '.' : 'Set the customer\'s country abroad first.']);
+        $currency = $validated['currency_code'];
+
+        $paid = \App\Services\OrderCurrencySwitch::moneyHasMoved($order) !== null;
+        if ($paid) {
+            abort_unless($request->user()->isSuperAdmin(), 403, 'Only the super admin changes the currency once payment has started.');
+            app(\App\Services\Auth\StepUp::class)->ensure($request);
+            if (trim((string) ($validated['reason'] ?? '')) === '') {
+                return response()->json(['message' => 'Say why the currency changes after payment (kept in the audit trail).', 'errors' => ['reason' => ['Say why.']]], 422);
+            }
+        }
+
+        try {
+            $r = \App\Services\OrderCurrencySwitch::toCountry($order, $country, $request->user(), 'bill_currency', $currency,
+                $validated['reason'] ?? 'Billing currency chosen on the order', $paid);
+        } catch (\Throwable $e) {
+            return ServerError::respond($e, 'Failed to change the currency.');
+        }
+        if (!$r['ok']) {
+            return response()->json(array_filter(['message' => $r['message'], 'unpriceable_items' => $r['unpriceable_items'] ?? null]), 422);
+        }
+
+        $order->refresh();
+
+        return response()->json([
+            'message'        => $r['changed'] ? "Billed in {$currency} now." : "Already billed in {$currency}.",
+            'currency_code'  => $r['currency_code'],
+            'new_total'      => (float) $order->total_amount,
+            'payment_status' => $order->payment_status,
+            'balance'        => round($order->outstandingBalance(), 2),
+        ]);
+    }
+
     // =========================================================================
     // PATCH /admin/orders/{orderId}/items/{itemId}/price
     // =========================================================================

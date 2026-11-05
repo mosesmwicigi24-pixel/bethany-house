@@ -536,7 +536,7 @@ function StatusUpdateModal({ order, onClose, onUpdated }: {
     );
     const totalPaid = (order as any).payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
+        .reduce((s: number, p: any) => s + countedNet(p), 0) ?? 0;
     const hasUnpaidBalance = totalPaid < (order.total_amount ?? 0) - 0.01;
 
     // Payments that are pending admin approval block all order progression
@@ -695,7 +695,7 @@ function RefundModal({ order, onClose, onDone }: {
     const toast = useToastStore();
     const paidAmount = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount), 0) ?? order.total_amount;
+        .reduce((s: number, p: any) => s + countedGross(p), 0) ?? order.total_amount;
     const alreadyRefunded = order.payments
         ?.reduce((s: number, p: any) => s + Number(p.refund_amount ?? 0), 0) ?? 0;
     const maxRefund = paidAmount - alreadyRefunded;
@@ -827,7 +827,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
     // moves; the amount already paid and the product prices never change.
     const paid = (order.payments ?? [])
         .filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0);
+        .reduce((s: number, p: any) => s + countedNet(p), 0);
     const oldShipping = order.shipping_amount ?? 0;
     const newTotal    = Math.max(0, order.total_amount - oldShipping + effectiveAmount);
     const newBalance  = Math.max(0, newTotal - paid);
@@ -1324,7 +1324,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
     const toast = useToastStore();
     const totalPaid = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
+        .reduce((s: number, p: any) => s + countedNet(p), 0) ?? 0;
     const outstanding = Math.max(0, order.total_amount - totalPaid);
 
     const [method, setMethod]                     = useState("");
@@ -2156,7 +2156,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
     const selectedPayment = selectedPaymentId ? payments.find((p: any) => p.id === selectedPaymentId) : null;
     const cc = order.currency_code ?? "KES";
 
-    const totalPaid = paidPayments.reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0);
+    const totalPaid = paidPayments.reduce((s: number, p: any) => s + countedNet(p), 0);
     const outstanding = Math.max(0, Number(order.total_amount ?? 0) - totalPaid);
 
     // Derived receipt values
@@ -2226,7 +2226,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                         <option value="">Select a payment…</option>
                         {paidPayments.map((p: any) => (
                             <option key={p.id} value={p.id}>
-                                {PAYMENT_METHODS[p.payment_method]?.label ?? p.payment_method} - {fmt(p.amount, cc)}
+                                {PAYMENT_METHODS[p.payment_method]?.label ?? p.payment_method} - {fmt(p.amount, p.currency_code ?? cc)}
                                 {p.paid_at ? ` (${new Date(p.paid_at).toLocaleDateString("en-KE")})` : ""}
                             </option>
                         ))}
@@ -3626,7 +3626,7 @@ function ReversePaymentModal({ order, payment, immediate, onClose, onDone }: {
             <div className="space-y-4 p-5">
                 <div className="rounded-xl border border-line bg-surface-50 p-3 text-xs space-y-1">
                     <div className="flex justify-between"><span className="text-surface-500">Payment</span><span className="font-mono">{payment.payment_number ?? "—"}</span></div>
-                    <div className="flex justify-between"><span className="text-surface-500">Amount</span><span className="font-semibold">{fmtMoney(payment.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Amount</span><span className="font-semibold">{payment.currency_code && payment.currency_code !== cc ? `${payment.currency_code} ${formatAmount(payment.amount)}` : fmtMoney(payment.amount)}</span></div>
                     <div className="flex justify-between"><span className="text-surface-500">Method</span><span className="uppercase">{String(payment.payment_method ?? "").replace(/_/g, " ")}</span></div>
                 </div>
                 <p className="text-xs text-surface-600">
@@ -3656,6 +3656,95 @@ function ReversePaymentModal({ order, payment, immediate, onClose, onDone }: {
                 </div>
             </div>
         </Modal>
+    );
+}
+
+
+/**
+ * What a payment counts for on its order, in the ORDER's currency (owner,
+ * 2026-11-05; server rule App\Support\PaymentCredit). A payment keeps the
+ * currency it was paid in; after the order switches currency it counts its
+ * share (order_amount). Otherwise it counts as its own amount.
+ */
+const countedGross = (p: any): number => p.order_currency_code ? Number(p.order_amount ?? 0) : Number(p.amount ?? 0);
+const countedNet = (p: any): number => {
+    const amount = Number(p.amount ?? 0), refunded = Number(p.refund_amount ?? 0);
+    if (!p.order_currency_code || amount === 0) return amount - refunded;
+    return (amount - refunded) * Number(p.order_amount ?? 0) / amount;
+};
+
+
+/**
+ * "Bill in" (owner, 2026-11-05): a customer abroad pays in US dollars or their
+ * own country's currency. Pick one, then Apply; the lines are re-priced from
+ * the price list. Before payment: anyone who edits orders. After payment:
+ * the super admin only (with step-up and a reason) — each payment keeps the
+ * currency it was paid in and counts its share in the new one.
+ */
+function BillCurrencyControl({ order }: { order: Order }) {
+    const qc = useQueryClient();
+    const toast = useToastStore();
+    const { can, isSuperAdmin } = usePermissions();
+    const country = (order as any).customer_country_code as string | null;
+    const { data: countryData } = useQuery({
+        queryKey: ["countries-all"],
+        queryFn:  () => get<{ data: Array<{ code: string; sale_currency?: string | null; is_active: boolean }> }>("/v1/admin/countries"),
+        staleTime: 300_000,
+        enabled: !!(order as any).is_international && !!country,
+    });
+    const own = countryData?.data?.find(c => c.code === country)?.sale_currency ?? null;
+    const choices = Array.from(new Set([own, "USD"].filter((c): c is string => !!c)));
+    const current = order.currency_code ?? "";
+    const [pick, setPick] = useState(current);
+    const [reason, setReason] = useState("");
+    useEffect(() => setPick(current), [current]);
+
+    const paidStarted = order.payment_status !== "pending" || (order.payments ?? []).some((p: any) =>
+        ["paid", "processing", "confirmed"].includes(p.status) || (p.requires_approval && p.approval_status === "pending_review"));
+    const dead = ["cancelled", "voided", "refunded"].includes(order.status);
+    const mayApply = !dead && can("orders.edit") && (!paidStarted || isSuperAdmin);
+
+    const apply = useMutation({
+        mutationFn: () => post<{ message: string }>(`/v1/admin/orders/${order.id}/bill-currency`, {
+            currency_code: pick, ...(paidStarted ? { reason: reason.trim() } : {}),
+        }),
+        onSuccess: (r) => {
+            toast.success(r.message);
+            setReason("");
+            void qc.invalidateQueries({ queryKey: ["order"] });   // the page keys it by the URL's id
+            void qc.invalidateQueries({ queryKey: ["orders"] });
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    if (!(order as any).is_international || !country || choices.length < 2 || !mayApply) return null;
+    const changed = pick !== current;
+
+    return (
+        <div className="rounded-lg border border-info-200 bg-info-50/60 p-2.5 space-y-2">
+            <label className="flex items-center justify-between gap-2">
+                <span className="text-surface-500 shrink-0">Bill in</span>
+                <select value={pick} onChange={e => setPick(e.target.value)} aria-label="Bill this order in"
+                    className="input input-sm max-w-[120px] py-1 text-xs font-mono font-bold">
+                    {choices.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+            </label>
+            {changed && paidStarted && (
+                <>
+                    <p className="text-2xs text-surface-600">Payment has started. Each payment keeps the currency it was paid in and counts its share of the order in {pick}.</p>
+                    <input className="input input-sm text-xs" placeholder="Reason (kept in the audit trail)" maxLength={300}
+                        value={reason} onChange={e => setReason(e.target.value)} />
+                </>
+            )}
+            {changed && (
+                <button type="button" onClick={() => apply.mutate()}
+                    disabled={apply.isPending || (paidStarted && reason.trim().length < 3)}
+                    className="btn-primary btn-sm w-full justify-center">
+                    {apply.isPending ? <Spinner size="xs" className="border-white/30 border-t-white" /> : null}
+                    Apply — bill in {pick}
+                </button>
+            )}
+        </div>
     );
 }
 
@@ -3948,7 +4037,7 @@ export default function OrderDetailPage() {
     // Payment summary
     const totalPaid = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
+        .reduce((s: number, p: any) => s + countedNet(p), 0) ?? 0;
     const outstanding = Math.max(0, order.total_amount - totalPaid);
     const canAddPayment = outstanding > 0 && !["cancelled", "voided", "refunded"].includes(order.status);
 
@@ -4842,7 +4931,7 @@ export default function OrderDetailPage() {
                                 <div className="mb-4 rounded-xl border border-danger/30 bg-danger-light px-4 py-3 text-xs text-danger">
                                     <p className="font-semibold">Paid after cancel — refund needed</p>
                                     <p className="mt-0.5">
-                                        {fmt(lateUnrefunded.reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0), cc)}
+                                        {fmt(lateUnrefunded.reduce((s: number, p: any) => s + countedNet(p), 0), cc)}
                                         {" "}arrived after this order was {order.status}. The money is recorded and the order stays {order.status} — refund the customer.
                                     </p>
                                 </div>
@@ -4932,7 +5021,14 @@ export default function OrderDetailPage() {
                                                             <button onClick={() => { setVerifyingPaystackPaymentId(p.id); setPaystackVerifyRef(""); }} className="mt-1 block text-2xs text-info-600 hover:underline font-medium">Verify with Paystack →</button>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 align-top text-right font-bold text-surface-900 tabular-nums">{fmt(p.amount, cc)}</td>
+                                                    <td className="px-4 py-3 align-top text-right font-bold text-surface-900 tabular-nums">
+                                                        {fmt(p.amount, p.currency_code ?? cc)}
+                                                        {p.order_currency_code && (
+                                                            <div className="text-2xs font-medium text-surface-500" title="Paid in its own currency; counts its share of the order in the order's currency">
+                                                                counts {fmt(p.order_amount, p.order_currency_code)}
+                                                            </div>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -5141,6 +5237,7 @@ export default function OrderDetailPage() {
                                     <span className="text-surface-400 shrink-0">Currency</span>
                                     <span className="font-mono font-bold text-surface-700 flex items-center gap-1">{cc}{(order as any).is_international && <span className="text-info-600">🌐</span>}</span>
                                 </div>
+                                <BillCurrencyControl order={order} />
                                 {(order as any).customer_country_code && (
                                     <div className="flex justify-between gap-2">
                                         <span className="text-surface-400 shrink-0">Country</span>
