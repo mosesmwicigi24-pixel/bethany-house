@@ -95,4 +95,38 @@ class InsightsDigestEmailTest extends TestCase
                 && str_contains($text, 'Every number above is computed from live records');
         });
     }
+
+    public function test_a_test_send_reaches_the_owner_alone_and_leaves_the_real_send_alone(): void
+    {
+        Mail::fake();
+        \Illuminate\Support\Facades\Http::fake();
+        config(['audit.owner_email' => 'owner@bethany.test']);
+        DB::table('production_orders')->insert([
+            'order_number' => 'PRD-LATE', 'product_id' => Product::factory()->create()->id, 'quantity' => 5,
+            'status' => 'in_progress', 'due_date' => now()->subDays(4)->format('Y-m-d'), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('system_settings')->upsert(
+            ['key' => 'eod_delivery', 'value' => json_encode([
+                'email_enabled' => true, 'email_recipients' => 'manager@sonalux.test',
+                'whatsapp_enabled' => true, 'whatsapp_recipients' => '+254712345678',
+            ]), 'updated_at' => now()],
+            ['key'], ['value', 'updated_at'],
+        );
+        DB::table('system_settings')->upsert(['key' => 'insights_digest_last_sent', 'value' => now()->toDateString(), 'updated_at' => now()], ['key'], ['value', 'updated_at']);
+
+        // Even after today's real brief went out, the test goes — to the owner only.
+        $this->artisan('insights:digest --owner-only')
+            ->expectsOutputToContain('Test brief sent to the owner.')
+            ->doesntExpectOutputToContain('manager@sonalux.test')
+            ->assertSuccessful();
+
+        Mail::assertSent(InsightsDigestMail::class, 1);
+        Mail::assertSent(InsightsDigestMail::class, fn ($m) => $m->hasTo('owner@bethany.test') && !$m->hasTo('manager@sonalux.test'));
+        \Illuminate\Support\Facades\Http::assertNothingSent();   // no WhatsApp
+
+        // The guard is untouched: tomorrow's 07:30 send is decided as before.
+        DB::table('system_settings')->where('key', 'insights_digest_last_sent')->update(['value' => '2000-01-01']);
+        $this->artisan('insights:digest --owner-only')->assertSuccessful();
+        $this->assertSame('2000-01-01', DB::table('system_settings')->where('key', 'insights_digest_last_sent')->value('value'));
+    }
 }

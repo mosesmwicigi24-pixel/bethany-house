@@ -24,7 +24,8 @@ use Illuminate\Support\Facades\Mail;
  */
 class SendInsightsDigest extends Command
 {
-    protected $signature = 'insights:digest {--force : Ignore the already-sent-today guard}';
+    protected $signature = 'insights:digest {--force : Ignore the already-sent-today guard}
+        {--owner-only : A test: email only the owner (audit.owner_email); no WhatsApp, the daily guard untouched}';
 
     protected $description = 'Email the morning insights digest (attention feed) to EoD recipients';
 
@@ -42,6 +43,19 @@ class SendInsightsDigest extends Command
         $recipients = !empty($settings['email_enabled']) ? $split($settings['email_recipients'] ?? '') : [];
         $waNumbers  = !empty($settings['whatsapp_enabled']) ? $split($settings['whatsapp_recipients'] ?? '') : [];
 
+        // A test (owner, 2026-11-05): the owner alone sees it, nobody else is
+        // sent a second brief, and the real 07:30 send is not affected.
+        $ownerOnly = (bool) $this->option('owner-only');
+        if ($ownerOnly) {
+            $owner = trim((string) config('audit.owner_email'));
+            if ($owner === '') {
+                $this->warn('No owner email configured (AUDIT_OWNER_EMAIL); nothing sent.');
+                return self::SUCCESS;
+            }
+            $recipients = [$owner];
+            $waNumbers  = [];
+        }
+
         if (empty($recipients) && empty($waNumbers)) {
             $this->info('No EoD email or WhatsApp recipients configured — digest skipped.');
             return self::SUCCESS;
@@ -49,7 +63,7 @@ class SendInsightsDigest extends Command
 
         $today = now()->toDateString();
         $lastSent = DB::table('system_settings')->where('key', 'insights_digest_last_sent')->value('value');
-        if (!$this->option('force') && $lastSent === $today) {
+        if (!$ownerOnly && !$this->option('force') && $lastSent === $today) {
             $this->info('Digest already sent today.');
             return self::SUCCESS;
         }
@@ -95,7 +109,7 @@ class SendInsightsDigest extends Command
         foreach ($recipients as $address) {
             try {
                 Mail::to($address)->send(clone $mail);
-                $this->info("Sent to {$address}");
+                $this->info($ownerOnly ? 'Test brief sent to the owner.' : "Sent to {$address}");
             } catch (\Exception $e) {
                 Log::error("Insights digest failed for {$address}: {$e->getMessage()}");
                 $this->error("Failed for {$address}");
@@ -112,6 +126,10 @@ class SendInsightsDigest extends Command
                     $this->error("WhatsApp failed for {$number}");
                 }
             }
+        }
+
+        if ($ownerOnly) {
+            return self::SUCCESS;   // a test: the 07:30 guard still belongs to the real send
         }
 
         DB::table('system_settings')->upsert(
