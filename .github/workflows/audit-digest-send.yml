@@ -5,9 +5,20 @@ name: Send the morning briefing now
 # the box. It goes ONLY to the configured owner address (AUDIT_OWNER_EMAIL);
 # there is no recipient input. The repository is public, so the log prints
 # only the day reported and "sent" — never the address or any figure.
+#
+# "07:30 morning brief" sends the insights brief to the owner ONLY
+# (insights:digest --owner-only): no other recipient, no WhatsApp, and the
+# real 07:30 send is not affected. The date applies to the 06:30 briefing.
 on:
   workflow_dispatch:
     inputs:
+      email:
+        description: "Which email"
+        type: choice
+        options:
+          - "06:30 briefing (audit)"
+          - "07:30 morning brief (owner only)"
+        default: "06:30 briefing (audit)"
       date:
         description: "Day to report, YYYY-MM-DD (empty = yesterday, as the 06:30 email)"
         required: false
@@ -50,10 +61,15 @@ jobs:
       - name: Send it (address and figures never printed)
         env:
           DAY: ${{ inputs.date }}
+          WHICH: ${{ inputs.email }}
         run: |
-          ARG=""
-          [ -n "$DAY" ] && ARG="--date=$DAY"
+          if [ "$WHICH" = "07:30 morning brief (owner only)" ]; then
+            CMD="php artisan insights:digest --owner-only"
+          else
+            CMD="php artisan audit:daily-digest"
+            [ -n "$DAY" ] && CMD="$CMD --date=$DAY"
+          fi
           ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
             -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
-            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel php artisan audit:daily-digest $ARG 2>&1 | sed -E 's/ sent to .*/ sent to the owner./; s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[address]/g' | grep -E '^(Digest for|No owner email)'"
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel $CMD 2>&1 | sed -E 's/ sent to .*/ sent to the owner./; s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[address]/g' | grep -E '^(Digest for|No owner email|Test brief sent|Nothing needs attention|Failed for)'"
         timeout-minutes: 10
