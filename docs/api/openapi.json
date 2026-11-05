@@ -21410,6 +21410,84 @@
                 }
             }
         },
+        "/api/v1/admin/orders/{id}/payments/{paymentId}/remove": {
+            "post": {
+                "operationId": "post_v1_admin_orders_by_id_payments_by_paymentId_remove",
+                "summary": "Remove Payment (SalesDocumentRevision)",
+                "tags": [
+                    "orders"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "paymentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "orders.view"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/orders/{id}/payments/{paymentId}/reverse": {
             "post": {
                 "operationId": "post_v1_admin_orders_by_id_payments_by_paymentId_reverse",

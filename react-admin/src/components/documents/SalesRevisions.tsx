@@ -66,12 +66,18 @@ const METHODS = [
     { value: "cheque", label: "Cheque" },
 ];
 
-/** The owner corrects a payment's details; the amount is never changed here. */
+/**
+ * The owner corrects a payment's details — and, since 2026-11-05, its amount
+ * and currency (a USD payment saved as rand), behind step-up. The old figures
+ * are kept as a revision.
+ */
 export function CorrectPaymentModal({
-    orderId, payment, onClose, onSaved,
+    orderId, payment, onClose, onSaved, currencies,
 }: {
     orderId: number;
-    payment: { id: number; payment_number?: string | null; payment_method: string; provider_reference?: string | null; phone_number?: string | null; paid_at?: string | null; amount: number | string };
+    payment: { id: number; payment_number?: string | null; payment_method: string; provider_reference?: string | null; phone_number?: string | null; paid_at?: string | null; amount: number | string; currency_code?: string | null };
+    /** Currencies the payment may be recorded in (the order's, USD, the customer's own). */
+    currencies?: string[];
     onClose: () => void;
     onSaved: () => void;
 }) {
@@ -88,6 +94,9 @@ export function CorrectPaymentModal({
     const [paidAt, setPaidAt] = useState(toLocalInput(payment.paid_at));
     const [reason, setReason] = useState("");
     const [saving, setSaving] = useState(false);
+    const [amount, setAmount] = useState(String(Number(payment.amount)));
+    const [currency, setCurrency] = useState((payment.currency_code ?? "").toUpperCase());
+    const currencyChoices = Array.from(new Set([currency, ...(currencies ?? [])].filter(Boolean)));
     const isCash = payment.payment_method === "cash";
 
     const save = async () => {
@@ -98,6 +107,10 @@ export function CorrectPaymentModal({
         if (method !== payment.payment_method) data.payment_method = method;
         const originalAt = toLocalInput(payment.paid_at);
         if (paidAt && paidAt !== originalAt) data.paid_at = new Date(paidAt).toISOString();
+        const amt = Number(amount);
+        if (!Number.isFinite(amt) || amt <= 0) return toast.error("Enter the amount that actually arrived.");
+        if (Math.abs(amt - Number(payment.amount)) > 0.001) data.amount = amt;
+        if (currency && currency !== (payment.currency_code ?? "").toUpperCase()) data.currency_code = currency;
         setSaving(true);
         try {
             const res = await salesRevisionApi.revisePayment(orderId, payment.id, data);
@@ -115,9 +128,17 @@ export function CorrectPaymentModal({
         <Modal open onClose={onClose} title={`Correct payment ${payment.payment_number ?? ""} (owner)`} size="md">
             <div className="space-y-3 text-sm">
                 <p className="rounded-lg bg-surface-50 border border-line p-3 text-xs text-surface-600">
-                    The amount ({Number(payment.amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}) is not changed here — if it is wrong, void the payment and record it again.
-                    A payment taken at a till keeps its method and date; cash is never switched in or out. The old details are kept, and the receipt shows the new revision.
+                    Correct what actually arrived. Changing the amount or currency asks you to confirm it is you; the order's balance is worked out again.
+                    A payment taken at a till, or confirmed by M-Pesa or a card provider, keeps its amount. The old details are kept, and the receipt shows the new revision.
                 </p>
+                <div className="grid grid-cols-[1fr_auto] gap-3">
+                    <label className="space-y-1"><span className="text-xs text-surface-500">Amount received</span>
+                        <input type="number" inputMode="decimal" step="0.01" min="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className="input w-full tabular-nums" /></label>
+                    <label className="space-y-1"><span className="text-xs text-surface-500">Currency</span>
+                        <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="input w-full font-mono font-bold">
+                            {currencyChoices.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select></label>
+                </div>
                 <label className="block space-y-1"><span className="text-xs text-surface-500">Reference / code</span>
                     <input value={reference} onChange={(e) => setReference(e.target.value)} className="input w-full font-mono" /></label>
                 <label className="block space-y-1"><span className="text-xs text-surface-500">Phone</span>

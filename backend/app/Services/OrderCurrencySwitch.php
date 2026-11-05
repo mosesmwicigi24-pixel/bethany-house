@@ -167,12 +167,16 @@ class OrderCurrencySwitch
                 ? (float) $p->amount
                 : round($before[$p->id] * $newTotal / $oldTotal, 2);
         }
-        // Fully paid before → exactly fully paid now, whatever the rounding.
-        if (array_sum($before->all()) >= $oldTotal - 0.01) {
+        // Fully paid before → exactly fully paid now. Only ever a rounding
+        // correction (a few cents): on #1158 a mis-recorded payment made the
+        // order look paid, and an unbounded "correction" set another payment's
+        // counted amount to 0. A gap bigger than cents is real and stays.
+        $gap = round($newTotal - array_sum($now), 2);
+        if (array_sum($before->all()) >= $oldTotal - 0.01 && abs($gap) > 0 && abs($gap) <= 0.05) {
             $foreign = array_filter(array_keys($now), fn ($id) => strtoupper((string) $payments->firstWhere('id', $id)->currency_code) !== $newCurrency);
             if ($foreign) {
                 $largest = array_reduce($foreign, fn ($c, $id) => $c === null || $now[$id] > $now[$c] ? $id : $c);
-                $now[$largest] = round($now[$largest] + ($newTotal - array_sum($now)), 2);
+                $now[$largest] = round($now[$largest] + $gap, 2);
             }
         }
 
