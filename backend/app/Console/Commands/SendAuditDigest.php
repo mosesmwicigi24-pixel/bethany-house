@@ -87,7 +87,7 @@ class SendAuditDigest extends Command
             'seals'         => collect(array_keys(AuditSealer::TABLES))->mapWithKeys(fn ($t) => [$t => $sealer->lastSeal($t)]),
             'imprest'       => \App\Models\ImprestAccount::with('custodian:id,first_name,last_name')->where('is_active', true)->get()
                                   ->map(fn ($a) => [
-                                      'name' => $a->name, 'balance' => $a->balance, 'float' => $a->float_amount, 'low' => $a->isLow(),
+                                      'name' => $a->name, 'balance' => $a->balance, 'float' => $a->float_amount, 'low' => $a->isLow(), 'alert_level' => $a->lowBalanceThreshold(),
                                       'custodian' => trim(($a->custodian?->first_name ?? '') . ' ' . ($a->custodian?->last_name ?? '')),
                                       'spent'     => number_format(-(float) \App\Models\ImprestTransaction::where('imprest_account_id', $a->id)
                                                         ->where('type', 'expense')->whereBetween('created_at', [$start, $end])->sum('amount'), 2, '.', ''),
@@ -129,7 +129,7 @@ class SendAuditDigest extends Command
             ->when($excludeCauser, fn ($q) => $q->where(fn ($w) => $w->whereNull('activity_log.causer_id')->orWhere('activity_log.causer_id', '!=', $excludeCauser)))
             ->orderBy('activity_log.created_at')
             ->limit(100)
-            ->get(['activity_log.event', 'activity_log.description', 'activity_log.ip_address', 'activity_log.created_at',
-                   'users.first_name', 'users.last_name']);
+            ->get(['activity_log.id', 'activity_log.event', 'activity_log.description', 'activity_log.ip_address', 'activity_log.created_at',
+                   'activity_log.properties', 'users.first_name', 'users.last_name']);
     }
 }
