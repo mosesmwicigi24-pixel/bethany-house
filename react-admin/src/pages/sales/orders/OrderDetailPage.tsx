@@ -4201,8 +4201,10 @@ export default function OrderDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-line overflow-hidden">
 
                 {/* ── Top action bar ──────────────────────────────────────────── */}
-                <div className="flex items-center justify-between gap-3 px-6 py-3 bg-surface-50/80 border-b border-line">
-                    <div className="flex items-center gap-2.5 min-w-0">
+                {/* Wraps on a phone: the tags take one line, the buttons the next and
+                    scroll sideways, so nothing slides under anything (owner, 2026-11-05). */}
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 sm:px-6 py-3 bg-surface-50/80 border-b border-line">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
                         <button onClick={() => navigate("/sales/orders")}
                             className="flex items-center gap-1.5 text-xs text-surface-500 hover:text-surface-900 font-medium transition-colors shrink-0">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -4226,7 +4228,7 @@ export default function OrderDetailPage() {
                             </button>
                         )}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 max-w-full overflow-x-auto no-scrollbar -mx-1 px-1 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
                         <button onClick={shareReceipt} disabled={pdfLoading} className="btn-secondary btn-sm gap-1.5" title={`Send the ${docLabel.toLowerCase()} PDF to the customer`}>
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" /></svg>
                             Share
@@ -4939,8 +4941,10 @@ export default function OrderDetailPage() {
                             {order.payments && order.payments.length > 0 ? (
                                 <div className="rounded-xl border border-line overflow-hidden">
                                     <div className="overflow-x-auto">
-                                    <table className="w-full text-xs min-w-[560px]">
-                                        <thead>
+                                    {/* A phone stacks each payment (method · amount, then reference, then status);
+                                        from sm up it is the table (owner, 2026-11-05: the amount sat off-screen). */}
+                                    <table className="w-full text-xs sm:min-w-[560px]">
+                                        <thead className="hidden sm:table-header-group">
                                             <tr className="bg-surface-50 border-b border-line">
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Method</th>
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Reference / Proof</th>
@@ -4951,9 +4955,9 @@ export default function OrderDetailPage() {
                                         </thead>
                                         <tbody className="divide-y divide-line">
                                             {order.payments.map((p: any) => (
-                                                <tr key={p.id} className={clsx("hover:bg-surface-50/50 transition-colors",
+                                                <tr key={p.id} className={clsx("grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 px-4 py-3 sm:table-row sm:p-0 hover:bg-surface-50/50 transition-colors",
                                                     p.requires_approval && p.approval_status !== "approved" && "bg-amber-50/40")}>
-                                                    <td className="px-4 py-3 align-top">
+                                                    <td className="order-1 sm:order-none p-0 sm:px-4 sm:py-3 align-top">
                                                         <span className="flex items-center gap-1.5 font-medium text-surface-900">
                                                             <span className="w-6 h-6 rounded-lg bg-surface-100 flex items-center justify-center shrink-0">
                                                                 <PaymentMethodIcon method={p.payment_method} className="w-3.5 h-3.5 text-surface-500" />
@@ -4961,7 +4965,7 @@ export default function OrderDetailPage() {
                                                             {PAYMENT_METHODS[p.payment_method]?.label ?? p.payment_method}
                                                         </span>
                                                     </td>
-                                                    <td className="px-4 py-3 align-top">
+                                                    <td className="order-3 col-span-2 sm:order-none sm:col-span-1 p-0 sm:px-4 sm:py-3 align-top">
                                                         <p className="font-mono text-surface-500 text-2xs">{p.payment_number ?? "-"}</p>
                                                         {p.provider_reference && <p className="text-surface-400 font-mono text-2xs">{p.provider_reference}</p>}
                                                         {isSuperAdmin && !["voided", "failed", "cancelled"].includes(p.status) && (
@@ -4986,10 +4990,10 @@ export default function OrderDetailPage() {
                                                             <div className="mt-1.5"><ProofUploadButton paymentId={p.id} onDone={refresh} /></div>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 align-top text-surface-500 hidden sm:table-cell">
+                                                    <td className="hidden sm:table-cell px-4 py-3 align-top text-surface-500">
                                                         {p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-KE", {dateStyle:"medium"}) : "—"}
                                                     </td>
-                                                    <td className="px-4 py-3 align-top">
+                                                    <td className="order-4 col-span-2 sm:order-none sm:col-span-1 p-0 sm:px-4 sm:py-3 align-top">
                                                         <span className={clsx("inline-flex items-center text-2xs font-semibold px-2 py-0.5 rounded-full",
                                                             p.status === "paid" && (!p.requires_approval || p.approval_status === "approved") ? "bg-success-light text-success-dark" :
                                                             p.requires_approval ? "bg-amber-100 text-amber-700" :
@@ -5021,7 +5025,7 @@ export default function OrderDetailPage() {
                                                             <button onClick={() => { setVerifyingPaystackPaymentId(p.id); setPaystackVerifyRef(""); }} className="mt-1 block text-2xs text-info-600 hover:underline font-medium">Verify with Paystack →</button>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 align-top text-right font-bold text-surface-900 tabular-nums">
+                                                    <td className="order-2 sm:order-none p-0 sm:px-4 sm:py-3 align-top text-right font-bold text-surface-900 tabular-nums whitespace-nowrap">
                                                         {fmt(p.amount, p.currency_code ?? cc)}
                                                         {p.order_currency_code && (
                                                             <div className="text-2xs font-medium text-surface-500" title="Paid in its own currency; counts its share of the order in the order's currency">
