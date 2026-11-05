@@ -49,7 +49,8 @@ public struct Me: Codable, Hashable, Sendable, Identifiable {
             return nil
         }
         isOwner = json["is_owner"]?.bool ?? false
-        moneyView = json["money_view"]?.string
+        // {range, period, label} (FinancialVisibility::describe); a plain string from an older server is kept.
+        moneyView = json["money_view"]?["label"]?.string ?? json["money_view"]?.string
         outlet = json["outlet"].flatMap { o in
             guard let oid = o["id"]?.int else { return nil }
             return OutletRef(id: oid, name: o["name"]?.string ?? "Outlet", raw: o)

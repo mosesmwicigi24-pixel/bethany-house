@@ -39,6 +39,10 @@ object MockHub {
     val punches = java.util.concurrent.CopyOnWriteArrayList<String>()
     /** When set, every kiosk endpoint answers with this status (401: the kiosk was removed on the Hub). */
     @Volatile var kioskStatus: Int? = null
+    /** "POST path body" of every order-payment write, in order. */
+    val payments = java.util.concurrent.CopyOnWriteArrayList<String>()
+    /** How verify-mpesa answers: 202 (asked Safaricom) or 422 (not confirmed). */
+    @Volatile var mpesaVerifyStatus: Int = 202
 
     private val server: MockWebServer by lazy {
         MockWebServer().apply {
@@ -47,6 +51,15 @@ object MockHub {
                     val path = request.path?.substringBefore('?') ?: ""
                     requests += "${request.method} $path"
                     if (request.method == "POST" && path.endsWith("/kiosk/punch")) punches += request.body.readUtf8()
+                    if (request.method == "POST" && (path.endsWith("/verify-mpesa") || Regex("/orders/\\d+/payments$").containsMatchIn(path))) {
+                        payments += "POST $path ${request.body.readUtf8()}"
+                        if (path.endsWith("/verify-mpesa")) {
+                            val code = mpesaVerifyStatus
+                            val reply = if (code == 202) MPESA_ASKED else MPESA_NOT_CONFIRMED
+                            return MockResponse().setResponseCode(code).setHeader("Content-Type", "application/json").setBody(reply)
+                        }
+                        return MockResponse().setResponseCode(201).setHeader("Content-Type", "application/json").setBody(PAYMENT_RECORDED)
+                    }
                     val forced = kioskStatus
                     if (forced != null && path.contains("/kiosk/")) {
                         return MockResponse().setResponseCode(forced).setHeader("Content-Type", "application/json").setBody(UNAUTHENTICATED)
@@ -57,6 +70,7 @@ object MockHub {
                         path.endsWith("/kiosk/punch") -> PUNCHED
                         request.method == "POST" && path.endsWith("/attendance/kiosks") -> KIOSK_CREATED
                         path.endsWith("/v1/admin/outlets") -> OUTLETS
+                        path.endsWith("/v1/payment-methods") -> PAYMENT_METHODS
                         else -> EMPTY_PAGE
                     }
                     return MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody(body)
@@ -72,6 +86,14 @@ object MockHub {
 
     private const val UNAUTHENTICATED = """{"message":"Unauthenticated."}"""
 
+    private const val PAYMENT_METHODS = """{"data":[{"code":"mpesa","name":"M-Pesa","type":"mobile_money","is_active":true,"supported_currencies":[]},{"code":"cash","name":"Cash","type":"cash","is_active":true,"supported_currencies":[]}]}"""
+
+    private const val MPESA_ASKED = """{"message":"Asked Safaricom to confirm receipt QHK7ABC123 — the payment will update here automatically when they answer (usually within a minute).","pending":true,"payment_status":"pending"}"""
+
+    private const val MPESA_NOT_CONFIRMED = """{"message":"Could not confirm payment with Daraja. Please check the transaction code and try again."}"""
+
+    private const val PAYMENT_RECORDED = """{"message":"Payment recorded","payment":{"id":77},"requires_approval":false}"""
+
     private const val OUTLETS = """{"data":[{"id":1,"name":"Westlands","code":"WST"}],"meta":{"current_page":1,"last_page":1,"total":1}}"""
 
     private const val KIOSK_CREATED = """{"message":"This tablet is now the kiosk at Westlands.","token":"5|new-kiosk-token","kiosk":{"id":4,"name":"Front door","outlet_id":1,"outlet":"Westlands"}}"""
@@ -86,7 +108,7 @@ object MockHub {
     private const val ME = """{"user":{
         "id":1,"first_name":"Test","last_name":"Owner","email":"owner@example.com","user_type":"system",
         "permissions":[],"roles":[{"id":1,"name":"super_admin","data_scope":"business"}],
-        "is_owner":true,"money_view":"all","outlet":{"id":1,"name":"Westlands"},
+        "is_owner":true,"money_view":{"range":"business","period":"any","label":"across your business"},"outlet":{"id":1,"name":"Westlands"},
         "terminal_pin_set":true,"two_factor_required":false,"two_factor_enabled":true,"recovery_codes_left":8
     }}"""
 }
