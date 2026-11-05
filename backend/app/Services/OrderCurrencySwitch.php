@@ -214,7 +214,12 @@ class OrderCurrencySwitch
         $moving = DB::table('payments')->where('order_id', $order->id)
             ->where(function ($q) {
                 $q->whereIn('status', ['paid', 'processing', 'confirmed'])
-                  ->orWhere(fn ($p) => $p->where('status', 'pending')->where('created_at', '>', now()->subMinutes(self::IN_FLIGHT_MINUTES)));
+                  ->orWhere(fn ($p) => $p->where('status', 'pending')->where('created_at', '>', now()->subMinutes(self::IN_FLIGHT_MINUTES)))
+                  // A payment waiting for an admin's approval is money that has
+                  // moved, however long it has waited (order #1158, 2026-11-05:
+                  // a USD 25 payment waited two days, the order was switched to
+                  // ZAR, and the 25 was then counted as rand).
+                  ->orWhere(fn ($p) => $p->where('requires_approval', true)->where('approval_status', 'pending_review')->where('status', '!=', 'cancelled'));
             })->exists();
 
         return $moving ? 'Cannot change currency: a payment on this order is recorded, awaiting review or still in progress.' : null;
