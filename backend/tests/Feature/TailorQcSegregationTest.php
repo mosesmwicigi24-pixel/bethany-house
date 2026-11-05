@@ -183,14 +183,16 @@ class TailorQcSegregationTest extends TestCase
             ->exists(), 'the refusal is on the audit trail');
     }
 
-    public function test_the_owner_cannot_pass_their_own_work_either(): void
+    /** Owner, 2026-11-05: a super admin needs no second person (SuperAdminSelfApproval) — audited. */
+    public function test_the_owner_may_pass_their_own_work_and_it_is_audited(): void
     {
         $owner = $this->user('super_admin');
         $po    = $this->orderAwaitingQc($owner);
         Sanctum::actingAs($owner);
 
-        $this->pass($po)->assertForbidden()->assertJsonPath('code', 'SELF_APPROVAL');
-        $this->assertSame('qc_pending', $po->fresh()->status);
+        $this->pass($po)->assertOk();
+        $this->assertSame('qc_passed', $po->fresh()->status);
+        $this->assertDatabaseHas('activity_log', ['event' => 'self_approved_super_admin', 'causer_id' => $owner->id]);
     }
 
     public function test_a_manager_who_did_not_work_on_it_passes_it(): void

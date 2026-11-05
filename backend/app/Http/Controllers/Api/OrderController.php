@@ -1400,9 +1400,10 @@ class OrderController extends Controller
                 ->load(['signatures', 'maker']),
             $user,
         ))->values()->all();
+        $allDone = collect($approvals)->every(fn ($a) => ($a['status'] ?? null) === \App\Models\ApprovalRequest::APPROVED);
 
         return response()->json([
-            'message'   => 'Reversal requested. It takes effect when finance approves it; the order reads paid until then.',
+            'message'   => $allDone ? 'Payment reversed.' : 'Reversal requested. It takes effect when finance approves it; the order reads paid until then.',
             'approvals' => $approvals,
         ], 202);
     }
@@ -1489,6 +1490,12 @@ class OrderController extends Controller
             $methodRow?->type,
             $methodRow?->requires_approval,
         );
+        // A super admin's own entry needs no reviewer (owner, 2026-11-05): the
+        // payment settles now, marked approved by them (SuperAdminSelfApproval).
+        $selfApproved = $requiresApproval && \App\Support\SuperAdminSelfApproval::applies($request->user());
+        if ($selfApproved) {
+            $requiresApproval = false;
+        }
 
         // For "other" method, prepend the custom name to the reference so it is
         // traceable in the payment record, approval queue, and audit log.
@@ -1526,9 +1533,15 @@ class OrderController extends Controller
                 'paid_at'              => $requiresApproval ? null : now(),
                 'tax_inclusive'        => $taxInclusive,
                 'tax_amount_collected' => $taxAmountCollected,
-                'requires_approval'    => $requiresApproval,
-                'approval_status'      => $requiresApproval ? 'pending_review' : null,
+                'requires_approval'    => $requiresApproval || $selfApproved,
+                'approval_status'      => $requiresApproval ? 'pending_review' : ($selfApproved ? 'approved' : null),
+                'approved_by'          => $selfApproved ? $request->user()->id : null,
+                'approved_at'          => $selfApproved ? now() : null,
+                'approval_notes'       => $selfApproved ? 'Recorded by a super admin — approved on entry.' : null,
             ]);
+            if ($selfApproved) {
+                \App\Support\SuperAdminSelfApproval::log($request->user(), 'payment.approve', $payment, [(int) $request->user()->id]);
+            }
 
             $payNote = "Payment of {$collectedAmount} {$order->currency_code} via "
                 . ucfirst($validated['method'])

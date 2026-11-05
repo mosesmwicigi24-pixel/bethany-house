@@ -1091,7 +1091,9 @@ class PurchaseOrderController extends Controller
         );
 
         return response()->json([
-            'message'        => 'Purchase order submitted for approval.',
+            'message'        => $approval->status === \App\Models\ApprovalRequest::APPROVED
+                ? 'Purchase order approved.'      // a super admin's own (SuperAdminSelfApproval)
+                : 'Purchase order submitted for approval.',
             'purchase_order' => $purchaseOrder->fresh(),
             'approval'       => app(\App\Services\Approvals\ApprovalEngine::class)->present($approval->load(['signatures', 'maker']), $request->user()),
         ]);

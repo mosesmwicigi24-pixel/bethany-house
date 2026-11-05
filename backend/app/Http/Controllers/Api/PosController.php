@@ -1501,7 +1501,7 @@ class PosController extends Controller
         $approval = app(TillReversals::class)->requestVoid($order, $validated['reason'], $request->user());
 
         return response()->json([
-            'message'  => 'Void requested. It needs an approver\'s signature before the sale is voided.',
+            'message'  => $approval->isPending() ? 'Void requested. It needs an approver\'s signature before the sale is voided.' : 'Sale voided.',
             'approval' => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),
             'pending'  => app(TillReversals::class)->pendingForOrder($order->id),
         ], 202);
@@ -1607,7 +1607,7 @@ class PosController extends Controller
         [$refund, $approval] = app(TillReversals::class)->requestRefund($order, $validated, $request->user());
 
         return response()->json([
-            'message'           => 'Refund requested. It needs an approver\'s signature before the refund is made.',
+            'message'           => $approval->isPending() ? 'Refund requested. It needs an approver\'s signature before the refund is made.' : 'Refund approved.',
             'refund_request_id' => $refund->id,
             'refund_amount'     => (float) $refund->refund_amount,
             'approval'          => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),

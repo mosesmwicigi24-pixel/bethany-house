@@ -121,21 +121,9 @@ class SalePriceMaximumTest extends TestCase
         $p = $this->product();
         $this->owner();
 
-        // The 5% rule lets the owner through; a 20% move is still a Phase 3C
-        // selling-price change over 10%, so it waits for finance's signature.
-        $this->putPrice($p, 1000, 800)->assertOk()->assertJsonPath('proposals.0.status', 'pending');
-        $this->assertNull($this->salePrice($p));
-
-        // Finance signs. The markdown is the OWNER's discretion, not the
-        // signer's: the price record judges its maker and saves it.
-        $finance = User::factory()->create(['status' => 'active']);
-        $finance->givePermissionTo(Permission::findOrCreate('approvals.finance_sign', 'sanctum'));
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
-        $request = \App\Models\ApprovalRequest::where('event', 'selling_price_change')->latest('id')->firstOrFail();
-        Sanctum::actingAs($finance->fresh());
-        $this->postJson("/api/v1/admin/approvals/{$request->id}/sign", [
-            'approvable_id' => $request->approvable_id, 'version' => $request->version,
-        ])->assertOk()->assertJsonPath('request.status', 'approved');
+        // The 5% rule lets the owner through, and a super admin's own price
+        // change needs no second signature (owner, 2026-11-05): at once.
+        $this->putPrice($p, 1000, 800)->assertOk()->assertJsonPath('proposals.0.status', 'applied');
         $this->assertSame(800.0, $this->salePrice($p));
     }
 
