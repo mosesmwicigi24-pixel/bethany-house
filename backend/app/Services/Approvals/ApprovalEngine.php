@@ -28,10 +28,12 @@ use Illuminate\Support\Facades\DB;
  *     person.
  *   - Anti-splitting: the band is judged on the rolling 24-hour total of the
  *     same maker's submissions to the same counterparty.
- *   - The maker never signs (App\Support\MakerChecker, on user id — super
- *     admin included). When nobody but the maker (and anyone who already
- *     signed) holds a band, the band escalates to the next one; past the top
- *     band of the set, to the super admin.
+ *   - The maker never signs (App\Support\MakerChecker, on user id). The one
+ *     exception is a super admin, whose own submission is approved on entry
+ *     (owner, 2026-11-05 — App\Support\SuperAdminSelfApproval). When nobody
+ *     but the maker (and anyone who already signed) holds a band, the band
+ *     escalates to the next one; past the top band of the set, to the super
+ *     admin.
  *   - A super admin may sign a lower band in place of its holder only when no
  *     super-admin band follows — otherwise he would use up the one signature
  *     the top band needs from him.
@@ -179,7 +181,7 @@ final class ApprovalEngine
      * force. A record with an earlier rejected/expired request becomes the
      * next version, linked to it.
      */
-    public function submit(string $event, Model $record, ?User $maker, ?array $payload = null, float $extraRollingKes = 0.0): ApprovalRequest
+    public function submit(string $event, Model $record, ?User $maker, ?array $payload = null, float $extraRollingKes = 0.0, bool $approveOwn = true): ApprovalRequest
     {
         $handler = $this->handler($event);
 
@@ -246,9 +248,67 @@ final class ApprovalEngine
             . ($amountKes !== null ? ' (KES ' . number_format($amountKes, 2) . ')' : ($valueUnknown ? ' (value unknown — every band)' : '')),
             $maker);
 
+        // A super admin's own entry needs no second person (owner,
+        // 2026-11-05): approved now, every band, signed by the maker.
+        // Not when adopting a record from before the engine (openOrAdopt): that
+        // is not the maker acting now, and may be on the way to a rejection.
+        if ($approveOwn && $maker !== null && \App\Support\SuperAdminSelfApproval::applies($maker)) {
+            return $this->selfApprove($request, $record, $maker);
+        }
+
         $this->notifySigners($request);
 
         return $request;
+    }
+
+    /**
+     * Approve a super admin's own submission at once (SuperAdminSelfApproval).
+     * One signature covering every band it needed, marked owner_override so
+     * the record and its exports say the maker approved it; the handler then
+     * applies it exactly as a last signature would.
+     */
+    private function selfApprove(ApprovalRequest $request, Model $record, User $maker): ApprovalRequest
+    {
+        $handler = $this->handler($request->event);
+        $orders  = array_map(fn ($b) => (int) $b['order'], (array) $request->bands);
+
+        $finished = DB::transaction(function () use ($request, $maker, $handler, $orders) {
+            /** @var ApprovalRequest $locked */
+            $locked = ApprovalRequest::whereKey($request->id)->lockForUpdate()->first();
+            $record = $handler->find((int) $locked->approvable_id);
+
+            ApprovalSignature::create([
+                'approval_request_id' => $locked->id,
+                'band_order'          => max($orders ?: [(int) $locked->current_band]),
+                'signer_id'           => $maker->id,
+                'decision'            => ApprovalSignature::APPROVED,
+                'covers'              => $orders ?: [(int) $locked->current_band],
+                'reason'              => 'Entered by a super admin — approved on entry.',
+                'signed_at'           => now(),
+                'owner_override'      => true,
+            ]);
+            $locked->update([
+                'status'     => ApprovalRequest::APPROVED,
+                'decided_at' => now(),
+                'decided_by' => $maker->id,
+            ]);
+            $handler->onApproved($locked, $record, $maker);
+
+            return $locked;
+        });
+
+        \App\Support\SuperAdminSelfApproval::log($maker, $handler->makerCheckerAction(), $record, [(int) $maker->id]);
+        ActivityLogService::log('approval_approved', $record, [
+            'approval_request_id' => $finished->id,
+            'event'               => $finished->event,
+            'version'             => $finished->version,
+            'covers'              => $orders,
+            'status'              => ApprovalRequest::APPROVED,
+            'owner_override'      => true,
+            'self_approved'       => true,
+        ], "Approved {$finished->event} v{$finished->version} on entry (super admin)", $maker);
+
+        return $finished->fresh();
     }
 
     /** The open (pending) request for a record and event, if any. */
@@ -295,7 +355,7 @@ final class ApprovalEngine
 
         $makerId = $handler->adoptedMaker($record);
 
-        return $this->submit($event, $record, $makerId ? User::find($makerId) : null);
+        return $this->submit($event, $record, $makerId ? User::find($makerId) : null, null, 0.0, false);
     }
 
     // ── signing ──────────────────────────────────────────────────────────────
@@ -337,6 +397,17 @@ final class ApprovalEngine
 
         if ($this->hash($handler->fingerprint($record, $request->payload)) !== $request->fingerprint) {
             $this->fail(422, 'APPROVAL_STALE', 'This record changed after it was submitted. It must be resubmitted before it can be signed.');
+        }
+
+        // A super admin approving their own request signs every band left at
+        // once (SuperAdminSelfApproval) — as if it had been approved on entry.
+        if ($decision === ApprovalSignature::APPROVED && !$overridden
+            && in_array((int) $signer->id, $this->makerIdsOf($request, $record), true)
+            && \App\Support\SuperAdminSelfApproval::applies($signer)) {
+            $done = $this->selfApprove($request, $record, $signer);
+            $this->notifyMaker($done);
+
+            return $done;
         }
 
         [$target, $covers] = $this->effectiveBand($request, $record);
@@ -647,8 +718,12 @@ final class ApprovalEngine
         if (!$record || !$this->withinScope($user, $request, $record)) {
             return false;
         }
-        if (in_array((int) $user->id, $this->makerIdsOf($request, $record), true)
-            || $this->signerIds($request)->contains((int) $user->id)) {
+        if (in_array((int) $user->id, $this->makerIdsOf($request, $record), true)) {
+            // A super admin approves their own (SuperAdminSelfApproval) — e.g.
+            // one they raised before that rule, still waiting.
+            return \App\Support\SuperAdminSelfApproval::applies($user);
+        }
+        if ($this->signerIds($request)->contains((int) $user->id)) {
             return false;
         }
         [$target] = $this->effectiveBand($request, $record);

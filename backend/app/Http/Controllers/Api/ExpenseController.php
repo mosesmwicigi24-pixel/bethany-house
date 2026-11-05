@@ -316,12 +316,14 @@ class ExpenseController extends Controller
             // Above the category's threshold (or paid from the imprest) it goes
             // to the approval engine: finance ≤ KES 50,000, + super admin above,
             // judged on the rolling 24h total to this category (Phase 3B).
+            $approval = null;
             if ($needsApproval) {
-                app(\App\Services\Approvals\ApprovalEngine::class)->submit('expense', $expense, $user);
+                $approval = app(\App\Services\Approvals\ApprovalEngine::class)->submit('expense', $expense, $user);
             }
 
-            // Notify finance managers if pending approval
-            if ($needsApproval) {
+            // Notify finance managers if pending approval (a super admin's
+            // own expense is approved on entry: nothing to ask for).
+            if ($needsApproval && $approval?->isPending()) {
                 $financeManagers = User::whereHas('roles.permissions', function ($q) {
                     $q->where('permissions.name', 'expenses.approve')
                       ->where('permissions.guard_name', 'sanctum');
@@ -481,10 +483,11 @@ class ExpenseController extends Controller
                 'submitted_by' => $user->id,
                 'submitted_at' => now(),
             ]);
-            app(\App\Services\Approvals\ApprovalEngine::class)->submit('expense', $expense->fresh(), $user);
+            $approval = app(\App\Services\Approvals\ApprovalEngine::class)->submit('expense', $expense->fresh(), $user);
 
-            // Notify approvers
-            $approvers = User::whereHas('roles.permissions', function ($q) {
+            // Notify approvers — none when a super admin's own expense was
+            // approved on entry (SuperAdminSelfApproval).
+            $approvers = !$approval->isPending() ? collect() : User::whereHas('roles.permissions', function ($q) {
                     $q->where('permissions.name', 'expenses.approve')
                       ->where('permissions.guard_name', 'sanctum');
                 })->get();
