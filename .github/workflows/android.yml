@@ -50,7 +50,13 @@ jobs:
       - name: Lint (report only)
         run: ./gradlew :app:lintDebug --console=plain || true
 
+      # Paused 2026-11-05: the app's till priced a customer abroad in shillings
+      # (a KES 2,500 dress billed USD 2,500) and its order page could record an
+      # M-Pesa receipt unchecked. The APK points at the live Hub, so it is not
+      # published until both app fixes are merged. CI still builds and tests it.
+      # To restore: delete the `if:` line below.
       - uses: actions/upload-artifact@v4
+        if: ${{ false }}
         with:
           name: hub-android-debug
           path: android/app/build/outputs/apk/debug/*.apk

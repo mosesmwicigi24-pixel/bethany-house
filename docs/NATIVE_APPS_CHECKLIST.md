@@ -118,6 +118,60 @@ keys the server validates, Android and Apple send the same keys, and the
 permission gates sampled match `routes/api.php`. No native work went
 beyond the plan; everything left out is recorded below.
 
+## Parity probe against the console (2026-11-05)
+
+Run against today's main: `LiveRenderTest` (108 Android routes on a real
+backend, no error state) and a read of every console change since the apps
+were ported (#517–#537). Items 1–7 were checked by hand in both apps.
+
+| # | Finding | Kind | State |
+|---|---|---|---|
+| P1 | The apps' till priced a customer abroad in shillings and sent no billing currency: a KES 2,500 dress sold to a US customer was billed USD 2,500 (reproduced on a local backend; the console charges USD 25). No "Bills in" choice; the order page's Country & currency sheet sends the country only. | money | Server guard added (`TillPriceCurrencyTest`): a sale in another currency than the outlet's needs each line's `price_currency` to match. App fix pending. |
+| P2 | The order page's "Record payment" saves an M-Pesa receipt without asking Safaricom (Android `OrderSheets.kt`, Apple `SalesOrderSheets.swift`); the console asks first since #522. | money | Pending |
+| P3 | Timesheets hidden from finance: the apps gate on `attendance.view_team` only; console and server also accept `timesheets.lock` (#535). | access | Pending |
+| P4 | Paying a payroll line from the apps cannot set the date paid (`paid_on`, #532); today is recorded. | money | Pending |
+| P5 | Payslip footnote ignores "government deductions off" (`structure.statutory`). | wording | Pending |
+| P6 | `money_view` read as text; the server sends an object. No screen uses it yet. | contract | Pending |
+| P7 | The till's Customer sheet offers "Reveal…" even when the contact is not masked (#528). | access log noise | Pending |
+| P8 | Console-only so far: People & pay, Commissions (#532/#533), message notices and "waiting on your reply" (#530), push action buttons (#537), variant price hints (#526). | parity | Backlog |
+
+The installable debug APK (CI artifact `hub-android-debug`) points at the
+live Hub; its upload is paused in `.github/workflows/android.yml` until P1
+and P2 are fixed in the apps.
+
+Read-only check of whether P1 reached the live Hub (nothing in it writes):
+
+```sql
+-- Read-only. Has the native app been used against this Hub, and did any
+-- till sale go out in a currency other than shillings since the Android app
+-- merged (2026-10-28)? Nothing here writes. Run with a read-only role.
+
+-- 1. Every sign-in or action by the native apps (their user agent starts
+--    "BethanyHub/"). Empty = the apps were never used against this Hub.
+SELECT 'live token' AS seen_in, t.tokenable_id AS user_id, t.user_agent, t.created_at, t.last_used_at
+FROM personal_access_tokens t
+WHERE t.user_agent LIKE 'BethanyHub/%'
+UNION ALL
+SELECT 'audit log', a.user_id, a.user_agent, a.created_at, NULL
+FROM audit_logs a
+WHERE a.user_agent LIKE 'BethanyHub/%'
+ORDER BY created_at;
+
+-- 2. Till sales in any currency but KES since 2026-10-28, line by line, for a
+--    person to judge against the product's price list. The bug's mark: a USD
+--    or ZAR sale whose unit_price is the item's shilling price (e.g. a KES
+--    2,500 dress sold as USD 2,500 instead of about USD 25).
+SELECT o.id, o.order_number, o.created_at, o.created_by, o.status, o.payment_status,
+       o.currency_code, o.total_amount,
+       oi.product_name, oi.quantity, oi.unit_price, oi.original_price, oi.price_adjusted
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.id
+WHERE o.order_type = 'pos'
+  AND COALESCE(o.currency_code, 'KES') <> 'KES'
+  AND o.created_at >= '2026-10-28'
+ORDER BY o.created_at, o.id;
+```
+
 ## Deliberately not ported
 
 - Kiosk mode on Mac and phone: a door device is a tablet. The iPad and Android tablet kiosks (Step 7) need the backend's own kiosk lifetime (#519, `KIOSK_TOKEN_DAYS`, default 90); before it a kiosk token died under the manager's 30-minute idle limit.
