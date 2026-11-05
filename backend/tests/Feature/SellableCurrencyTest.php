@@ -270,7 +270,7 @@ class SellableCurrencyTest extends TestCase
 
     // ── the currency table itself ───────────────────────────────────────────
 
-    public function test_a_currency_in_use_is_not_deleted_and_a_new_one_waits_for_its_rates(): void
+    public function test_a_currency_in_use_is_not_deleted_and_a_super_admins_new_one_gets_its_rates_at_once(): void
     {
         $owner = $this->person('super_admin');
         Sanctum::actingAs($owner);
@@ -285,9 +285,11 @@ class SellableCurrencyTest extends TestCase
             'code' => 'ZAR', 'name' => 'Rand', 'symbol' => 'R', 'exchange_rate' => 0.14, 'reporting_rate_to_kes' => 7.2, 'decimal_places' => 2,
         ])->assertStatus(201);
         $row = DB::table('currencies')->where('code', 'ZAR')->first();
-        $this->assertNull($row->reporting_rate_to_kes, 'the rate waits for approval');
-        $this->assertEquals(1.0, (float) $row->exchange_rate);
+        // Still two proposals, but a super admin's own are approved on entry
+        // (owner, 2026-11-05 — SuperAdminSelfApproval).
         $this->assertCount(2, $res->json('proposals'));
-        $this->assertFalse(\App\Support\SellableCurrency::isSellable('ZAR'));
+        $this->assertEquals(7.2, (float) $row->reporting_rate_to_kes);
+        $this->assertEquals(0.14, (float) $row->exchange_rate);
+        $this->assertTrue(\App\Support\SellableCurrency::isSellable('ZAR'));
     }
 }
