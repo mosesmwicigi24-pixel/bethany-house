@@ -352,11 +352,57 @@ internal fun CustomerSheet(session: PosSession, onDismiss: () -> Unit) {
                 OutlinedButton(onClick = { session.customer = draft.copy(id = 0); session.cartChanged(); onDismiss() }, enabled = draft.firstName.isNotEmpty()) { Text("Use for this sale") }
             }
         }
-        LabelledRow("Customer country (2 letters, for currency)") {
-            OutlinedTextField(
-                value = session.customerCountryCode, onValueChange = { session.customerCountryCode = it.take(2).uppercase(); session.cartChanged() },
-                placeholder = { Text("KE") }, singleLine = true, modifier = Modifier.width(84.dp),
-            )
+        CustomerCountry(session)
+    }
+}
+
+/**
+ * The customer's country decides what they are billed in (the server's
+ * sale_currency: Kenya → KES, a sellable own currency → that, else USD), and
+ * abroad they may ask for another ("Bills in", owner 2026-10-29). Changing
+ * either reprices the cart from the Hub's list in that currency; a line it
+ * cannot price there is removed and named (PosPage.tsx).
+ */
+@Composable
+private fun CustomerCountry(session: PosSession) {
+    val env = LocalEnv.current
+    val scope = rememberCoroutineScope()
+    var code by remember { mutableStateOf(session.customerCountryCode) }
+    var choosing by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { session.loadBillingLists() }
+
+    fun announce(removed: List<String>) {
+        if (removed.isNotEmpty()) env.toasts.show("Removed from the cart — no ${session.pricingCurrency} price on the Hub: ${removed.joinToString(", ")}", StatusTone.WARNING)
+    }
+
+    LabelledRow("Customer country (2 letters, for currency)") {
+        OutlinedTextField(
+            value = code,
+            onValueChange = { v ->
+                code = v.take(2).uppercase()
+                if (code.length == 2 || code.isEmpty()) scope.launch { announce(session.setCountry(code)) }
+            },
+            placeholder = { Text("KE") }, singleLine = true, modifier = Modifier.width(84.dp),
+        )
+    }
+    session.country?.let { c -> Text("${c["name"].str ?: ""} · bills in ${session.countryCurrency ?: "—"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
+    if (code.length == 2 && session.country == null && session.countries.isNotEmpty()) {
+        Text("Not a country the Hub lists", style = MaterialTheme.typography.labelSmall, color = Palette.warning)
+    }
+    if (session.billsAbroad) {
+        LabelledRow("Bills in") {
+            Box {
+                OutlinedButton(onClick = { choosing = true }) { Text(session.pricingCurrency) }
+                DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+                    session.billingOptions.forEach { cur ->
+                        DropdownMenuItem(
+                            text = { Text(if (cur == session.countryCurrency) "$cur (their country's)" else cur) },
+                            onClick = { choosing = false; scope.launch { announce(session.chooseBillCurrency(cur)) } },
+                        )
+                    }
+                }
+            }
         }
+        Text("as the customer asks", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
     }
 }

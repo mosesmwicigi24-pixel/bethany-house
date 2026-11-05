@@ -137,7 +137,8 @@ internal fun PosSaleScreen(session: PosSession) {
     fun makeProducts() {
         val outlet = session.outlet ?: return
         val cat = category
-        products = Resource(scope) { session.api.products(outlet.id, cat, null) }.also { it.load() }
+        val cur = session.pricingCurrency
+        products = Resource(scope) { session.api.products(outlet.id, cat, cur) }.also { it.load() }
     }
 
     suspend fun handleTillRefusal(e: Exception) {
@@ -168,7 +169,7 @@ internal fun PosSaleScreen(session: PosSession) {
     /** A scanned code is a SKU lookup: one exact match goes straight into the cart, otherwise it fills the search. */
     suspend fun scanned(code: String) {
         val outlet = session.outlet ?: return
-        val hits = runCatching { session.api.searchProducts(code, outlet.id, session.currency) }.getOrDefault(emptyList())
+        val hits = runCatching { session.api.searchProducts(code, outlet.id, session.pricingCurrency) }.getOrDefault(emptyList())
         val exact = hits.firstOrNull { p -> p.sku.equals(code, true) || p.variants.any { it.sku.equals(code, true) } }
         if (exact != null) {
             val v = exact.variants.firstOrNull { it.sku.equals(code, true) } ?: exact.defaultVariant
@@ -181,8 +182,7 @@ internal fun PosSaleScreen(session: PosSession) {
         val outlet = session.outlet ?: return@LaunchedEffect
         if (products == null) makeProducts()
         session.checkoutConfig = session.checkoutConfig ?: runCatching { session.api.checkoutConfig() }.getOrNull()
-        session.shippingMethods = runCatching { session.api.shippingMethods(session.currency) }.getOrDefault(emptyList())
-        session.paymentMethods = runCatching { session.api.paymentMethods(session.currency) }.getOrDefault(emptyList())
+        session.loadBillingLists()
         // An unpaid pending order from this session is resumed, never duplicated (PosPage.tsx auto-resume).
         if (session.cart.isEmpty() && session.pendingOrderId == null) {
             val open = runCatching { session.api.openPendingOrder(outlet.id) }.getOrNull()
@@ -194,13 +194,20 @@ internal fun PosSaleScreen(session: PosSession) {
         }
     }
     LaunchedEffect(category) { if (products != null) makeProducts() }
+    // The billing currency decides the price list, the shipping fees and the
+    // payment methods (PosPage.tsx: every query is keyed on currencyForQuery).
+    LaunchedEffect(session.pricingCurrency) {
+        if (products != null) makeProducts()
+        session.shippingMethods = runCatching { session.api.shippingMethods(session.pricingCurrency) }.getOrDefault(emptyList())
+        session.paymentMethods = runCatching { session.api.paymentMethods(session.pricingCurrency) }.getOrDefault(emptyList())
+    }
     LaunchedEffect(search) {
         searchJob?.cancel()
         if (search.length < 2) { searchResults = null; return@LaunchedEffect }
         searchJob = scope.launch {
             delay(300)
             val outlet = session.outlet ?: return@launch
-            searchResults = runCatching { session.api.searchProducts(search, outlet.id, session.currency) }.getOrNull()
+            searchResults = runCatching { session.api.searchProducts(search, outlet.id, session.pricingCurrency) }.getOrNull()
         }
     }
 
