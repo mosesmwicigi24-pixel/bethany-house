@@ -273,9 +273,7 @@ struct CustomerSheet: View {
                 TextField("Phone (optional)", text: $draft.phone).textFieldStyle(.roundedBorder)
                 Button("Use for this sale") { draft.id = 0; session.customer = draft; session.cartChanged(); dismiss() }.buttonStyle(.bordered).disabled(draft.firstName.isEmpty)
             }
-            LabeledContent("Customer country (2 letters, for currency)") {
-                TextField("KE", text: Binding(get: { session.customerCountryCode }, set: { session.customerCountryCode = String($0.prefix(2)).uppercased(); session.cartChanged() })).textFieldStyle(.roundedBorder).frame(width: 64)
-            }
+            CustomerCountryField(session: session)
         } actions: { Button("Done") { dismiss() } }
         .onChange(of: query) { _, q in
             searchTask?.cancel()
@@ -296,5 +294,52 @@ struct CustomerSheet: View {
             let r = try await session.api.reveal(customerId: c.id, field: field, reason: revealReason, orderId: session.pendingOrderId)
             if let v = r["value"]?.string { revealed[field] = v; env.toasts.show("\(field.capitalizedFirst) revealed — this is audited", tone: .info) }
         } catch { env.toasts.error(error) }
+    }
+}
+
+/// The customer's country decides what they are billed in (the server's
+/// sale_currency: Kenya → KES, a sellable own currency → that, else USD), and
+/// abroad they may ask for another ("Bills in", owner 2026-10-29). Changing
+/// either reprices the cart from the Hub's list in that currency; a line it
+/// cannot price there is removed and named (PosPage.tsx).
+struct CustomerCountryField: View {
+    @Environment(AppEnvironment.self) private var env
+    let session: PosSession
+    @State private var code = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("Customer country (2 letters, for currency)") {
+                TextField("KE", text: $code).textFieldStyle(.roundedBorder).frame(width: 64)
+            }
+            if let c = session.country {
+                Text("\(c["name"]?.string ?? "") · bills in \(session.countryCurrency ?? "—")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+            } else if code.count == 2, !session.countries.isEmpty {
+                Text("Not a country the Hub lists").font(Theme.Font.caption).foregroundStyle(Theme.Palette.warning)
+            }
+            if session.billsAbroad {
+                Picker("Bills in", selection: Binding(get: { session.pricingCurrency }, set: { cur in Task { announce(await session.chooseBillCurrency(cur)) } })) {
+                    ForEach(session.billingOptions, id: \.self) { cur in
+                        Text(cur == session.countryCurrency ? "\(cur) (their country's)" : cur).tag(cur)
+                    }
+                }
+                Text("as the customer asks").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            }
+        }
+        .task {
+            code = session.customerCountryCode
+            await session.loadBillingLists()
+        }
+        .onChange(of: code) { _, v in
+            let next = String(v.prefix(2)).uppercased()
+            if next != v { code = next; return }
+            guard next.count == 2 || next.isEmpty, next != session.customerCountryCode else { return }
+            Task { announce(await session.setCountry(next)) }
+        }
+    }
+
+    private func announce(_ removed: [String]) {
+        guard !removed.isEmpty else { return }
+        env.toasts.show("Removed from the cart — no \(session.pricingCurrency) price on the Hub: \(removed.joined(separator: ", "))", tone: .warning)
     }
 }

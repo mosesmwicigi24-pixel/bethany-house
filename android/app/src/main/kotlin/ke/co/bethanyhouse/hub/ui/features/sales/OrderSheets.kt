@@ -391,22 +391,48 @@ internal fun ShippingFeeSheet(order: Record, onDone: () -> Unit, onDismiss: () -
     }
 }
 
-// ── Country & currency — POST /orders/{id}/update-currency {country_code} ───
+// ── Country & currency — POST /orders/{id}/update-currency {country_code, currency_code?, reason?} ───
 
+/**
+ * The country decides the default billing currency (the server's
+ * sale_currency); the customer may ask for another, with a reason, and a
+ * customer abroad billed in shillings needs one (owner, 2026-10-29;
+ * OrderDetailPage.tsx Change Country / Currency).
+ */
 @Composable
 internal fun CurrencySheet(order: Record, onDone: () -> Unit, onDismiss: () -> Unit) {
     val env = LocalEnv.current
     var countries by remember { mutableStateOf<List<Record>>(emptyList()) }
+    var sellable by remember { mutableStateOf<List<String>>(emptyList()) }
     var code by remember { mutableStateOf(order.string("customer_country_code") ?: "") }
-    LaunchedEffect(Unit) { runCatching { countries = env.client.get("/v1/admin/countries").json.salesRecords.filter { it["is_active"].bool != false } } }
-    FormSheet("Country & currency", onDismiss, saveLabel = "Apply", canSave = code.length == 2, save = {
-        val r = env.client.post("/v1/admin/orders/${order.id}/update-currency", jsonOf("country_code" to code))
+    var currency by remember { mutableStateOf("") }   // "" = the country's default
+    var reason by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        runCatching { countries = env.client.get("/v1/countries").json.salesRecords.filter { it["is_active"].bool != false } }
+        sellable = ke.co.bethanyhouse.hub.ui.features.pos.loadSellableCurrencies(env.client)
+    }
+    val default = countries.firstOrNull { it.string("code") == code }?.string("sale_currency")
+    val chosen = currency.ifEmpty { default ?: "" }
+    val differs = currency.isNotEmpty() && currency != default
+    val needsReason = differs && chosen == "KES" && code != "KE"
+    val canSave = code.length == 2 && (!needsReason || reason.trim().length >= 5)
+
+    FormSheet("Country & currency", onDismiss, saveLabel = "Apply", canSave = canSave, save = {
+        val body = mutableMapOf<String, Any?>("country_code" to code)
+        if (differs) body["currency_code"] = currency
+        if (differs && reason.isNotBlank()) body["reason"] = reason.trim()
+        val r = env.client.post("/v1/admin/orders/${order.id}/update-currency", jsonOf(*body.entries.map { it.key to it.value }.toTypedArray()))
         env.toasts.show(if (r.json["changed"].bool == true) "Currency set to ${r.json["currency_code"].str ?: ""}" else "Currency unchanged (${r.json["currency_code"].str ?: ""})")
         onDone()
     }) { error ->
         DetailRow("Current", "${order.string("customer_country_code") ?: "—"} · ${order.string("currency_code") ?: ""}")
-        SalesCaption("Only while no payment has started. The currency follows the country's default when it is sellable (active with a reporting rate); prices are re-quoted by the server.")
-        OptionPicker("Country", code, countries.map { (it.string("code") ?: "") to "${it.string("name") ?: ""} (${it.string("default_currency_code") ?: "—"})" }, { code = it }, error = error?.field("country_code"))
+        SalesCaption("Only while no payment has started. The country's default is what the Hub bills there; prices are re-quoted by the server.")
+        OptionPicker("Country", code, countries.map { (it.string("code") ?: "") to "${it.string("name") ?: ""} (${it.string("sale_currency") ?: "—"})" }, { code = it; currency = "" }, error = error?.field("country_code"))
+        if (default != null) {
+            val options = listOf(default, "USD", "KES").plus(sellable).distinct()
+            OptionPicker("Bills in", chosen, options.map { it to (if (it == default) "$it (their country's)" else it) }, { currency = if (it == default) "" else it }, error = error?.field("currency_code"))
+            if (differs) Field(if (needsReason) "Why shillings for a customer abroad (required)" else "Why (the customer asked…)", reason, { reason = it }, error = error?.field("reason"))
+        }
         SalesFieldErrors(error)
     }
 }

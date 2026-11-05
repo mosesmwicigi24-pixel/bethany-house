@@ -408,30 +408,64 @@ struct ShippingFeeSheet: View {
     }
 }
 
-// MARK: Country & currency — POST /orders/{id}/update-currency {country_code}
+// MARK: Country & currency — POST /orders/{id}/update-currency {country_code, currency_code?, reason?}
 
+/// The country decides the default billing currency (the server's
+/// sale_currency); the customer may ask for another, with a reason, and a
+/// customer abroad billed in shillings needs one (owner, 2026-10-29;
+/// OrderDetailPage.tsx Change Country / Currency).
 struct CurrencySheet: View {
     @Environment(AppEnvironment.self) private var env
     let order: Record
     let onDone: () -> Void
     let onCancel: () -> Void
     @State private var countries: [Record] = []
+    @State private var sellable: [String] = []
     @State private var code = ""
+    @State private var currency = ""   // "" = the country's default
+    @State private var reason = ""
+
+    private var defaultCurrency: String? { countries.first { $0.string("code") == code }?.string("sale_currency") }
+    private var chosen: String { currency.isEmpty ? (defaultCurrency ?? "") : currency }
+    private var differs: Bool { !currency.isEmpty && currency != defaultCurrency }
+    private var needsReason: Bool { differs && chosen == "KES" && code != "KE" }
+    private var options: [String] {
+        var out: [String] = []
+        for c in [defaultCurrency, "USD", "KES"].compactMap({ $0 }) + sellable where !out.contains(c) { out.append(c) }
+        return out
+    }
+
     var body: some View {
-        SheetFrame(title: "Country & currency", submitLabel: "Apply", canSubmit: code.count == 2, onCancel: onCancel, onSubmit: {
-            let r = try await env.session.client.post("/v1/admin/orders/\(order.id)/update-currency", json: .object(["country_code": .string(code)]))
+        SheetFrame(title: "Country & currency", submitLabel: "Apply",
+                   canSubmit: code.count == 2 && (!needsReason || reason.trimmingCharacters(in: .whitespaces).count >= 5),
+                   onCancel: onCancel, onSubmit: {
+            var payload: [String: JSONValue] = ["country_code": .string(code)]
+            if differs { payload["currency_code"] = .string(currency) }
+            let why = reason.trimmingCharacters(in: .whitespaces)
+            if differs, !why.isEmpty { payload["reason"] = .string(why) }
+            let r = try await env.session.client.post("/v1/admin/orders/\(order.id)/update-currency", json: .object(payload))
             env.toasts.show(r.json?["changed"]?.bool == true ? "Currency set to \(r.json?["currency_code"]?.string ?? "")" : "Currency unchanged (\(r.json?["currency_code"]?.string ?? ""))")
             onDone()
         }) {
             DetailRow("Current", "\(order.string("customer_country_code") ?? "—") · \(order.string("currency_code") ?? "")")
-            Text("Only while no payment has started. The currency follows the country's default when it is sellable (active with a reporting rate); prices are re-quoted by the server.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+            Text("Only while no payment has started. The country's default is what the Hub bills there; prices are re-quoted by the server.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
             Picker("Country", selection: $code) {
                 Text("Choose…").tag("")
-                ForEach(countries) { c in Text("\(c.string("name") ?? "") (\(c.string("default_currency_code") ?? "—"))").tag(c.string("code") ?? "") }
+                ForEach(countries) { c in Text("\(c.string("name") ?? "") (\(c.string("sale_currency") ?? "—"))").tag(c.string("code") ?? "") }
+            }
+            .onChange(of: code) { _, _ in currency = "" }
+            if let d = defaultCurrency {
+                Picker("Bills in", selection: Binding(get: { chosen }, set: { currency = $0 == d ? "" : $0 })) {
+                    ForEach(options, id: \.self) { c in Text(c == d ? "\(c) (their country's)" : c).tag(c) }
+                }
+                if differs {
+                    TextField(needsReason ? "Why shillings for a customer abroad (required)" : "Why (the customer asked…)", text: $reason).textFieldStyle(.roundedBorder)
+                }
             }
         }
         .task {
-            if let r = try? await env.session.client.get("/v1/admin/countries") { countries = r.json?.salesRecords.filter { $0["is_active"]?.bool != false } ?? [] }
+            if let r = try? await env.session.client.get("/v1/countries") { countries = r.json?.salesRecords.filter { $0["is_active"]?.bool != false } ?? [] }
+            sellable = await loadSellableCurrencies(env.session.client)
             if code.isEmpty { code = order.string("customer_country_code") ?? "" }
         }
     }

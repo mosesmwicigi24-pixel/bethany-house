@@ -76,6 +76,9 @@ internal class PosApi(val client: ApiClient) {
         client.get("$BASE/products/search", mapOf("q" to q, "outlet_id" to outletId.toString(), "currency" to currency))
             .json["data"].records.mapNotNull(PosProduct::from)
 
+    /** GET /v1/countries (public): each country's `sale_currency`, the server's one rule (SellableCurrency::forCustomer). */
+    suspend fun countries(): List<JsonElement> = client.get("/v1/countries").json["data"].records.filter { it["is_active"].bool != false }
+
     suspend fun searchCustomers(q: String): List<JsonElement> = client.get("$BASE/customers/search", mapOf("q" to q)).json["data"].records
 
     suspend fun shippingMethods(currency: String?): List<JsonElement> =
@@ -273,6 +276,10 @@ internal data class CartLine(
             "product_id" to productId,
             "quantity" to quantity,
             "unit_price" to unitPrice,
+            // The currency the price was loaded in. On a sale in another currency
+            // than the outlet's the Hub refuses a line in anything else
+            // (TillPriceCurrencyTest), so a shilling price is never billed as dollars.
+            "price_currency" to currency,
             "discount_type" to discountType,
             "discount_value" to (amountJson(discountValue) ?: JsonPrimitive(0)),
         )
@@ -283,6 +290,7 @@ internal data class CartLine(
             "product_id" to productId,
             "quantity" to quantity,
             "unit_price" to unitPrice,
+            "price_currency" to currency,
             "production_notes" to (productionNotes.ifEmpty { null } ?: Omit),
             "measurement_values" to (if (measurementValues.isEmpty()) Omit else JsonObject(measurementValues.mapValues { JsonPrimitive(it.value) })),
         )
@@ -429,6 +437,10 @@ internal class PosSession(val api: PosApi, val offline: OfflineStore?, val me: M
     var cartDiscountValue by mutableStateOf("0")
     var customer by mutableStateOf<PosCustomer?>(null)
     var customerCountryCode by mutableStateOf("")
+    /** The customer's own choice of billing currency abroad; "" = their country's (sale_currency). */
+    var billCurrency by mutableStateOf("")
+    var countries by mutableStateOf<List<JsonElement>>(emptyList())
+    var sellableCurrencies by mutableStateOf<List<String>>(emptyList())
     var note by mutableStateOf("")
     var shippingMethodId by mutableStateOf<Int?>(null)
 
@@ -452,6 +464,75 @@ internal class PosSession(val api: PosApi, val offline: OfflineStore?, val me: M
     val staleTill: JsonElement? get() = registerStatus["stale_till"]?.takeUnless { it.isNull }
     val registerId: Int? get() = register["id"].int
     val currency: String get() = pendingOrder["currency_code"].str ?: outlet?.currencyCode ?: "KES"
+
+    /** The customer's country as the Hub lists it, or null. */
+    val country: JsonElement? get() = customerCountryCode.takeIf { it.length == 2 }?.let { c -> countries.firstOrNull { it["code"].str == c } }
+
+    /** What the customer's country is billed in by default (the server's sale_currency). */
+    val countryCurrency: String? get() = country?.get("sale_currency").str
+
+    /**
+     * The currency the cart's prices are loaded in, and the sale is billed in:
+     * the customer's choice, else their country's, else the outlet's
+     * (PosPage.tsx currencyForQuery).
+     */
+    val pricingCurrency: String get() = billCurrency.ifEmpty { null }
+        ?: (if (customerCountryCode.length == 2) countryCurrency else null)
+        ?: outlet?.currencyCode ?: "KES"
+
+    /** A customer abroad: their country bills in something other than the outlet's currency. */
+    val billsAbroad: Boolean get() = countryCurrency != null && countryCurrency != (outlet?.currencyCode ?: "KES")
+
+    /** The "Bills in" choices (PosPage.tsx): their country's, USD, then every other sellable currency but shillings. */
+    val billingOptions: List<String> get() = listOfNotNull(countryCurrency, "USD").plus(sellableCurrencies.filter { it != "KES" }).distinct()
+
+    suspend fun loadBillingLists() {
+        if (countries.isEmpty()) countries = runCatching { api.countries() }.getOrDefault(emptyList())
+        if (sellableCurrencies.isEmpty()) sellableCurrencies = loadSellableCurrencies(api.client)
+    }
+
+    /**
+     * Brings every line's price into [pricingCurrency] from the Hub's list in
+     * that currency (PosPage.tsx "Refresh cart prices when currency changes").
+     * A line the Hub cannot price there is removed and named, never carried
+     * over at the old figure. A line not found keeps its old price and
+     * currency, and the Hub refuses it at checkout rather than mis-billing.
+     * Returns the names removed.
+     */
+    suspend fun repriceCart(): List<String> {
+        val o = outlet ?: return emptyList()
+        val target = pricingCurrency
+        val stale = cart.filter { it.currency != target }
+        if (stale.isEmpty()) return emptyList()
+        val q = stale.map { it.sku }.filter { it.isNotEmpty() }.distinct().joinToString(" ").ifEmpty { "_" }
+        val fresh = runCatching { api.searchProducts(q, o.id, target) }.getOrNull() ?: return emptyList()
+        val variants = fresh.flatMap { p -> p.variants.map { p to it } }
+        val removed = mutableListOf<String>()
+        for (line in stale) {
+            val hit = variants.firstOrNull { (p, v) -> v.variantId == line.variantId && p.id == line.productId }
+                ?: variants.firstOrNull { (_, v) -> v.sku.isNotEmpty() && v.sku == line.sku } ?: continue
+            val i = cart.indexOfFirst { it.id == line.id }
+            if (i < 0) continue
+            val v = hit.second
+            if (v.priceUnavailable || v.price == null) { cart.removeAt(i); removed += line.title }
+            else cart[i] = line.copy(unitPrice = v.price, currency = v.currency)
+        }
+        cartChanged()
+        return removed
+    }
+
+    /** The customer's country changed: their default currency applies again and the cart is repriced. */
+    suspend fun setCountry(code: String): List<String> {
+        customerCountryCode = code
+        billCurrency = ""
+        return repriceCart()
+    }
+
+    /** "Bills in": the customer asked for another currency (owner, 2026-10-29). */
+    suspend fun chooseBillCurrency(code: String): List<String> {
+        billCurrency = if (code == countryCurrency) "" else code
+        return repriceCart()
+    }
     val ownerWatchesOnly: Boolean get() = PosGates.ownerWatchesOnly(me)
     val discountCap: Double? get() = PosGates.discountCap(me)
     val itemCount: Int get() = cart.sumOf { it.quantity }
@@ -496,7 +577,7 @@ internal class PosSession(val api: PosApi, val offline: OfflineStore?, val me: M
     fun clearCart() {
         cart.clear()
         cartDiscountType = "none"; cartDiscountValue = "0"
-        customer = null; customerCountryCode = ""; note = ""; shippingMethodId = null
+        customer = null; customerCountryCode = ""; billCurrency = ""; note = ""; shippingMethodId = null
         pendingOrder = null; pendingOrderId = null; isResumedOrder = false; totalsStale = false
         clientRequestId = null
         saveJob?.cancel()
@@ -521,6 +602,9 @@ internal class PosSession(val api: PosApi, val offline: OfflineStore?, val me: M
             !name.isNullOrEmpty() -> PosCustomer.fromName(0, name, sale.json["customer_phone"].str, sale.json["customer_email"].str)
             else -> null
         }
+        // A resumed sale keeps billing in its own currency: new lines load in it.
+        customerCountryCode = sale.json["customer_country_code"].str ?: customerCountryCode
+        billCurrency = if (sale.currency != (outlet?.currencyCode ?: "KES")) sale.currency else ""
         pendingOrderId = sale.id
         pendingOrder = jsonOf("order_id" to sale.id, "order_number" to sale.orderNumber, "total_amount" to (sale.json["total"] ?: JsonNull), "currency_code" to sale.currency, "order" to sale.json)
         isResumedOrder = true
@@ -538,6 +622,8 @@ internal class PosSession(val api: PosApi, val offline: OfflineStore?, val me: M
             "outlet_id" to (outlet?.id ?: Omit),
             "client_request_id" to saleAttemptKey(),
             "customer_country_code" to (if (customerCountryCode.length == 2) customerCountryCode.uppercase() else Omit),
+            // The customer's own choice, when it is not their country's default (PosPage.tsx).
+            "currency_code" to (if (customerCountryCode.length == 2 && billCurrency.isNotEmpty() && billCurrency != countryCurrency) billCurrency else Omit),
             "notes" to (note.trim().ifEmpty { null } ?: Omit),
             // MTO lines travel only in production_items (no stock check).
             "items" to JsonArray(cart.filter { !it.isProduction }.map { it.payload }),
@@ -594,7 +680,7 @@ internal class PosSession(val api: PosApi, val offline: OfflineStore?, val me: M
             "cart" to JsonArray(cart.map { it.toDraft() }),
             "cart_discount_type" to cartDiscountType, "cart_discount_value" to cartDiscountValue,
             "customer" to (customer?.toJson() ?: JsonNull),
-            "customer_country_code" to customerCountryCode, "note" to note,
+            "customer_country_code" to customerCountryCode, "bill_currency" to billCurrency, "note" to note,
             "shipping_method_id" to jsonInt(shippingMethodId), "pending_order_id" to jsonInt(pendingOrderId),
             "is_resumed_order" to isResumedOrder, "client_request_id" to (clientRequestId ?: JsonNull),
             "saved_at" to Instant.now().epochSecond,
@@ -611,7 +697,7 @@ internal class PosSession(val api: PosApi, val offline: OfflineStore?, val me: M
         if (Instant.now().epochSecond - savedAt > DRAFT_MAX_AGE_SECONDS) { store.remove(DRAFT_KEY); return null }
         cart.clear(); cart += d["cart"].records.mapNotNull(CartLine::fromDraft)
         cartDiscountType = d["cart_discount_type"].str ?: "none"; cartDiscountValue = d["cart_discount_value"].str ?: "0"
-        customer = PosCustomer.fromJson(d["customer"]); customerCountryCode = d["customer_country_code"].str ?: ""; note = d["note"].str ?: ""
+        customer = PosCustomer.fromJson(d["customer"]); customerCountryCode = d["customer_country_code"].str ?: ""; billCurrency = d["bill_currency"].str ?: ""; note = d["note"].str ?: ""
         shippingMethodId = d["shipping_method_id"].int
         pendingOrderId = d["pending_order_id"].int; isResumedOrder = d["is_resumed_order"].bool ?: false; clientRequestId = d["client_request_id"].str
         totalsStale = pendingOrderId != null

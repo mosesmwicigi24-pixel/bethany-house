@@ -45,6 +45,11 @@ struct PosAPI {
         return (r.json?["data"]?.array ?? []).compactMap(PosProduct.init(json:))
     }
 
+    /// GET /v1/countries (public): each country's `sale_currency`, the server's one rule (SellableCurrency::forCustomer).
+    func countries() async throws -> [JSONValue] {
+        (try await client.get("/v1/countries").json?["data"]?.array ?? []).filter { $0["is_active"]?.bool != false }
+    }
+
     func searchCustomers(_ q: String) async throws -> [JSONValue] {
         try await client.get("\(Self.base)/customers/search", query: ["q": q]).json?["data"]?.array ?? []
     }
@@ -277,6 +282,10 @@ struct CartLine: Identifiable, Codable, Hashable, Sendable {
             "product_id": .number(Double(productId)),
             "quantity": .number(Double(quantity)),
             "unit_price": unitPrice,
+            // The currency the price was loaded in. On a sale in another currency
+            // than the outlet's the Hub refuses a line in anything else
+            // (TillPriceCurrencyTest), so a shilling price is never billed as dollars.
+            "price_currency": .string(currency),
             "discount_type": .string(discountType),
             "discount_value": amountJSON(discountValue) ?? .number(0),
         ])
@@ -288,6 +297,7 @@ struct CartLine: Identifiable, Codable, Hashable, Sendable {
             "product_id": .number(Double(productId)),
             "quantity": .number(Double(quantity)),
             "unit_price": unitPrice,
+            "price_currency": .string(currency),
             "production_notes": productionNotes.isEmpty ? nil : .string(productionNotes),
             "measurement_values": measurementValues.isEmpty ? nil : .object(measurementValues.mapValues { .string($0) }),
         ])
@@ -370,6 +380,10 @@ final class PosSession {
     var cartDiscountValue = "0"
     var customer: PosCustomer?
     var customerCountryCode = ""
+    /// The customer's own choice of billing currency abroad; "" = their country's (sale_currency).
+    var billCurrency = ""
+    var countries: [JSONValue] = []
+    var sellableCurrencies: [String] = []
     var note = ""
     var shippingMethodId: Int?
 
@@ -397,6 +411,84 @@ final class PosSession {
     var staleTill: JSONValue? { registerStatus?["stale_till"].flatMap { $0.isNull ? nil : $0 } }
     var registerId: Int? { register?["id"]?.int }
     var currency: String { pendingOrder?["currency_code"]?.string ?? outlet?.currencyCode ?? "KES" }
+
+    /// The customer's country as the Hub lists it, or nil.
+    var country: JSONValue? {
+        guard customerCountryCode.count == 2 else { return nil }
+        return countries.first { $0["code"]?.string == customerCountryCode }
+    }
+
+    /// What the customer's country is billed in by default (the server's sale_currency).
+    var countryCurrency: String? { country?["sale_currency"]?.string }
+
+    /// The currency the cart's prices are loaded in, and the sale is billed in:
+    /// the customer's choice, else their country's, else the outlet's
+    /// (PosPage.tsx currencyForQuery).
+    var pricingCurrency: String {
+        if !billCurrency.isEmpty { return billCurrency }
+        if customerCountryCode.count == 2, let c = countryCurrency { return c }
+        return outlet?.currencyCode ?? "KES"
+    }
+
+    /// A customer abroad: their country bills in something other than the outlet's currency.
+    var billsAbroad: Bool { countryCurrency != nil && countryCurrency != (outlet?.currencyCode ?? "KES") }
+
+    /// The "Bills in" choices (PosPage.tsx): their country's, USD, then every other sellable currency but shillings.
+    var billingOptions: [String] {
+        var out: [String] = []
+        for c in [countryCurrency, "USD"].compactMap({ $0 }) + sellableCurrencies.filter({ $0 != "KES" }) where !out.contains(c) { out.append(c) }
+        return out
+    }
+
+    func loadBillingLists() async {
+        if countries.isEmpty { countries = (try? await api.countries()) ?? [] }
+        if sellableCurrencies.isEmpty { sellableCurrencies = await loadSellableCurrencies(api.client) }
+    }
+
+    /// Brings every line's price into `pricingCurrency` from the Hub's list in
+    /// that currency (PosPage.tsx "Refresh cart prices when currency changes").
+    /// A line the Hub cannot price there is removed and named, never carried
+    /// over at the old figure; a line not found keeps its old price and
+    /// currency, and the Hub refuses it at checkout rather than mis-billing.
+    /// Returns the names removed.
+    func repriceCart() async -> [String] {
+        guard let o = outlet else { return [] }
+        let target = pricingCurrency
+        let stale = cart.filter { $0.currency != target }
+        if stale.isEmpty { return [] }
+        var skus: [String] = []
+        for l in stale where !l.sku.isEmpty && !skus.contains(l.sku) { skus.append(l.sku) }
+        guard let fresh = try? await api.searchProducts(skus.isEmpty ? "_" : skus.joined(separator: " "), outletId: o.id, currency: target) else { return [] }
+        let pairs = fresh.flatMap { p in p.variants.map { (p, $0) } }
+        var removed: [String] = []
+        for line in stale {
+            guard let hit = pairs.first(where: { $0.1.variantId == line.variantId && $0.0.id == line.productId })
+                    ?? pairs.first(where: { !$0.1.sku.isEmpty && $0.1.sku == line.sku }),
+                  let i = cart.firstIndex(where: { $0.id == line.id }) else { continue }
+            let v = hit.1
+            if v.priceUnavailable || v.price == nil || v.price?.isNull == true {
+                cart.remove(at: i); removed.append(line.title)
+            } else {
+                cart[i].unitPrice = v.price ?? .number(0)
+                cart[i].currency = v.currency
+            }
+        }
+        cartChanged()
+        return removed
+    }
+
+    /// The customer's country changed: their default currency applies again and the cart is repriced.
+    func setCountry(_ code: String) async -> [String] {
+        customerCountryCode = code
+        billCurrency = ""
+        return await repriceCart()
+    }
+
+    /// "Bills in": the customer asked for another currency (owner, 2026-10-29).
+    func chooseBillCurrency(_ code: String) async -> [String] {
+        billCurrency = code == countryCurrency ? "" : code
+        return await repriceCart()
+    }
     var ownerWatchesOnly: Bool { PosGates.ownerWatchesOnly(me) }
     var discountCap: Double? { PosGates.discountCap(me) }
 
@@ -444,7 +536,7 @@ final class PosSession {
     func clearCart() {
         cart = []
         cartDiscountType = "none"; cartDiscountValue = "0"
-        customer = nil; customerCountryCode = ""; note = ""; shippingMethodId = nil
+        customer = nil; customerCountryCode = ""; billCurrency = ""; note = ""; shippingMethodId = nil
         pendingOrder = nil; pendingOrderId = nil; isResumedOrder = false; totalsStale = false
         clientRequestId = nil
         saveTask?.cancel()
@@ -468,6 +560,9 @@ final class PosSession {
         } else {
             customer = nil
         }
+        // A resumed sale keeps billing in its own currency: new lines load in it.
+        if let c = sale.json["customer_country_code"]?.string { customerCountryCode = c }
+        billCurrency = sale.currency != (outlet?.currencyCode ?? "KES") ? sale.currency : ""
         pendingOrderId = sale.id
         pendingOrder = jsonObject(["order_id": .number(Double(sale.id)), "order_number": .string(sale.orderNumber), "total_amount": sale.json["total"], "currency_code": .string(sale.currency), "order": sale.json])
         isResumedOrder = true
@@ -502,6 +597,8 @@ final class PosSession {
             "outlet_id": outlet.map { .number(Double($0.id)) },
             "client_request_id": .string(saleAttemptKey()),
             "customer_country_code": customerCountryCode.count == 2 ? .string(customerCountryCode.uppercased()) : nil,
+            // The customer's own choice, when it is not their country's default (PosPage.tsx).
+            "currency_code": customerCountryCode.count == 2 && !billCurrency.isEmpty && billCurrency != countryCurrency ? .string(billCurrency) : nil,
             "notes": note.trimmingCharacters(in: .whitespaces).isEmpty ? nil : .string(note),
             // MTO lines travel only in production_items (no stock check).
             "items": .array(cart.filter { !$0.isProduction }.map(\.payload)),
@@ -543,6 +640,8 @@ final class PosSession {
         var cartDiscountValue: String
         var customer: PosCustomer?
         var customerCountryCode: String
+        /// Optional so a draft saved before this field still loads.
+        var billCurrency: String?
         var note: String
         var shippingMethodId: Int?
         var pendingOrderId: Int?
@@ -563,7 +662,7 @@ final class PosSession {
     func saveDraft() async {
         guard let offline else { return }
         let d = Draft(outletId: outlet?.id, cart: cart, cartDiscountType: cartDiscountType, cartDiscountValue: cartDiscountValue, customer: customer,
-                      customerCountryCode: customerCountryCode, note: note, shippingMethodId: shippingMethodId, pendingOrderId: pendingOrderId,
+                      customerCountryCode: customerCountryCode, billCurrency: billCurrency, note: note, shippingMethodId: shippingMethodId, pendingOrderId: pendingOrderId,
                       isResumedOrder: isResumedOrder, clientRequestId: clientRequestId, savedAt: Date())
         guard let data = try? HubJSON.encoder.encode(d), let json = try? HubJSON.decoder.decode(JSONValue.self, from: data) else { return }
         await offline.put(json, for: Self.draftKey)
@@ -576,7 +675,7 @@ final class PosSession {
               let d = try? HubJSON.decoder.decode(Draft.self, from: data) else { return nil }
         if Date().timeIntervalSince(d.savedAt) > Self.draftMaxAge { await offline.remove(Self.draftKey); return nil }
         cart = d.cart; cartDiscountType = d.cartDiscountType; cartDiscountValue = d.cartDiscountValue
-        customer = d.customer; customerCountryCode = d.customerCountryCode; note = d.note; shippingMethodId = d.shippingMethodId
+        customer = d.customer; customerCountryCode = d.customerCountryCode; billCurrency = d.billCurrency ?? ""; note = d.note; shippingMethodId = d.shippingMethodId
         pendingOrderId = d.pendingOrderId; isResumedOrder = d.isResumedOrder; clientRequestId = d.clientRequestId
         totalsStale = d.pendingOrderId != nil
         return d.outletId
