@@ -2556,7 +2556,7 @@ class ProductionController extends Controller
                 $totalPaid = DB::table('payments')
                     ->where('order_id', $order->customer_order_id)
                     ->where('status', 'paid')
-                    ->sum('amount');
+                    ->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
 
                 if ($totalPaid <= 0) {
                     $force = filter_var($request->input('force', false), FILTER_VALIDATE_BOOLEAN);

@@ -26,6 +26,39 @@ use Illuminate\Support\Facades\Log;
  */
 class PublicPaymentController extends Controller
 {
+    // ── POST /api/v1/pay/{token}/currency {currency_code} ─────────────────────
+    //
+    // The buyer chooses to pay in US dollars or their own currency (owner,
+    // 2026-11-05) — before any money has moved; after that only the super
+    // admin changes it. The same switch as staff use (OrderCurrencySwitch):
+    // every line re-priced from the price list, recorded in the audit trail.
+    public function chooseCurrency(Request $request, string $token)
+    {
+        if ($refusal = $this->deadOrderRefusal($token)) {
+            return $refusal;
+        }
+        $order = $this->resolveOrder($token);
+        if (!$order || $this->isExpired($order)) {
+            return response()->json(['message' => 'Payment link not found or has expired.'], 404);
+        }
+        $choices = \App\Support\SellableCurrency::billChoices($order->customer_country_code);
+        $currency = strtoupper((string) $request->input('currency_code'));
+        if (!in_array($currency, $choices, true)) {
+            return response()->json(['message' => $choices ? 'Choose ' . implode(' or ', $choices) . '.' : 'This order is billed in its own currency.'], 422);
+        }
+        if (\App\Services\OrderCurrencySwitch::moneyHasMoved($order) !== null) {
+            return response()->json(['message' => 'Payment has started on this order, so its currency is fixed. Contact us to change it.'], 409);
+        }
+
+        $r = \App\Services\OrderCurrencySwitch::toCountry($order->loadMissing('items'), (string) $order->customer_country_code, null,
+            'buyer', $currency, 'Chosen by the customer on the payment page');
+        if (!$r['ok']) {
+            return response()->json(['message' => 'That currency is not available for this order. Contact us and we will help.'], 422);
+        }
+
+        return response()->json(['currency_code' => $r['currency_code'], 'changed' => $r['changed']]);
+    }
+
     // ── GET /api/v1/pay/{token} ───────────────────────────────────────────────
 
     public function show(string $token)
@@ -44,7 +77,7 @@ class PublicPaymentController extends Controller
         $availableMethods = self::availableMethodsFor($order);
 
         // Calculate remaining balance (customer may only owe a partial amount)
-        $totalPaid      = Payment::where('order_id', $order->id)->where('status', 'paid')->sum('amount');
+        $totalPaid      = Payment::where('order_id', $order->id)->where('status', 'paid')->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
         $amountDue      = max(0, $order->total_amount - $totalPaid);
 
         return response()->json([
@@ -73,6 +106,11 @@ class PublicPaymentController extends Controller
             // carries a complete number.
             'customer_phone'    => $order->customer_phone ?? $order->user?->phone,
             'is_international'  => (bool) ($order->is_international ?? false),
+            // The buyer's own choice of currency (owner, 2026-11-05): US dollars or
+            // their country's, until money starts to move. Empty: no choice.
+            'currency_choices'  => \App\Services\OrderCurrencySwitch::moneyHasMoved($order) === null && !$this->isExpired($order)
+                ? \App\Support\SellableCurrency::billChoices($order->customer_country_code)
+                : [],
             'expires_at'        => $order->payment_token_expires_at?->toISOString(),
             'is_expired'        => $this->isExpired($order),
             // The customer's durable receipt. THIS is where a paid customer
@@ -441,8 +479,8 @@ class PublicPaymentController extends Controller
         // Update order payment status to reflect pending-approval
         $order->refresh();
         $totalPending = Payment::where('order_id', $order->id)
-            ->whereIn('status', ['pending'])->sum('amount');
-        if ($totalPending > 0 && Payment::where('order_id', $order->id)->where('status', 'paid')->sum('amount') == 0) {
+            ->whereIn('status', ['pending'])->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
+        if ($totalPending > 0 && Payment::where('order_id', $order->id)->where('status', 'paid')->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments'))) == 0) {
             $order->update(['payment_status' => 'pending_approval']);
         }
 
@@ -865,7 +903,7 @@ class PublicPaymentController extends Controller
         if ($order instanceof Order) {
             return round($order->outstandingBalance(), 2);
         }
-        $paid = (float) \App\Support\SettledPayment::where(Payment::where('order_id', $order->id), 'payments')->sum('amount');
+        $paid = (float) \App\Support\SettledPayment::where(Payment::where('order_id', $order->id), 'payments')->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
 
         return max(0, (float) $order->total_amount - $paid);
     }

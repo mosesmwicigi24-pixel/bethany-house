@@ -157,6 +157,8 @@ Route::prefix('v1')->group(function () {
         Route::get('/{token}',                 [PublicPaymentController::class, 'show']);
         Route::post('/{token}/initiate',       [PublicPaymentController::class, 'initiate']);
         Route::get('/{token}/status',          [PublicPaymentController::class, 'status']);
+        // The buyer's choice of currency (USD or their own), before paying.
+        Route::post('/{token}/currency',       [PublicPaymentController::class, 'chooseCurrency'])->middleware('throttle:10,1');
         Route::post('/{token}/mpesa-callback', [PublicPaymentController::class, 'mpesaCallback']);
         Route::post('/{token}/upload-proof',   [PublicPaymentController::class, 'uploadProof']);
         Route::post('/{token}/mpesa-confirm',  [PublicPaymentController::class, 'confirmMpesa']);
@@ -1088,6 +1090,10 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{id}/set-deposit',         [OrderController::class, 'setDeposit'])
                     ->middleware('permission:orders.set_deposit,sanctum');
                 Route::post('/{id}/update-currency',     [OrderController::class, 'updateCurrency'])
+                    ->middleware('permission:orders.edit,sanctum');
+                // "Bill in" USD or the customer's own currency (owner, 2026-11-05);
+                // after payment the controller requires the super admin and step-up.
+                Route::post('/{id}/bill-currency',       [OrderController::class, 'billCurrency'])
                     ->middleware('permission:orders.edit,sanctum');
                 // Revisions of the order's issued documents (2026-10-16): the
                 // invoice copy's history; the owner's payment-detail correction

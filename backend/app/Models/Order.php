@@ -620,7 +620,9 @@ class Order extends Model
         // 'paid' while finance reviews it, and counted here it turned a cart
         // into a sale before the money was approved.
         return (float) \App\Support\SettledPayment::where($this->payments(), 'payments')
-            ->selectRaw('COALESCE(SUM(amount - refund_amount), 0) AS net')
+            // What each payment counts for in the order's currency (PaymentCredit):
+            // a USD payment on an order since moved to ZAR counts its ZAR share.
+            ->selectRaw('COALESCE(SUM(' . \App\Support\PaymentCredit::netSql('payments') . '), 0) AS net')
             ->value('net');
     }
 

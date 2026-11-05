@@ -2266,7 +2266,7 @@ class PosController extends Controller
             ->select([
                 'ord.id', 'ord.order_number', 'ord.total_amount', 'ord.currency_code', 'ord.reporting_rate_to_kes',
                 'ord.status', 'ord.payment_status', 'ord.customer_first_name', 'ord.customer_last_name',
-                DB::raw('COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0) as amount_paid'),
+                DB::raw('COALESCE(SUM(' . \App\Support\PaymentCredit::netSql('p') . '), 0) as amount_paid'),   // in the order's currency
             ])
             ->get()
             ->map(function ($o) {

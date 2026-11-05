@@ -159,6 +159,22 @@ final class SellableCurrency
         return $asked;
     }
 
+    /**
+     * The two currencies a customer abroad may be billed in (owner,
+     * 2026-11-05): US dollars, or their own country's currency when the books
+     * carry it. Kenya: none (a Kenyan order is in shillings).
+     *
+     * @return list<string>
+     */
+    public static function billChoices(?string $countryCode): array
+    {
+        if (!self::isForeign($countryCode)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter([self::forCustomer($countryCode), self::isSellable('USD') ? 'USD' : null])));
+    }
+
     /** A country's default currency when it is sellable, else the fallback. */
     public static function forCountry(?string $countryCode, ?string $fallback = null): string
     {

@@ -147,7 +147,7 @@ class SendEodReportSlack implements ShouldQueue
                 // rate (Step 5); settled money only.
                 $rows = DB::table('orders as ord')
                     ->leftJoin(DB::raw("(
-                        SELECT order_id, SUM(amount - COALESCE(refund_amount, 0)) as paid
+                        SELECT order_id, SUM(" . \App\Support\PaymentCredit::netSql('payments') . ") as paid
                         FROM payments
                         WHERE " . \App\Support\SettledPayment::sql('payments') . "
                         GROUP BY order_id
