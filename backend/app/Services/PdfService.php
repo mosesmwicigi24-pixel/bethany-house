@@ -669,11 +669,15 @@ HTML;
             $ref      = $ref !== '' ? $ref : '—';
             $dt       = self::date($p['paid_at'] ?? ($p['created_at'] ?? null));
             $refunded = (float) ($p['refund_amount'] ?? 0);
+            // What arrived, in its own currency (PaymentCredit keeps both).
+            $pc       = $p['currency_code'] ?? $currency;
+            $counted  = (!empty($p['order_currency_code']) && strtoupper((string) $pc) !== strtoupper($currency))
+                ? '<div class="sub-desc">counts ' . self::money((float) ($p['order_amount'] ?? 0), $currency) . '</div>' : '';
             $rows    .= "<tr><td>{$dt}</td><td>{$method}</td><td>{$ref}</td><td class=\"tr\">"
-                . self::money((float) ($p['amount'] ?? 0), $currency) . '</td></tr>';
+                . self::money((float) ($p['amount'] ?? 0), $pc) . $counted . '</td></tr>';
             if ($refunded > 0.005) {
                 $rows .= "<tr><td>{$dt}</td><td>Refund</td><td>{$ref}</td><td class=\"tr\">- "
-                    . self::money($refunded, $currency) . '</td></tr>';
+                    . self::money($refunded, $pc) . '</td></tr>';
             }
         }
 
@@ -765,130 +769,418 @@ HTML;
 
     /**
      * Renders from a receipt sales_document's frozen snapshot (see ReceiptService),
-     * so it always reflects exactly what was issued at payment time.
+     * so it always reflects exactly what was issued at payment time. One payment,
+     * and the invoice position right after it.
      */
     public static function receipt(array $snap): string
     {
         $currency = $snap['currency_code'] ?? 'KES';
         $cust     = $snap['customer'] ?? [];
-        $custName = trim(($cust['first_name'] ?? '') . ' ' . ($cust['last_name'] ?? '')) ?: 'Customer';
         $pay      = $snap['payment'] ?? [];
+        $balance  = (float) ($snap['balance_due'] ?? 0);
+        $paidToDate = (float) ($snap['paid_to_date'] ?? 0);
 
-        $meta = [
-            'Receipt #'   => ($snap['receipt_number'] ?? '—') . (!empty($snap['revision']) ? ' · Rev ' . (int) $snap['revision'] : ''),
-            'Order #'     => $snap['order_number'] ?? '—',
-            'Date'        => self::date($snap['issued_at'] ?? null),
-            'Paid Via'    => ucfirst(str_replace('_', ' ', $pay['method'] ?? '—')),
-        ];
-        // Snapshots are frozen at issue time, so receipts written before this
-        // was recorded simply do not carry it — omit the row rather than
-        // printing a dash where a person's name belongs.
-        if (!empty($snap['served_by'])) {
-            $meta['Served By'] = $snap['served_by'];
-        }
-
-        $parties = self::partyRow(
-            'Received From', $custName,
-            array_filter([$cust['email'] ?? '', $cust['phone'] ?? ''])
-        );
-
-        $columns = [
-            ['key' => 'label',  'label' => 'Description'],
-            ['key' => 'amount', 'label' => 'Amount', 'align' => 'right', 'width' => '25%', 'mono' => true],
-        ];
-        $rows = [
-            ['label' => 'Payment received' . (!empty($pay['reference']) ? ' (Ref: ' . $pay['reference'] . ')' : ''),
-             'amount' => self::money((float)($pay['amount'] ?? 0), $currency)],
-        ];
-
-        $status = !empty($snap['fully_paid']) ? 'paid' : 'partial';
-        $extra  = '<table class="totals-table" style="margin-top:8px">'
-            . '<tr><td class="tl">Invoice Total</td><td class="tv">' . self::money((float)($snap['invoice_total'] ?? 0), $currency) . '</td></tr>'
-            . '<tr><td class="tl">Paid To Date</td><td class="tv">' . self::money((float)($snap['paid_to_date'] ?? 0), $currency) . '</td></tr>'
-            . '<tr class="total-line"><td class="tl">Balance Due</td><td class="tv">' . self::money((float)($snap['balance_due'] ?? 0), $currency) . '</td></tr>'
-            . '</table>';
-
-        return self::page('Receipt', $snap['receipt_number'] ?? '—', $status,
-            $meta, $parties, self::itemsTable($columns, $rows), [], $extra);
+        return self::receiptDocument([
+            'number'      => $snap['receipt_number'] ?? '—',
+            'revision'    => (int) ($snap['revision'] ?? 0),
+            'state'       => !empty($snap['fully_paid']) ? 'paid' : ($paidToDate > 0.005 ? 'partial' : 'unpaid'),
+            'currency'    => $currency,
+            'facts'       => array_filter([
+                'Receipt date' => self::date($snap['issued_at'] ?? null),
+                'Payment date' => self::date($pay['paid_at'] ?? ($snap['issued_at'] ?? null)),
+                'Order no.'    => $snap['order_number'] ?? '—',
+                'Served by'    => $snap['served_by'] ?? null,
+            ]),
+            'customer'    => trim(($cust['first_name'] ?? '') . ' ' . ($cust['last_name'] ?? '')) ?: 'Customer',
+            'contacts'    => array_filter([$cust['email'] ?? '', $cust['phone'] ?? '']),
+            'items'       => [],
+            'totals'      => null,
+            'payments'    => [[
+                'date'      => $pay['paid_at'] ?? ($snap['issued_at'] ?? null),
+                'method'    => $pay['method'] ?? null,
+                'reference' => $pay['reference'] ?? null,
+                // Snapshots written since 2026-11-05 carry the payment's own currency.
+                'amount'    => (float) ($pay['amount'] ?? 0),
+                'currency'  => $pay['currency_code'] ?? $currency,
+                'counted'   => null,
+                'refunded'  => 0,
+            ]],
+            'order_total' => (float) ($snap['invoice_total'] ?? 0),
+            'paid'        => $paidToDate,
+            'balance'     => $balance,
+            'paid_label'  => 'Received to date',
+        ]);
     }
 
     /**
      * One receipt for a whole order (owner, 2026-10-15): what was bought,
-     * every payment that has SETTLED (status paid, net of refunds — the same
-     * money truth as Order::totalPaid), and the balance still due, or PAID IN
-     * FULL. Built from the order as it stands, so a reprint shows today's
-     * position. Pending, rejected and voided payments are not money received
-     * and are left off. The per-payment receipt above (quote-originated
-     * invoices) is unchanged.
+     * every payment that has SETTLED (SettledPayment, net of refunds — the
+     * same money truth as Order::totalPaid), and the balance still due, or
+     * PAID IN FULL. Built from the order as it stands, so a reprint shows
+     * today's position. Pending, awaiting-approval, rejected and voided
+     * payments are not money received and are left off.
      *
      * $order needs: items, settled_payments[{paid_at, payment_method,
-     * provider_reference, amount, refund_amount}], total_paid, balance_due.
+     * provider_reference, amount, currency_code, order_amount,
+     * order_currency_code, refund_amount}], total_paid, balance_due.
      */
     public static function orderReceipt(array $order): string
     {
         $currency = $order['currency_code'] ?? 'KES';
-        $custName = $order['customer_name'] ?? 'Customer';
         $balance  = (float) ($order['balance_due'] ?? 0);
-        $paidUp   = $balance < 0.01;
+        $paid     = (float) ($order['total_paid'] ?? 0);
 
-        $meta = [
-            'Order #'  => $order['order_number'] ?? '—',
-            'Date'     => self::date($order['created_at'] ?? null),
-            'Location' => $order['outlet_name'] ?? '—',
-        ];
-        if (!empty($order['cashier_name'])) {
-            $meta['Served By'] = $order['cashier_name'];
-        }
-        $meta['Issued'] = self::date(now()->toIso8601String());
-
-        $parties = self::partyRow(
-            'Received From', $custName,
-            array_filter([$order['customer_email'] ?? '', $order['customer_phone'] ?? ''])
-        );
-
-        $columns = [
-            ['key' => 'qty',        'label' => 'Qty',                   'align' => 'right', 'width' => '7%'],
-            ['key' => 'desc',       'label' => 'Product / Description'],
-            ['key' => 'unit_price', 'label' => 'Unit Price', 'align' => 'right', 'width' => '16%', 'mono' => true],
-            ['key' => 'amount',     'label' => 'Amount',     'align' => 'right', 'width' => '16%', 'mono' => true],
-        ];
-        $rows = array_map(function ($item) use ($currency) {
+        $items = array_map(function ($item) {
             $qty   = (float) ($item['quantity'] ?? 0);
             $price = (float) ($item['unit_price'] ?? 0);
             $disc  = (float) ($item['discount_amount'] ?? 0);
             $line  = (float) ($item['subtotal'] ?? ($qty * $price - $disc));
-            $var   = $item['variant_name'] ?? '';
-            $sku   = $item['sku'] ?? '';
             return [
-                'qty'        => number_format($qty),
-                'desc'       => $item['product_name'] ?? '—',
-                'desc_sub'   => trim(($var ? "Variant: {$var}" : '') . ($sku ? " | SKU: {$sku}" : '')),
-                'unit_price' => self::money($qty > 0 ? $line / $qty : $price, $currency),
-                'amount'     => self::money($line, $currency),
+                'name'    => $item['product_name'] ?? '—',
+                'variant' => $item['variant_name'] ?? '',
+                'sku'     => $item['sku'] ?? '',
+                'qty'     => $qty,
+                // The price each unit was actually sold at (after any line discount),
+                // so qty × unit always equals the line amount shown beside it.
+                'unit'    => $qty > 0 ? $line / $qty : $price,
+                'line'    => $line,
             ];
         }, $order['items'] ?? []);
 
-        $totals = [
-            'subtotal' => $order['subtotal']        ?? 0,
-            'discount' => $order['discount_amount'] ?? 0,
-            'tax'      => $order['tax_amount']      ?? 0,
-            'shipping' => $order['shipping_amount'] ?? 0,
-            'total'    => $order['total_amount']    ?? 0,
-            'currency' => $currency,
-        ];
+        $payments = array_map(fn ($p) => [
+            'date'      => $p['paid_at'] ?? ($p['created_at'] ?? null),
+            'method'    => $p['payment_method'] ?? null,
+            'reference' => $p['provider_reference'] ?? null,
+            'amount'    => (float) ($p['amount'] ?? 0),
+            'currency'  => $p['currency_code'] ?? $currency,
+            'counted'   => !empty($p['order_currency_code']) ? (float) ($p['order_amount'] ?? 0) : null,
+            'refunded'  => (float) ($p['refund_amount'] ?? 0),
+        ], $order['settled_payments'] ?? []);
 
-        $extra = self::paymentsReceivedHtml($order['settled_payments'] ?? [], $currency)
-            . '<table class="totals-table" style="margin-top:8px">'
-            . '<tr><td class="tl">Order Total</td><td class="tv">' . self::money((float) ($order['total_amount'] ?? 0), $currency) . '</td></tr>'
-            . '<tr><td class="tl">Total Paid</td><td class="tv">' . self::money((float) ($order['total_paid'] ?? 0), $currency) . '</td></tr>'
-            . ($paidUp
-                ? '<tr class="total-line"><td class="tl">PAID IN FULL</td><td class="tv">' . self::money(0, $currency) . ' due</td></tr>'
-                : '<tr class="total-line"><td class="tl">Balance Due</td><td class="tv">' . self::money($balance, $currency) . '</td></tr>')
-            . '</table>'
-            . '<div class="notes-box" style="margin-top:10px;color:#666">Thank you for shopping with us.</div>';
+        return self::receiptDocument([
+            'number'      => $order['order_number'] ?? '—',
+            'revision'    => 0,
+            'state'       => $balance < 0.01 ? 'paid' : ($paid > 0.005 ? 'partial' : 'unpaid'),
+            'currency'    => $currency,
+            'facts'       => array_filter([
+                'Receipt date' => self::date(now()->toIso8601String()),
+                'Order date'   => self::date($order['created_at'] ?? null),
+                'Order no.'    => $order['order_number'] ?? '—',
+                'Location'     => $order['outlet_name'] ?? null,
+                'Served by'    => $order['cashier_name'] ?? null,
+            ]),
+            'customer'    => $order['customer_name'] ?? 'Customer',
+            'contacts'    => array_filter([$order['customer_email'] ?? '', $order['customer_phone'] ?? '']),
+            'items'       => $items,
+            'payments'    => $payments,
+            'totals'      => [
+                'subtotal'      => (float) ($order['subtotal'] ?? 0),
+                'discount'      => (float) ($order['discount_amount'] ?? 0),
+                'tax'           => (float) ($order['tax_amount'] ?? 0),
+                'tax_inclusive' => !empty($order['prices_include_tax']),
+                'shipping'      => (float) ($order['shipping_amount'] ?? 0),
+            ],
+            'order_total' => (float) ($order['total_amount'] ?? 0),
+            'paid'        => $paid,
+            'balance'     => $balance,
+            'paid_label'  => 'Amount received',
+        ]);
+    }
 
-        return self::page('Receipt', $order['order_number'] ?? '—', $paidUp ? 'paid' : 'partial',
-            $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra);
+    /**
+     * The receipt page (owner, 2026-11-05: "a professionally designed
+     * corporate financial document"). Its own layout, not the shared
+     * page() shell: a white letterhead, one line of transaction facts, the
+     * customer in a single line, a ruled items table, then payments beside
+     * the money summary. Every figure is passed in from the order, its
+     * settled payments or the frozen snapshot — nothing here computes money
+     * except presenting it. dompdf-safe: tables only, solid colours,
+     * DejaVu Sans (full glyph set).
+     *
+     * Tax is shown the way the order counted it (OrderTotals): ADDED to the
+     * total only when prices exclude it; when prices include it, it is shown
+     * as "included", never as a line that seems to add.
+     */
+    protected static function receiptDocument(array $r): string
+    {
+        $s        = self::settings();
+        $ccy      = (string) $r['currency'];
+        $m        = fn (float $v, ?string $c = null) => htmlspecialchars(self::money($v, $c ?? $ccy));
+        $e        = fn ($v) => htmlspecialchars((string) $v);
+        $appName  = $e($s['app_name'] ?: 'Bethany House');
+        $address  = $e(trim(($s['app_address'] ?? '') . (!empty($s['app_city']) ? ', ' . $s['app_city'] : ''), ', '));
+        $email    = $e($s['app_email'] ?? '');
+        $phone    = $e($s['app_phone'] ?? '');
+        $website  = '';
+        if ($url = config('app.storefront_url')) {
+            $website = $e(preg_replace('#^https?://(www\.)?#', '', rtrim((string) $url, '/')));
+        }
+        $logo = '';
+        if (!empty($s['app_logo_url'])) {
+            // Height only: the logo keeps its own proportions.
+            $logo = str_replace(
+                'style="max-height:52px;max-width:140px;object-fit:contain;display:block;"',
+                'style="height:46px;display:block;"',
+                self::logoHtml($s['app_logo_url'], $appName)
+            );
+        }
+
+        // ── Status ────────────────────────────────────────────────────────
+        [$stateLabel, $stateFg, $stateBg] = match ($r['state']) {
+            'paid'    => ['PAID', '#ffffff', '#1f7a4c'],
+            'partial' => ['PARTIALLY PAID', '#ffffff', '#C08A2E'],
+            default   => ['UNPAID', '#ffffff', '#b42318'],
+        };
+        $number   = $e($r['number']) . (!empty($r['revision']) ? ' <span class="muted">· Rev ' . (int) $r['revision'] . '</span>' : '');
+
+        // ── Letterhead ────────────────────────────────────────────────────
+        $contact = implode('<br>', array_filter([
+            $address,
+            implode('&nbsp;&nbsp;·&nbsp;&nbsp;', array_filter([$phone, $email])),
+        ]));
+        $brand = $logo !== '' ? $logo : "<div class=\"brand-name\">{$appName}</div>";
+
+        // ── Facts strip ───────────────────────────────────────────────────
+        $facts = '';
+        $n = max(1, count($r['facts']));
+        $w = round(100 / $n, 2);
+        foreach ($r['facts'] as $label => $value) {
+            $facts .= "<td style=\"width:{$w}%\"><div class=\"k\">" . $e($label) . '</div><div class="v">' . $e($value) . '</div></td>';
+        }
+
+        // ── Customer ──────────────────────────────────────────────────────
+        $contacts = $r['contacts'] ? '<div class="cust-lines">' . implode('&nbsp;&nbsp;·&nbsp;&nbsp;', array_map($e, $r['contacts'])) . '</div>' : '';
+
+        // ── Items ─────────────────────────────────────────────────────────
+        $itemsHtml = '';
+        if ($r['items']) {
+            $rows = '';
+            foreach ($r['items'] as $i => $it) {
+                $sub = implode('&nbsp;&nbsp;·&nbsp;&nbsp;', array_filter([
+                    $it['variant'] !== '' ? $e($it['variant']) : '',
+                    $it['sku'] !== '' ? 'SKU ' . $e($it['sku']) : '',
+                ]));
+                $qty = abs($it['qty'] - round($it['qty'])) < 0.001 ? number_format($it['qty']) : number_format($it['qty'], 2);
+                $rows .= '<tr' . ($i % 2 === 1 ? ' class="alt"' : '') . '>'
+                    . '<td class="c-no">' . ($i + 1) . '</td>'
+                    . '<td class="c-desc"><div class="item">' . $e($it['name']) . '</div>' . ($sub ? "<div class=\"item-sub\">{$sub}</div>" : '') . '</td>'
+                    . "<td class=\"c-qty\">{$qty}</td>"
+                    . '<td class="c-num">' . $m($it['unit']) . '</td>'
+                    . '<td class="c-num strong">' . $m($it['line']) . '</td>'
+                    . '</tr>';
+            }
+            $itemsHtml = '<div class="section-title">Items</div>'
+                . '<table class="items"><thead><tr>'
+                . '<th class="c-no">#</th><th class="c-desc">Description</th><th class="c-qty">Qty</th>'
+                . '<th class="c-num">Unit price</th><th class="c-num">Amount</th>'
+                . "</tr></thead><tbody>{$rows}</tbody></table>";
+        }
+
+        // ── Payments received ─────────────────────────────────────────────
+        $payRows = '';
+        foreach ($r['payments'] as $p) {
+            $method = $e(ucwords(str_replace(['_', '-'], ' ', (string) ($p['method'] ?: '—'))));
+            $ref    = trim((string) ($p['reference'] ?? ''));
+            $pc     = strtoupper((string) ($p['currency'] ?: $ccy));
+            // A payment made in another currency shows what arrived, and what
+            // it counts for on this order (PaymentCredit) beneath it.
+            $counted = ($p['counted'] !== null && $pc !== strtoupper($ccy))
+                ? '<div class="pay-sub">counts ' . $m((float) $p['counted']) . '</div>' : '';
+            $payRows .= '<tr>'
+                . '<td class="p-date">' . self::date($p['date']) . '</td>'
+                . "<td><div>{$method}</div>" . ($ref !== '' ? '<div class="pay-sub">' . $e($ref) . '</div>' : '') . '</td>'
+                . '<td class="c-num">' . $m((float) $p['amount'], $pc) . $counted . '</td>'
+                . '</tr>';
+            if ($p['refunded'] > 0.005) {
+                $payRows .= '<tr><td class="p-date">' . self::date($p['date']) . '</td><td>Refund</td>'
+                    . '<td class="c-num">&minus; ' . $m((float) $p['refunded'], $pc) . '</td></tr>';
+            }
+        }
+        if ($payRows === '') {
+            $payRows = '<tr><td colspan="3" class="muted">No payment received yet.</td></tr>';
+        }
+        $paymentsHtml = '<div class="section-title">Payments received</div>'
+            . '<table class="pays"><thead><tr><th>Date</th><th>Method &amp; reference</th><th class="c-num">Amount</th></tr></thead>'
+            . "<tbody>{$payRows}</tbody></table>";
+
+        // ── Money summary ─────────────────────────────────────────────────
+        $sum = '';
+        $line = fn (string $k, string $v, string $cls = '') => "<tr class=\"{$cls}\"><td class=\"s-k\">{$k}</td><td class=\"s-v\">{$v}</td></tr>";
+        $t = $r['totals'];
+        $taxNote = '';
+        if ($t !== null) {
+            $sum .= $line('Subtotal', $m($t['subtotal']));
+            if ($t['discount'] > 0.005) $sum .= $line('Discount', '&minus; ' . $m($t['discount']));
+            if ($t['tax'] > 0.005) {
+                if ($t['tax_inclusive']) {
+                    $taxNote = '<tr class="note"><td class="s-k" colspan="2">Prices include tax of ' . $m($t['tax']) . '</td></tr>';
+                } else {
+                    $sum .= $line('Tax', $m($t['tax']));
+                }
+            }
+            if ($t['shipping'] > 0.005) $sum .= $line('Shipping', $m($t['shipping']));
+        }
+        $sum .= $line('Total', $m($r['order_total']), 'grand');
+        $sum .= $taxNote;
+        $sum .= $line($e($r['paid_label']), $m($r['paid']), 'gap');
+        if ($r['balance'] < 0.01) {
+            $over = round($r['paid'] - $r['order_total'], 2);
+            if ($over >= 0.01) {
+                $sum .= $line('Received above total', $m($over));
+            }
+            $settle = '<table class="settle paid"><tr><td class="s-k">PAID IN FULL</td><td class="s-v">' . $m(0) . ' due</td></tr></table>';
+        } else {
+            $settle = '<table class="settle due"><tr><td class="s-k">Balance due</td><td class="s-v">' . $m($r['balance']) . '</td></tr></table>';
+        }
+
+        // ── Footer ────────────────────────────────────────────────────────
+        $footRight = implode('&nbsp;&nbsp;·&nbsp;&nbsp;', array_filter([$website, $email, $phone]));
+        $generated = now()->format('d M Y, H:i');
+        $title     = 'Receipt ' . $e($r['number']);
+        $orgName   = $logo !== '' ? "<span class=\"name\">{$appName}</span><br>" : '';
+
+        $css = '
+@page{margin:34px 0 34px}
+body,div,table,td,th,tr{margin:0;padding:0}
+body{font-family:"DejaVu Sans",Arial,sans-serif;font-size:9.5px;color:#2b3442;line-height:1.45;background:#fff}
+table{border-collapse:collapse;width:100%}
+td,th{vertical-align:top}
+.muted{color:#8a93a3}
+.strong{font-weight:700;color:#152441}
+
+.topband{position:fixed;top:-34px;left:0;right:0;height:7px;background:#152441}
+.topgold{position:fixed;top:-27px;left:0;right:0;height:2px;background:#C9A45C}
+.sheet{padding:0 42px}
+
+.head td{vertical-align:bottom}
+.brand-name{font-size:17px;font-weight:700;color:#152441}
+.org{font-size:8px;color:#5d6878;line-height:1.6;margin-top:7px}
+.org .name{font-size:9.5px;font-weight:700;color:#152441;letter-spacing:.2px}
+.doc{text-align:right}
+.doc .title{font-size:9px;font-weight:700;letter-spacing:3px;color:#B9721E}
+.doc .no{font-size:16px;font-weight:700;color:#152441;margin-top:3px}
+.state{display:inline-block;margin-top:8px;padding:4px 12px;border-radius:12px;font-size:7.5px;font-weight:700;letter-spacing:1.5px;color:#fff}
+
+.facts{margin-top:18px;background:#f2f4f9;border-radius:8px}
+.facts td{padding:9px 12px;border-left:1px solid #e1e6ef}
+.facts td:first-child{border-left:none}
+.k{font-size:6.8px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:#8a93a3}
+.v{font-size:9.5px;font-weight:700;color:#152441;margin-top:2px}
+
+.cust{margin-top:14px;padding:8px 0 8px 12px;border-left:3px solid #C9A45C}
+.cust .k{color:#B9721E}
+.cust .name{font-size:12px;font-weight:700;color:#152441;margin-top:2px}
+.cust-lines{font-size:8.5px;color:#5d6878;margin-top:1px}
+
+.section-title{font-size:7px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#B9721E;margin:18px 0 6px}
+
+.items thead th{font-size:7px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#fff;background:#152441;padding:7px 8px;text-align:left;border-bottom:2px solid #C9A45C}
+.items tbody td{padding:7px 8px;border-bottom:1px solid #edf0f4}
+.items tbody tr.alt td{background:#faf7f0}
+.items tbody tr{page-break-inside:avoid}
+.c-no{width:4%;text-align:left}
+.items td.c-no{font-size:8.5px;color:#B9721E;font-weight:700}
+.c-qty{width:7%;text-align:center !important}
+.c-num{text-align:right !important;white-space:nowrap}
+.items .c-num{width:16%}
+.item{font-size:9.5px;color:#1f2937}
+.item-sub{font-size:7.8px;color:#8a93a3;margin-top:1px}
+
+.lower{margin-top:2px}
+.lower td.l{width:54%;padding-right:22px}
+.lower td.r{width:46%}
+
+.pays thead th{font-size:6.8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#152441;padding:0 4px 5px 0;border-bottom:1.5px solid #152441;text-align:left}
+.pays tbody td{padding:6px 4px 6px 0;border-bottom:1px solid #edf0f4;font-size:8.8px}
+.p-date{white-space:nowrap;width:24%}
+.pay-sub{font-size:7.6px;color:#8a93a3;margin-top:1px}
+
+.sumbox{background:#f2f4f9;border-radius:8px;padding:8px 12px 10px}
+.sum td{padding:4px 0;font-size:9.3px}
+.sum .s-k{color:#5d6878}
+.sum .s-v{text-align:right;white-space:nowrap;color:#1f2937;font-weight:700}
+.sum tr.grand td{border-top:1.5px solid #152441;padding-top:7px;font-size:12px;color:#152441;font-weight:700}
+.sum tr.grand .s-k{color:#152441}
+.sum tr.note td{font-size:7.8px;color:#8a93a3;padding-top:0;font-weight:400}
+.sum tr.gap td{padding-top:9px}
+.settle{margin-top:8px;border-radius:6px}
+.settle td{padding:9px 12px;font-weight:700;font-size:11px;color:#fff}
+.settle.paid{background:#1f7a4c}
+.settle.due{background:#152441}
+.settle.due .s-v{color:#E8C27A}
+.settle .s-k{letter-spacing:.8px}
+.settle .s-v{text-align:right;white-space:nowrap}
+
+.thanks{margin-top:24px;padding:11px 14px;background:#faf7f0;border-radius:8px}
+.thanks .t{font-size:10px;font-weight:700;color:#152441}
+.thanks .s{font-size:8px;color:#6b7585;margin-top:2px}
+.sign td{padding-top:26px;font-size:7.5px;color:#8a93a3;width:50%}
+.sign .line{border-top:1px solid #9aa5b8;padding-top:4px;width:78%}
+
+.foot{margin-top:18px;padding-top:7px;border-top:2px solid #C9A45C;font-size:7.3px;color:#6b7585}
+.foot td.r{text-align:right}
+.foot .brand{color:#152441;font-weight:700}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}';
+
+        $items    = $itemsHtml;
+        $custName = $e($r['customer']);
+        $plainNo  = $e($r['number']);
+
+        return <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{$title}</title>
+<style>{$css}</style>
+</head>
+<body>
+<div class="topband"></div><div class="topgold"></div>
+<div class="sheet">
+  <table class="head"><tr>
+    <td style="width:60%">
+      {$brand}
+      <div class="org">{$orgName}{$contact}</div>
+    </td>
+    <td class="doc" style="width:40%">
+      <div class="title">RECEIPT</div>
+      <div class="no">{$number}</div>
+      <div class="state" style="color:{$stateFg};background:{$stateBg}">{$stateLabel}</div>
+    </td>
+  </tr></table>
+
+  <table class="facts"><tr>{$facts}</tr></table>
+
+  <div class="cust">
+    <div class="k">Received from</div>
+    <div class="name">{$custName}</div>
+    {$contacts}
+  </div>
+
+  {$items}
+
+  <table class="lower"><tr>
+    <td class="l">{$paymentsHtml}</td>
+    <td class="r"><div class="section-title">Summary</div><div class="sumbox"><table class="sum">{$sum}</table>{$settle}</div></td>
+  </tr></table>
+
+  <div class="thanks">
+    <div class="t">Thank you for choosing {$appName}.</div>
+    <div class="s">This receipt confirms the payments listed above. Please keep it for your records.</div>
+  </div>
+  <table class="sign"><tr>
+    <td><div class="line">Received by (name &amp; signature)</div></td>
+    <td><div class="line">Date</div></td>
+  </tr></table>
+
+  <table class="foot"><tr>
+    <td><span class="brand">{$appName}</span>&nbsp;&nbsp;·&nbsp;&nbsp;Receipt {$plainNo}&nbsp;&nbsp;·&nbsp;&nbsp;Generated {$generated}</td>
+    <td class="r">{$footRight}</td>
+  </tr></table>
+</div>
+</body>
+</html>
+HTML;
     }
 
     // =========================================================================
