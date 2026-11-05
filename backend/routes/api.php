@@ -1101,6 +1101,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{id}/document-revisions', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'index'])->whereNumber('id');
                 Route::put('/{id}/payments/{paymentId}/revise', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'revisePayment'])
                     ->whereNumber('id')->whereNumber('paymentId');
+                // The owner deletes a payment, softly (voided and hidden; the record stays).
+                Route::post('/{id}/payments/{paymentId}/remove', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'removePayment'])
+                    ->whereNumber('id')->whereNumber('paymentId');
                 Route::post('/{id}/shipments',           [ShipmentController::class, 'create'])
                     ->middleware('permission:shipment.create,sanctum');
                 Route::post('/{id}/payment',             [PaymentController::class, 'initiatePayment'])

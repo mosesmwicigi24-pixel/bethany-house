@@ -3748,6 +3748,48 @@ function BillCurrencyControl({ order }: { order: Order }) {
     );
 }
 
+
+/**
+ * The owner deletes a payment that should never have been there (owner,
+ * 2026-11-05). Softly: it is voided — counts for nothing anywhere — and
+ * hidden on this page; the record, who and why stay ("Show deleted").
+ */
+function DeletePaymentModal({ order, payment, onClose, onDone }: { order: Order; payment: any; onClose: () => void; onDone: () => void }) {
+    const toast = useToastStore();
+    const [reason, setReason] = useState("");
+    const del = useMutation({
+        mutationFn: () => post<{ message: string }>(`/v1/admin/orders/${order.id}/payments/${payment.id}/remove`, { reason: reason.trim() }),
+        onSuccess: (r) => { toast.success(r.message); onDone(); },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+    const ccy = payment.currency_code ?? order.currency_code;
+
+    return (
+        <Modal open onClose={onClose} title="Delete this payment (owner)" size="sm"
+            footer={<>
+                <button onClick={onClose} className="btn-ghost btn-sm" disabled={del.isPending}>Cancel</button>
+                <button onClick={() => del.mutate()} disabled={del.isPending || reason.trim().length < 5} className="btn-danger btn-sm">
+                    {del.isPending ? <Spinner size="xs" className="border-white/30 border-t-white" /> : null} Delete payment
+                </button>
+            </>}>
+            <div className="space-y-3 text-sm">
+                <div className="rounded-xl border border-line bg-surface-50 p-3 text-xs space-y-1">
+                    <div className="flex justify-between"><span className="text-surface-500">Payment</span><span className="font-mono">{payment.payment_number ?? "—"}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Amount</span><span className="font-semibold">{ccy} {formatAmount(payment.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Method</span><span className="uppercase">{String(payment.payment_method ?? "").replace(/_/g, " ")}</span></div>
+                </div>
+                <p className="text-xs text-surface-600">
+                    It stops counting everywhere — the balance, reports and cash — and the order&apos;s balance is worked out again.
+                    The record stays behind &ldquo;Show deleted&rdquo; with your reason, for the audit trail. You will be asked to confirm it is you.
+                </p>
+                <label className="block space-y-1"><span className="text-xs font-medium text-surface-700">Why is it deleted? *</span>
+                    <input value={reason} onChange={(e) => setReason(e.target.value)} className="input w-full" maxLength={500}
+                        placeholder="e.g. Customer never sent it; recorded in error" /></label>
+            </div>
+        </Modal>
+    );
+}
+
 export default function OrderDetailPage() {
     const { download: downloadPdf, fetchFile: fetchPdfFile, loading: pdfLoading } = usePdfDownload();
     // A prepared PDF waiting for a fresh tap to open the phone's share sheet.
@@ -3800,6 +3842,15 @@ export default function OrderDetailPage() {
     // The owner corrects a recorded payment's details (2026-10-16).
     const [correctingPayment, setCorrectingPayment] = useState<any | null>(null);
     const [reversingPayment,  setReversingPayment]  = useState<any | null>(null);
+    const [deletingPayment,   setDeletingPayment]   = useState<any | null>(null);
+    const [showDeleted,       setShowDeleted]       = useState(false);
+    // Currencies a payment may be corrected to: the order's, USD, the customer's own.
+    const { data: countriesForPay } = useQuery({
+        queryKey: ["countries-all"],
+        queryFn:  () => get<{ data: Array<{ code: string; sale_currency?: string | null }> }>("/v1/admin/countries"),
+        staleTime: 300_000,
+        enabled: isSuperAdmin,
+    });
     // A settled payment recorded by mistake: the owner reverses it at once, finance-grade staff ask.
     const canReverse = isSuperAdmin || canDo("payments.void") || canDo("payments.request_void");
 
@@ -4954,9 +5005,10 @@ export default function OrderDetailPage() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-line">
-                                            {order.payments.map((p: any) => (
+                                            {order.payments.filter((p: any) => showDeleted || !p.removed_at).map((p: any) => (
                                                 <tr key={p.id} className={clsx("grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 px-4 py-3 sm:table-row sm:p-0 hover:bg-surface-50/50 transition-colors",
-                                                    p.requires_approval && p.approval_status !== "approved" && "bg-amber-50/40")}>
+                                                    p.requires_approval && p.approval_status !== "approved" && !p.removed_at && "bg-amber-50/40",
+                                                    p.removed_at && "opacity-60 line-through decoration-surface-300")}>
                                                     <td className="order-1 sm:order-none p-0 sm:px-4 sm:py-3 align-top">
                                                         <span className="flex items-center gap-1.5 font-medium text-surface-900">
                                                             <span className="w-6 h-6 rounded-lg bg-surface-100 flex items-center justify-center shrink-0">
@@ -4973,7 +5025,17 @@ export default function OrderDetailPage() {
                                                                 Correct details (owner)
                                                             </button>
                                                         )}
-                                                        {canReverse && p.status === "paid" && (!p.requires_approval || p.approval_status === "approved") && (
+                                                        {p.removed_at && (
+                                                            <p className="mt-1 text-2xs font-medium text-danger no-underline" style={{ textDecoration: "none" }}>
+                                                                Deleted {new Date(p.removed_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}: {p.removed_reason}
+                                                            </p>
+                                                        )}
+                                                        {isSuperAdmin && !p.removed_at && (
+                                                            <button onClick={() => setDeletingPayment(p)} className="mt-1 block text-2xs font-medium text-danger hover:underline">
+                                                                Delete (owner)
+                                                            </button>
+                                                        )}
+                                                        {canReverse && p.status === "paid" && !p.removed_at && (!p.requires_approval || p.approval_status === "approved") && (
                                                             <button onClick={() => setReversingPayment(p)} className="mt-1 block text-2xs font-medium text-danger hover:underline">
                                                                 {isSuperAdmin ? "Reverse — recorded by mistake (owner)" : "Request reversal — recorded by mistake"}
                                                             </button>
@@ -5059,10 +5121,23 @@ export default function OrderDetailPage() {
                                     onDone={() => { setReversingPayment(null); refresh(); }}
                                 />
                             )}
+                            {(order.payments ?? []).some((p: any) => p.removed_at) && (
+                                <button type="button" onClick={() => setShowDeleted((v) => !v)} className="mt-2 text-2xs font-medium text-surface-500 hover:text-surface-800 hover:underline">
+                                    {showDeleted ? "Hide deleted payments" : `Show deleted (${(order.payments ?? []).filter((p: any) => p.removed_at).length})`}
+                                </button>
+                            )}
+                            {deletingPayment && (
+                                <DeletePaymentModal order={order} payment={deletingPayment}
+                                    onClose={() => setDeletingPayment(null)}
+                                    onDone={() => { setDeletingPayment(null); refresh(); }} />
+                            )}
                             {correctingPayment && (
                                 <CorrectPaymentModal
                                     orderId={order.id}
                                     payment={correctingPayment}
+                                    currencies={Array.from(new Set([order.currency_code, "USD",
+                                        countriesForPay?.data?.find((c) => c.code === (order as any).customer_country_code)?.sale_currency ?? null,
+                                    ].filter((c): c is string => !!c)))}
                                     onClose={() => setCorrectingPayment(null)}
                                     onSaved={() => {
                                         setCorrectingPayment(null);

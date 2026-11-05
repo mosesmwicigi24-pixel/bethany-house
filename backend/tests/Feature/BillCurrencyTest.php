@@ -247,4 +247,74 @@ class BillCurrencyTest extends TestCase
         $this->assertSame('USD', DB::table('payments')->find($payId)->currency_code);
         $this->artisan('orders:payment-currency')->expectsOutputToContain('no counted amount: 0')->assertSuccessful();
     }
+
+    public function test_the_owner_corrects_a_payment_saved_in_the_wrong_currency(): void
+    {
+        // Recorded as "25" on the rand order — really 25 dollars.
+        $o = $this->shirtOrder();                                                // ZAR 450
+        $payId = $this->pay($o, 25, 'ZAR');
+        $this->assertEqualsWithDelta(425, $o->fresh()->outstandingBalance(), 0.001);
+
+        $this->as(['orders.view', 'orders.edit', 'payments.void']);
+        $this->putJson("/api/v1/admin/orders/{$o->id}/payments/{$payId}/revise", ['amount' => 25, 'currency_code' => 'USD', 'reason' => 'It was 25 dollars'])->assertStatus(403);
+
+        $boss = $this->as([], 'super_admin');
+        $this->assertNotSame(200, $this->putJson("/api/v1/admin/orders/{$o->id}/payments/{$payId}/revise", ['currency_code' => 'USD', 'reason' => 'It was 25 dollars'])->status(), 'step-up first');
+        $this->stepUp($boss);
+        $this->putJson("/api/v1/admin/orders/{$o->id}/payments/{$payId}/revise", ['currency_code' => 'USD', 'reason' => 'It was 25 dollars'])->assertOk();
+
+        $pay = DB::table('payments')->find($payId);
+        $this->assertSame('USD', $pay->currency_code);
+        $this->assertEqualsWithDelta(128, (float) $pay->reporting_rate_to_kes, 0.001, 'the dollar rate, not the rand one');
+        $this->assertEqualsWithDelta(450, (float) $pay->order_amount, 0.001);    // USD 25 = the whole R450 shirt
+        $this->assertSame('paid', $o->fresh()->payment_status);
+        $this->assertDatabaseHas('document_revisions', ['document_id' => $payId]); // the old "ZAR 25" is kept
+        // More than the order: refused.
+        $this->putJson("/api/v1/admin/orders/{$o->id}/payments/{$payId}/revise", ['amount' => 30, 'reason' => 'Typo test'])->assertStatus(422);
+    }
+
+    public function test_the_owner_deletes_a_payment_that_never_arrived_and_it_is_kept_out_of_sight(): void
+    {
+        // #1158 as it stood: USD order, USD 25 paid; a ZAR 405.77 Mukuru line approved by mistake.
+        $o = $this->shirtOrder();
+        $this->as(['orders.view', 'orders.edit']);
+        $this->bill($o, 'USD')->assertOk();
+        $this->pay($o, 25, 'USD');
+        $ghost = DB::table('payments')->insertGetId([
+            'order_id' => $o->id, 'payment_number' => 'PAY-' . uniqid(), 'amount' => 405.77, 'currency_code' => 'ZAR',
+            'order_amount' => 0, 'order_currency_code' => 'USD', 'reporting_rate_to_kes' => 7.1, 'status' => 'paid',
+            'payment_method' => 'mukuru', 'requires_approval' => true, 'approval_status' => 'approved', 'paid_at' => now(),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->as(['orders.view', 'orders.edit', 'payments.void']);
+        $this->postJson("/api/v1/admin/orders/{$o->id}/payments/{$ghost}/remove", ['reason' => 'Customer never sent it'])->assertStatus(403);
+
+        $boss = $this->as([], 'super_admin');
+        $this->stepUp($boss);
+        $this->postJson("/api/v1/admin/orders/{$o->id}/payments/{$ghost}/remove", ['reason' => 'no'])->assertStatus(422);   // a real reason
+        $this->postJson("/api/v1/admin/orders/{$o->id}/payments/{$ghost}/remove", ['reason' => 'Customer never sent it'])
+            ->assertOk()->assertJsonPath('payment_status', 'paid');
+
+        $row = DB::table('payments')->find($ghost);
+        $this->assertSame('voided', $row->status);                              // counts nowhere
+        $this->assertNotNull($row->removed_at);                                 // hidden on the page
+        $this->assertSame('Customer never sent it', $row->removed_reason);      // and kept, with why
+        $this->assertEqualsWithDelta(25, $o->fresh()->totalPaid(), 0.001);      // the dollars alone
+        $this->assertDatabaseHas('activity_log', ['event' => 'payment_removed', 'causer_id' => $boss->id]);
+        $this->postJson("/api/v1/admin/orders/{$o->id}/payments/{$ghost}/remove", ['reason' => 'Customer never sent it'])->assertStatus(422);
+    }
+
+    public function test_a_switch_only_ever_rounds_cents_and_never_wipes_a_payment(): void
+    {
+        // A rand order that looks fully paid only because a USD payment was saved as "25":
+        // switching to dollars must not zero the other payment to make the sum fit.
+        $o = $this->shirtOrder();                                                // ZAR 450
+        $this->pay($o, 25, 'USD');                                              // stray: counts "25"
+        $rand = $this->pay($o, 425, 'ZAR');
+        $boss = $this->as([], 'super_admin');
+        $this->stepUp($boss);
+        $this->bill($o, 'USD', ['reason' => 'Back to dollars'])->assertOk();
+        $this->assertEqualsWithDelta(23.61, (float) DB::table('payments')->find($rand)->order_amount, 0.01);   // 425 × 25/450
+    }
 }
