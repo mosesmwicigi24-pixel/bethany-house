@@ -766,4 +766,96 @@ class OrderLineEditingTest extends TestCase
         $this->assertSame(3, (int) $line->fresh()->quantity);
         $this->assertSame(0, \App\Models\OrderCorrection::count());
     }
+
+    // ── The order-level discount (owner, 2026-11-06: "make the discount edit available") ──
+
+    private function actAsOwner(): User
+    {
+        $u = User::factory()->create(['status' => 'active']);
+        $u->assignRole(Role::findOrCreate('super_admin', 'sanctum'));
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Sanctum::actingAs($u);
+
+        return $u;
+    }
+
+    public function test_the_order_discount_can_be_changed_and_the_total_follows(): void
+    {
+        $this->actAsOwner();
+        $this->defaultVat();
+        $this->taxInclusive(true);
+        $chasuble = $this->product('Chasuble', 13000, 6000);
+        [$order, $line] = $this->orderWithLine($chasuble, 1, 13000, ['prices_include_tax' => true, 'discount_amount' => 3100, 'total_amount' => 9900]);
+
+        // Independent arithmetic: prices include tax, so total = 13,000 − 2,600 = 10,400.
+        $res = $this->edit($order, [
+            'items' => [['id' => $line->id, 'quantity' => 1, 'unit_price' => 13000, 'discount_amount' => 0]],
+            'order_discount' => 2600,
+        ])->assertOk();
+
+        $this->assertSame(2600.0, (float) $res->json('discount_amount'));
+        $this->assertSame(10400.0, (float) $res->json('total_amount'));
+        $fresh = $order->fresh();
+        $this->assertSame(2600.0, (float) $fresh->discount_amount);
+        $this->assertSame(10400.0, (float) $fresh->total_amount);
+
+        $log = DB::table('activity_log')->where('event', 'order_items_edited')->where('subject_id', $order->id)->latest('id')->first();
+        $props = json_decode($log->properties, true);
+        $this->assertEquals(3100, $props['old_discount_amount']);
+        $this->assertEquals(2600, $props['new_discount_amount']);
+    }
+
+    public function test_leaving_the_order_discount_out_keeps_it(): void
+    {
+        $this->actAsOwner();
+        $shirt = $this->product('Cassock', 1000, 400);
+        [$order, $line] = $this->orderWithLine($shirt, 2, 1000, ['discount_amount' => 100, 'total_amount' => 1900]);
+
+        $this->edit($order, ['items' => [['id' => $line->id, 'quantity' => 3, 'unit_price' => 1000]]])->assertOk();
+        // 3 × 1,000 − 100 = 2,900.
+        $this->assertSame(100.0, (float) $order->fresh()->discount_amount);
+        $this->assertSame(2900.0, (float) $order->fresh()->total_amount);
+    }
+
+    public function test_an_order_discount_above_the_subtotal_is_refused_and_nothing_changes(): void
+    {
+        $this->actAsOwner();
+        $shirt = $this->product('Cassock', 1000, 400);
+        [$order, $line] = $this->orderWithLine($shirt, 2, 1000);
+
+        $this->edit($order, ['items' => [['id' => $line->id, 'quantity' => 2, 'unit_price' => 1000]], 'order_discount' => 2500])
+            ->assertStatus(422)->assertJsonPath('reason', 'discount_above_subtotal');
+        $this->assertSame(0.0, (float) $order->fresh()->discount_amount);
+        $this->assertSame(2000.0, (float) $order->fresh()->total_amount);
+    }
+
+    public function test_a_staff_member_is_held_to_their_discount_limit_on_the_order_discount(): void
+    {
+        $this->actAsEditor();   // no discount allowance of their own
+        $shirt = $this->product('Cassock', 1000, 400);
+        [$order, $line] = $this->orderWithLine($shirt, 10, 1000);
+
+        $this->edit($order, ['items' => [['id' => $line->id, 'quantity' => 10, 'unit_price' => 1000]], 'order_discount' => 5000])
+            ->assertStatus(422);
+        $this->assertSame(0.0, (float) $order->fresh()->discount_amount);
+    }
+
+    public function test_changing_a_paid_orders_discount_is_a_recorded_correction(): void
+    {
+        $this->actAsOwner();
+        $shirt = $this->product('Cassock', 1000, 400);
+        [$order, $line] = $this->orderWithLine($shirt, 10, 1000, ['discount_amount' => 1000, 'total_amount' => 9000]);
+        \App\Models\Payment::factory()->create(['order_id' => $order->id, 'amount' => 9000, 'currency_code' => 'KES', 'status' => 'paid', 'paid_at' => now()]);
+
+        $items = ['items' => [['id' => $line->id, 'quantity' => 10, 'unit_price' => 1000]], 'order_discount' => 1500, 'confirm_paid_change' => true];
+        $this->edit($order, $items)->assertStatus(422)->assertJsonPath('reason', 'reason_required');
+
+        // 10,000 − 1,500 = 8,500; 9,000 paid → 500 over.
+        $res = $this->edit($order, $items + ['reason' => 'Agreed bishop rate'])->assertOk();
+        $this->assertSame(8500.0, (float) $res->json('total_amount'));
+        $this->assertSame(500.0, (float) $res->json('overpaid'));
+        $c = \App\Models\OrderCorrection::where('order_id', $order->id)->sole();
+        $this->assertEquals(1000, $c->before['discount_amount']);
+        $this->assertEquals(1500, $c->after['discount_amount']);
+    }
 }

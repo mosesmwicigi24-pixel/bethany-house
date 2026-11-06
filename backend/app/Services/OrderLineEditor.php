@@ -58,6 +58,13 @@ use Illuminate\Support\Facades\DB;
  */
 class OrderLineEditor
 {
+    /**
+     * The order-level ("cart") discount asked for in this edit, or null to
+     * keep the one booked (owner, 2026-11-06: "make the discount edit
+     * available"). Whole units, like every customer figure (CustomerMoney).
+     */
+    private ?float $orderDiscount = null;
+
     /** Statuses where the order is closed and its lines are frozen. */
     public const CLOSED_STATUSES = ['cancelled', 'voided', 'refunded'];
 
@@ -76,6 +83,10 @@ class OrderLineEditor
         $order->loadMissing(['items', 'payments']);
 
         $this->guardOrderIsOpen($order);
+
+        $this->orderDiscount = array_key_exists('order_discount', $opts) && $opts['order_discount'] !== null
+            ? \App\Support\CustomerMoney::whole(max(0.0, (float) $opts['order_discount']))
+            : null;
 
         [$keep, $add, $removeIds] = $this->diff($order, $desired);
 
@@ -97,6 +108,7 @@ class OrderLineEditor
 
         $before = [
             'subtotal'       => (float) $order->subtotal,
+            'discount_amount' => (float) $order->discount_amount,
             'tax_amount'     => (float) $order->tax_amount,
             'total_amount'   => (float) $order->total_amount,
             'payment_status' => $order->payment_status,
@@ -211,7 +223,15 @@ class OrderLineEditor
             $stockMoves = $this->applyStockDeltas($order, $deltas, $stockMode, $actor?->id);
 
             // ── 4. Recalculate every figure from the resulting line set ───────
+            // A new order discount is an input like a line; the total is derived
+            // from it (OrderTotals), clamped to the subtotal, never trusted.
+            if ($this->orderDiscount !== null) {
+                $order->discount_amount = $this->orderDiscount;
+            }
             $totals = $this->recalculateTotals($order, $taxInclusive);
+            if ($this->orderDiscount !== null && $totals['discount_clamped']) {
+                $this->refuse('The order discount cannot be more than the order\'s subtotal.', 'discount_above_subtotal');
+            }
 
             // ── 5. Reconcile the money already collected ──────────────────────
             $order->refresh();
@@ -258,6 +278,7 @@ class OrderLineEditor
                     'before'      => $before,
                     'after'       => [
                         'subtotal'       => (float) $order->subtotal,
+                        'discount_amount' => (float) $order->discount_amount,
                         'tax_amount'     => (float) $order->tax_amount,
                         'total_amount'   => $newTotal,
                         'payment_status' => $order->payment_status,
@@ -280,6 +301,8 @@ class OrderLineEditor
                 'updated'                => $updated,
                 'removed'                => $removed,
                 'old_subtotal'           => $before['subtotal'],
+                'old_discount_amount'    => $before['discount_amount'],
+                'new_discount_amount'    => (float) $order->discount_amount,
                 'new_subtotal'           => (float) $order->subtotal,
                 'old_tax_amount'         => $before['tax_amount'],
                 'new_tax_amount'         => (float) $order->tax_amount,
@@ -572,7 +595,7 @@ class OrderLineEditor
             $before->line($g, $b, 'items');
         }
 
-        $after = DiscountRule::tally()->amount((float) $order->discount_amount, 'discount_amount');
+        $after = DiscountRule::tally()->amount($this->orderDiscount ?? (float) $order->discount_amount, 'discount_amount');
         $moved = [];
         foreach ($keep as $row) {
             $line = $row['line'];
