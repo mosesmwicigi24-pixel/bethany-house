@@ -3908,6 +3908,11 @@ export default function OrderDetailPage() {
     const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
     const [showAddItem, setShowAddItem]   = useState(false);
     const [itemsReason, setItemsReason]   = useState("");
+    // The order-level discount being edited (owner, 2026-11-06); null = as booked.
+    const [itemsOrderDiscount, setItemsOrderDiscount] = useState<string | null>(null);
+    const orderDiscountChanged = itemsOrderDiscount !== null
+        && itemsOrderDiscount.trim() !== ""
+        && Number(itemsOrderDiscount) !== Number(order?.discount_amount ?? 0);
     // Set when the server asks for an explicit acknowledgement (paid / shipped).
     const [itemsConfirm, setItemsConfirm] = useState<{ reason: string; message: string } | null>(null);
     // An order can be BOTH paid and shipped, so the server refuses twice.
@@ -3933,6 +3938,7 @@ export default function OrderDetailPage() {
                     discount_amount: l.discount_amount,
                 })),
                 ...(itemsReason.trim() ? { reason: itemsReason.trim() } : {}),
+                ...(orderDiscountChanged ? { order_discount: Math.max(0, Number(itemsOrderDiscount)) } : {}),
                 ...(confirm?.paid    ? { confirm_paid_change: true }    : {}),
                 ...(confirm?.shipped ? { confirm_shipped_change: true } : {}),
             }),
@@ -3940,6 +3946,7 @@ export default function OrderDetailPage() {
             setItemsDraft(null);
             setEditingLineKey(null);
             setItemsReason("");
+            setItemsOrderDiscount(null);
             setItemsConfirm(null);
             setItemsConfirmed({ paid: false, shipped: false });
             setItemsResult(res);
@@ -4799,6 +4806,16 @@ export default function OrderDetailPage() {
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
                                                 Add another
                                             </button>
+                                            <label className="inline-flex items-center gap-1.5 text-2xs font-medium text-surface-600">
+                                                Order discount
+                                                <input
+                                                    type="number" min={0} step={1} inputMode="numeric"
+                                                    value={itemsOrderDiscount ?? String(Number(order.discount_amount ?? 0))}
+                                                    onChange={e => setItemsOrderDiscount(e.target.value)}
+                                                    className="w-24 text-right text-xs border border-line rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-brand-500"
+                                                    aria-label="Order discount"
+                                                />
+                                            </label>
                                             <input
                                                 value={itemsReason}
                                                 onChange={e => setItemsReason(e.target.value)}
@@ -4813,7 +4830,7 @@ export default function OrderDetailPage() {
                                             <div className="flex items-center gap-2 shrink-0">
                                                 <button
                                                     onClick={() => {
-                                                        setItemsDraft(null); setEditingLineKey(null); setItemsReason("");
+                                                        setItemsDraft(null); setEditingLineKey(null); setItemsReason(""); setItemsOrderDiscount(null);
                                                         setItemsConfirm(null); setItemsConfirmed({ paid: false, shipped: false });
                                                     }}
                                                     disabled={updateItemsMutation.isPending}
@@ -4869,9 +4886,19 @@ export default function OrderDetailPage() {
                                     <div className="flex justify-between text-surface-500 py-1.5 border-b border-surface-50">
                                         <span>Subtotal</span><span className="tabular-nums font-medium text-surface-700">{fmt(order.subtotal, cc)}</span>
                                     </div>
-                                    {order.discount_amount > 0 && (
+                                    {(order.discount_amount > 0 || canEditItems) && (
                                         <div className="flex justify-between text-warning-dark py-1.5 border-b border-surface-50">
-                                            <span>Discount</span><span className="tabular-nums">-{fmt(order.discount_amount, cc)}</span>
+                                            <span className="flex items-center gap-1.5">Discount
+                                                {/* Opens the items editor with the order discount field:
+                                                    the server recalculates tax, total and balance. */}
+                                                {canEditItems && !itemsDraft && (
+                                                    <button
+                                                        onClick={() => { setItemsDraft(beginDraft()); setItemsOrderDiscount(String(Number(order.discount_amount ?? 0))); }}
+                                                        className="text-brand-500 hover:underline text-2xs"
+                                                    >{order.discount_amount > 0 ? "edit" : "+ add"}</button>
+                                                )}
+                                            </span>
+                                            <span className="tabular-nums">-{fmt(order.discount_amount ?? 0, cc)}</span>
                                         </div>
                                     )}
                                     <div className="flex justify-between text-surface-500 py-1.5 border-b border-surface-50">

@@ -2531,6 +2531,8 @@ class OrderController extends Controller
             'items.*.quantity'             => 'required|integer|min:1',
             'items.*.unit_price'           => 'nullable|numeric|min:0',
             'items.*.discount_amount'      => 'nullable|numeric|min:0',
+            // The order-level discount (owner, 2026-11-06); left out, it stays.
+            'order_discount'               => 'nullable|numeric|min:0|max:1000000000',
             'reason'                       => 'nullable|string|max:500',
             'confirm_paid_change'          => 'boolean',
             'confirm_shipped_change'       => 'boolean',
@@ -2549,6 +2551,7 @@ class OrderController extends Controller
                 'confirm_paid_change'    => (bool) ($validated['confirm_paid_change'] ?? false),
                 'confirm_shipped_change' => (bool) ($validated['confirm_shipped_change'] ?? false),
                 'reason'                 => $validated['reason'] ?? null,
+                'order_discount'         => $validated['order_discount'] ?? null,
             ],
             $request->user(),
         );
