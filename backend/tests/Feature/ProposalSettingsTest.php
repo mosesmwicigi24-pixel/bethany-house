@@ -160,32 +160,31 @@ class ProposalSettingsTest extends TestCase
         $this->assertTrue($p->applied_at->gt($p->effective_from), 'took effect at signing, after the date it named');
     }
 
-    public function test_the_super_admins_own_tax_change_waits_for_the_other_super_admin(): void
+    /** Owner, 2026-11-05: a super admin's own change needs no second person (SuperAdminSelfApproval). */
+    public function test_the_super_admins_own_tax_change_applies_on_entry_and_is_signed_by_him(): void
     {
         $id = $this->taxRate(16);
         Sanctum::actingAs($this->owner);
-        $this->putJson("/api/v1/admin/tax-rates/{$id}", ['rate' => 17])->assertStatus(202);
+        $this->putJson("/api/v1/admin/tax-rates/{$id}", ['rate' => 17]);
         $r = $this->requestOf($this->latest('tax_rate_change'));
-        $this->assertSame(16.0, $this->rate($id));
 
-        $this->sign($this->owner, $r)->assertForbidden()->assertJsonPath('code', 'SELF_APPROVAL');
-        $this->sign($this->fm, $r)->assertForbidden();
-        $this->sign($this->owner2, $r)->assertOk()->assertJsonPath('request.status', 'approved');
+        $this->assertSame('approved', $r->fresh()->status);
         $this->assertSame(17.0, $this->rate($id));
+        $this->assertDatabaseHas('approval_signatures', ['approval_request_id' => $r->id, 'signer_id' => $this->owner->id, 'owner_override' => true]);
+        $this->assertDatabaseHas('activity_log', ['event' => 'self_approved_super_admin', 'causer_id' => $this->owner->id]);
     }
 
-    public function test_with_one_super_admin_his_own_tax_change_waits_and_nobody_else_can_sign_it(): void
+    public function test_finances_tax_change_still_waits_for_a_super_admin(): void
     {
-        $this->owner2->update(['status' => 'inactive']);
         $id = $this->taxRate(16);
-        Sanctum::actingAs($this->owner);
+        Sanctum::actingAs($this->fm);
         $this->putJson("/api/v1/admin/tax-rates/{$id}", ['rate' => 17])->assertStatus(202);
         $r = $this->requestOf($this->latest('tax_rate_change'));
-
-        Sanctum::actingAs($this->owner);
-        $this->assertNotContains($r->id, collect($this->getJson('/api/v1/admin/approvals/inbox')->json('data'))->pluck('id')->all());
-        $this->sign($this->fm, $r)->assertForbidden();
         $this->assertSame(16.0, $this->rate($id));
+
+        $this->sign($this->fm, $r)->assertForbidden();
+        $this->sign($this->owner, $r)->assertOk()->assertJsonPath('request.status', 'approved');
+        $this->assertSame(17.0, $this->rate($id));
     }
 
     public function test_finance_cannot_edit_a_tax_rates_other_details_and_a_toggle_is_a_proposal(): void

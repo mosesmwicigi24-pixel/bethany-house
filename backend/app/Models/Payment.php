@@ -46,8 +46,13 @@ class Payment extends Model
         'recorded_by',
     ];
 
+    // What it counts for on its order, in the order's currency (PaymentCredit).
+    // Sent with every payment so screens add up the same figure the server does.
+    protected $appends = ['counted_amount'];
+
     protected $casts = [
         'amount'               => 'decimal:2',
+        'order_amount'         => 'decimal:2',
         'tax_amount_collected' => 'decimal:2',
         'refund_amount'        => 'decimal:2',
         'cash_received'        => 'decimal:2',
@@ -62,6 +67,22 @@ class Payment extends Model
         'paid_at'              => 'datetime',
         'received_after_cancel_at' => 'datetime',
     ];
+
+    /**
+     * What this payment counts for on its order, in the order's currency,
+     * gross of refunds (App\Support\PaymentCredit). Its own amount unless
+     * the order switched currency after it was paid.
+     */
+    public function getCountedAmountAttribute(): float
+    {
+        return \App\Support\PaymentCredit::gross($this);
+    }
+
+    /** The same, net of refunds. */
+    public function countedNet(): float
+    {
+        return \App\Support\PaymentCredit::net($this);
+    }
 
     protected static function boot()
     {

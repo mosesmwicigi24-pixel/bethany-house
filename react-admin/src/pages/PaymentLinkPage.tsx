@@ -58,6 +58,8 @@ interface OrderInfo {
     customer_name?:       string | null;
     customer_phone?:      string | null;
     is_international:   boolean;
+    /** USD or the buyer's own currency, while nothing is paid yet (owner, 2026-11-05). */
+    currency_choices?:  string[];
     expires_at?:        string | null;
 }
 
@@ -1174,7 +1176,7 @@ function ManualTransferPanel({
 
 // ── Order summary card ────────────────────────────────────────────────────────
 
-function OrderCard({ order }: { order: OrderInfo }) {
+function OrderCard({ order, token, onChanged }: { order: OrderInfo; token?: string; onChanged?: (o: OrderInfo) => void }) {
     const statusMap: Record<string, { label: string; cls: string }> = {
         paid:             { label: "Paid",              cls: "bg-success-100  text-success-800  border-success-200"  },
         partial:          { label: "Partially Paid",    cls: "bg-amber-100 text-amber-800 border-amber-200" },
@@ -1239,9 +1241,50 @@ function OrderCard({ order }: { order: OrderInfo }) {
                     {order.is_international && (
                         <p className="text-xs text-info-600 font-medium text-right mt-0.5">🌐 International order</p>
                     )}
+                    {token && onChanged && (order.currency_choices?.length ?? 0) > 1 && (
+                        <PayInChoice order={order} token={token} onChanged={onChanged} />
+                    )}
                 </div>
             </div>
         </Card>
+    );
+}
+
+/**
+ * "Pay in" (owner, 2026-11-05): a customer abroad pays in US dollars or their
+ * own currency. Choosing re-prices the order from our price list; once a
+ * payment has started the choice disappears (the server refuses it too).
+ */
+function PayInChoice({ order, token, onChanged }: { order: OrderInfo; token: string; onChanged: (o: OrderInfo) => void }) {
+    const [busy, setBusy] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const choose = async (code: string) => {
+        if (code === order.currency_code || busy) return;
+        setBusy(code); setError(null);
+        try {
+            await api(`/v1/pay/${token}/currency`, { method: "POST", body: JSON.stringify({ currency_code: code }) });
+            onChanged(await api<OrderInfo>(`/v1/pay/${token}`));
+        } catch (e) {
+            setError(e instanceof Error ? e.message : "That did not work. Please try again.");
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    return (
+        <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-xs text-surface-500">Pay in</span>
+            <div role="radiogroup" aria-label="Currency to pay in" className="inline-flex rounded-lg border border-surface-200 p-0.5">
+                {(order.currency_choices ?? []).map(code => (
+                    <button key={code} type="button" role="radio" aria-checked={code === order.currency_code}
+                        onClick={() => choose(code)} disabled={!!busy}
+                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${code === order.currency_code ? "bg-brand-600 text-white" : "text-surface-600 hover:bg-surface-100"}`}>
+                        {busy === code ? "…" : code}
+                    </button>
+                ))}
+            </div>
+            {error && <p className="basis-full text-xs text-danger-600 text-right">{error}</p>}
+        </div>
     );
 }
 
@@ -1378,7 +1421,7 @@ export default function PaymentLinkPage() {
                 </div>
 
                 {/* Order summary */}
-                <OrderCard order={order} />
+                <OrderCard order={order} token={token} onChanged={setOrder} />
 
                 {/* Persistent path back to the customer's order on the storefront */}
                 {order.continue_url && (

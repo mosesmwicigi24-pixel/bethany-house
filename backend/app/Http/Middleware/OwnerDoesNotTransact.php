@@ -28,6 +28,14 @@ class OwnerDoesNotTransact
     {
         $user = $request->user();
 
+        // A super admin may transact (owner, 2026-11-09: "Super Admin should be
+        // able to have all these roles without having to get approvals from
+        // anyone else" — every super admin). The platform account
+        // (system_admin) still never transacts.
+        if ($user && $user->hasRole('super_admin')) {
+            return $next($request);
+        }
+
         // No guard name: an owner role under any guard counts.
         if ($user && $user->hasAnyRole(self::OWNER_ROLES)) {
             return response()->json([
