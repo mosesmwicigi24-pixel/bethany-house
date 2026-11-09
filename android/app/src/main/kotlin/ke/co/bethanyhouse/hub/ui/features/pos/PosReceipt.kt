@@ -303,7 +303,9 @@ internal fun CustomerSheet(session: PosSession, onDismiss: () -> Unit) {
                     Text(c.displayName, style = MaterialTheme.typography.bodyMedium)
                     Text(listOf(revealed["phone"] ?: c.phone, revealed["email"] ?: c.email).filter { it.isNotEmpty() }.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
                 }
-                if (c.id > 0) Box {
+                // Only a masked contact needs revealing (#528: the sales roles see contacts in full;
+                // a reveal is audited and limited, PosPage.tsx shows it only for "•").
+                if (c.id > 0 && (c.phone.contains("•") || c.email.contains("•"))) Box {
                     TextButton(onClick = { revealMenu = true }) { Text("Reveal…") }
                     DropdownMenu(expanded = revealMenu, onDismissRequest = { revealMenu = false }) {
                         REVEAL_REASONS.forEach { (v, l) -> DropdownMenuItem(text = { Text((if (revealReason == v) "● " else "○ ") + l) }, onClick = { revealReason = v }) }

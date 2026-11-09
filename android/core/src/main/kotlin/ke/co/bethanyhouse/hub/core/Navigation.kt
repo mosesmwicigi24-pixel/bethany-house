@@ -381,7 +381,8 @@ object NavCatalogue {
             NavItem("Attendance", Route.Attendance, p("attendance.view_team"), "LocationOn"),
             NavItem("Checklists", Route.FormsManage, p("forms.manage"), "FactCheck"),
             NavItem("Roster", Route.Roster, p("attendance.view_team"), "EventNote"),
-            NavItem("Timesheets", Route.Timesheets, p("attendance.view_team"), "TableChart"),
+            // Finance reaches Timesheets with timesheets.lock alone, to lock pay periods (#535, routes/api.php).
+            NavItem("Timesheets", Route.Timesheets, NavGate.anyOf("attendance.view_team", "timesheets.lock"), "TableChart"),
             NavItem("Leave", Route.Leave, p("attendance.view_team"), "Flight"),
             NavItem("Employee files", Route.People(), p("hr.view"), "FolderShared"),
             NavItem("Payroll", Route.Payroll, p("payroll.view"), "AccountBalance"),
