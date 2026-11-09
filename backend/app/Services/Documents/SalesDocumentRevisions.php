@@ -249,7 +249,7 @@ class SalesDocumentRevisions
 
     // ── Receipt (a payment's details) ────────────────────────────────────────
 
-    /** @param array $data provider_reference, phone_number, payment_method, paid_at (each optional) */
+    /** @param array $data provider_reference, phone_number, payment_method, paid_at, amount, currency_code (each optional) */
     public static function revisePayment(Payment $payment, array $data, string $reason, User $owner): Payment
     {
         return DB::transaction(function () use ($payment, $data, $reason, $owner) {
@@ -302,6 +302,36 @@ class SalesDocumentRevisions
                 }
             }
 
+            // Amount and currency (owner, 2026-11-05 — #1158: a USD payment
+            // recorded as rand). What arrived is restated only here, by the
+            // owner, with the old figure kept in the revision below.
+            $moneyChanged = false;
+            $newCcy = array_key_exists('currency_code', $data) && $data['currency_code'] !== null
+                ? strtoupper((string) $data['currency_code']) : strtoupper((string) $payment->currency_code);
+            $newAmt = array_key_exists('amount', $data) && $data['amount'] !== null
+                ? round((float) $data['amount'], 2) : (float) $payment->amount;
+            if ($newCcy !== strtoupper((string) $payment->currency_code) || abs($newAmt - (float) $payment->amount) > 0.001) {
+                if ($atTill) {
+                    self::refuse('amount', 'This payment went through a till, which counted it in its drawer. Void it from the till and record it again.');
+                }
+                $method = strtolower((string) $payment->payment_method);
+                if (in_array($method, ['mpesa', 'm_pesa', 'paystack', 'card'], true) && !empty($payment->provider_transaction_id)) {
+                    self::refuse('amount', 'The provider confirmed this amount, so it is what arrived. Refund the difference instead.');
+                }
+                if ($newAmt <= 0) {
+                    self::refuse('amount', 'The amount must be more than zero. To take a payment off the order, delete it.');
+                }
+                if ((float) $payment->refund_amount > $newAmt) {
+                    self::refuse('amount', 'More than this has already been refunded on this payment.');
+                }
+                \App\Support\SellableCurrency::assert($newCcy);
+                $update['amount'] = $newAmt;
+                $update['currency_code'] = $newCcy;
+                $changes[] = 'Amount ' . strtoupper((string) $payment->currency_code) . ' ' . number_format((float) $payment->amount, 2)
+                    . ' → ' . $newCcy . ' ' . number_format($newAmt, 2);
+                $moneyChanged = true;
+            }
+
             if ($changes === []) {
                 self::refuse('payment', 'Nothing was changed.');
             }
@@ -321,11 +351,44 @@ class SalesDocumentRevisions
                 'created_by'    => $owner->id,
             ]);
 
-            $payment->update($update);
+            if ($moneyChanged) {
+                // The reporting rate belongs to the currency; what it counts for
+                // on the order follows the new figure (PaymentCredit).
+                $order = Order::withoutViewerScope()->with('items')->lockForUpdate()->findOrFail($payment->order_id);
+                $orderCcy = strtoupper((string) $order->currency_code);
+                if ($update['currency_code'] !== strtoupper((string) $payment->currency_code)) {
+                    $update += \App\Support\ReportingRateStamp::for($update['currency_code']);
+                }
+                if ($update['currency_code'] === $orderCcy) {
+                    $update['order_amount'] = null;
+                    $update['order_currency_code'] = null;
+                } else {
+                    $there = \App\Services\OrderCurrencySwitch::totalIn($order, $update['currency_code']);
+                    if (!$there || $there <= 0) {
+                        self::refuse('currency_code', "This order cannot be priced in {$update['currency_code']}, so the payment cannot count toward it. Set a price or rate first.");
+                    }
+                    $update['order_amount'] = round($update['amount'] * (float) $order->total_amount / $there, 2);
+                    $update['order_currency_code'] = $orderCcy;
+                }
+                $others = (float) \App\Models\Payment::where('order_id', $order->id)->whereKeyNot($payment->id)->whereIn('status', ['paid', 'pending'])
+                    ->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
+                $counts = $update['order_currency_code'] ? $update['order_amount'] : $update['amount'];
+                if ($others + $counts > (float) $order->total_amount + 0.01) {
+                    self::refuse('amount', 'With this figure the payments would come to more than the order. Correct the other payment first, or delete it.');
+                }
+            }
+
+            $payment->forceFill($update)->save();
+
+            if ($moneyChanged) {
+                $order->refresh()->syncPaymentStatus();
+            }
 
             if ($receipt) {
                 $snap = $receipt->snapshot ?? [];
                 $snap['payment'] = array_merge($snap['payment'] ?? [], [
+                    'amount'    => (float) $payment->amount,
+                    'currency'  => $payment->currency_code,
                     'method'    => $payment->payment_method,
                     'reference' => $payment->provider_reference,
                     'paid_at'   => optional($payment->paid_at)->toIso8601String(),

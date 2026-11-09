@@ -32,9 +32,9 @@ use Tests\TestCase;
  * permission check — so the rule lives in App\Support\MakerChecker, which runs
  * in the controller after the permission gates, not in a gate.
  *
- * And the owner never transacts: super_admin / system_admin get
- * OWNER_DOES_NOT_TRANSACT on the till's write endpoints (route middleware),
- * while every POS screen stays readable to them.
+ * The platform account (system_admin) never transacts: it gets
+ * OWNER_DOES_NOT_TRANSACT on the till's write endpoints (route middleware).
+ * A super admin may transact since 2026-11-09 (owner's decision).
  */
 class MakerCheckerTest extends TestCase
 {
@@ -151,14 +151,16 @@ class MakerCheckerTest extends TestCase
         $this->assertSame($approver->id, (int) $po->approved_by);
     }
 
-    public function test_a_super_admin_who_raised_a_po_cannot_approve_it(): void
+    /** Owner, 2026-11-05: a super admin's own entries need no second person (SuperAdminSelfApproval). */
+    public function test_a_super_admin_who_raised_a_po_may_approve_it_and_it_is_audited(): void
     {
         $owner = $this->user('super_admin');
         $po    = $this->po('pending_approval', $owner);
 
         Sanctum::actingAs($owner);
-        $this->assertSelfApprovalBlocked($this->postJson("/api/v1/admin/purchase-orders/{$po->id}/approve"), $owner);
-        $this->assertSame('pending_approval', $po->fresh()->status);
+        $this->postJson("/api/v1/admin/purchase-orders/{$po->id}/approve")->assertOk();
+        $this->assertSame('approved', $po->fresh()->status);
+        $this->assertDatabaseHas('activity_log', ['event' => 'self_approved_super_admin', 'causer_id' => $owner->id]);
     }
 
     public function test_a_super_admin_can_approve_someone_elses_po(): void
@@ -364,7 +366,9 @@ class MakerCheckerTest extends TestCase
 
     public function test_an_admins_adjustment_that_needs_approval_now_waits_like_anyone_elses(): void
     {
-        foreach (['admin', 'super_admin'] as $role) {
+        // A super admin's own adjustment is approved on entry (owner, 2026-11-05) —
+        // SuperAdminSelfApprovalTest; an admin's still waits.
+        foreach (['admin'] as $role) {
             // Stacked with roles that raise and approve stock adjustments, so the only
             // thing stopping self-approval is the maker≠checker rule itself.
             $boss = $this->user($role, 'outlet_manager', 'procurement_manager');
@@ -488,14 +492,22 @@ class MakerCheckerTest extends TestCase
         $this->assertSame($approver->id, (int) $expense->fresh()->approved_by);
     }
 
-    public function test_a_super_admin_who_recorded_an_expense_cannot_approve_it(): void
+    public function test_a_super_admins_own_expense_is_approved_on_entry(): void
     {
-        $owner   = $this->user('super_admin');
-        $expense = $this->pendingExpense($owner);
+        $owner    = $this->user('super_admin');
+        $category = ExpenseCategory::firstOrCreate(
+            ['code' => 'SALES_OFFICE'],
+            ['name' => 'Sales Office Expense', 'requires_approval_above' => 3000, 'is_active' => true],
+        );
 
         Sanctum::actingAs($owner);
-        $this->assertSelfApprovalBlocked($this->postJson("/api/v1/admin/expenses/{$expense->id}/approve"), $owner);
-        $this->assertSame('pending_approval', $expense->fresh()->status);
+        $id = $this->postJson('/api/v1/admin/expenses', [
+            'title' => 'Printer toner', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
+            'amount' => 5000, 'currency_code' => 'KES', 'payment_method' => 'cash', 'vendor_name' => 'Milka',
+        ])->assertCreated()->json('expense.id');
+
+        $this->assertSame('approved', Expense::findOrFail($id)->status, 'owner, 2026-11-05: no second person for a super admin');
+        $this->assertDatabaseHas('activity_log', ['event' => 'self_approved_super_admin', 'causer_id' => $owner->id]);
     }
 
     // ── Payments awaiting approval ──────────────────────────────────────────
@@ -537,14 +549,15 @@ class MakerCheckerTest extends TestCase
         $this->assertNull($payment->approved_by);
     }
 
-    public function test_a_super_admin_who_recorded_a_payment_cannot_approve_it(): void
+    public function test_a_super_admin_who_recorded_a_payment_may_approve_it(): void
     {
         $owner   = $this->user('super_admin');
         $payment = $this->pendingPayment($owner);
 
         Sanctum::actingAs($owner);
-        $this->assertSelfApprovalBlocked($this->postJson("/api/v1/admin/payments/{$payment->id}/approve", ["notes" => "Seen on the bank statement"]), $owner);
-        $this->assertSame('pending_review', $payment->fresh()->approval_status);
+        $this->postJson("/api/v1/admin/payments/{$payment->id}/approve", ["notes" => "Seen on the bank statement"])->assertOk();
+        $this->assertSame('approved', $payment->fresh()->approval_status);
+        $this->assertDatabaseHas('activity_log', ['event' => 'self_approved_super_admin', 'causer_id' => $owner->id]);
     }
 
     public function test_someone_else_can_approve_the_payment(): void
@@ -590,29 +603,28 @@ class MakerCheckerTest extends TestCase
         // controller methods that never existed).
     ];
 
-    public function test_a_super_admin_cannot_transact_on_any_pos_write_endpoint(): void
+    /** Owner, 2026-11-09: every super admin may transact; the platform account never does. */
+    public function test_a_super_admin_reaches_every_pos_write_endpoint(): void
     {
         Sanctum::actingAs($this->user('super_admin'));
 
         foreach (self::TRANSACTING as [$method, $uri]) {
             $res = $this->json($method, $uri, []);
-            $this->assertSame(403, $res->status(), "{$method} {$uri} must refuse the owner (got {$res->status()})");
-            $this->assertSame('OWNER_DOES_NOT_TRANSACT', $res->json('code'), "{$method} {$uri}");
-            $this->assertNotEmpty($res->json('message'));
+            $this->assertNotSame('OWNER_DOES_NOT_TRANSACT', $res->json('code'), "{$method} {$uri} must let a super admin through");
         }
     }
 
-    public function test_holding_a_till_role_as_well_does_not_lift_the_owner_deny(): void
+    public function test_the_platform_account_still_never_transacts_even_with_a_till_role(): void
     {
-        foreach (['super_admin', 'system_admin'] as $ownerRole) {
-            Sanctum::actingAs($this->user($ownerRole, 'pos_clerk'));
+        foreach ([['system_admin'], ['system_admin', 'pos_clerk']] as $roles) {
+            Sanctum::actingAs($this->user(...$roles));
 
-            $this->postJson('/api/v1/admin/pos/sales', [])
-                ->assertForbidden()
-                ->assertJsonPath('code', 'OWNER_DOES_NOT_TRANSACT');
-            $this->postJson('/api/v1/admin/pos/register/open', [])
-                ->assertForbidden()
-                ->assertJsonPath('code', 'OWNER_DOES_NOT_TRANSACT');
+            foreach (self::TRANSACTING as [$method, $uri]) {
+                // Refused — by the owner deny, or before it by a permission the
+                // platform account does not hold. Never let through.
+                $res = $this->json($method, $uri, []);
+                $this->assertSame(403, $res->status(), "{$method} {$uri}");
+            }
         }
     }
 

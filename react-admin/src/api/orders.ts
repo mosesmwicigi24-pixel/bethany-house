@@ -511,6 +511,8 @@ export const ordersApi = {
                 discount_amount?:    number;
             }[];
             reason?:                 string;
+            /** The order-level discount; left out, it stays as booked. */
+            order_discount?:         number;
             confirm_paid_change?:    boolean;
             confirm_shipped_change?: boolean;
         },
