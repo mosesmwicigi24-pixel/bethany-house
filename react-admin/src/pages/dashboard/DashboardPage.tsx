@@ -812,7 +812,13 @@ export default function DashboardPage() {
     const { can, isAdmin } = usePermissions();
 
     // Derive roles from the auth store user
-    const roles: string[] = user?.roles?.map((r: { name: string }) => r.name) ?? [];
+    const allRoles: string[] = user?.roles?.map((r: { name: string }) => r.name) ?? [];
+    // A super admin who also holds a working role (owner, 2026-11-09: "Super
+    // Admin should be able to have all these roles") keeps the owner's
+    // dashboard — the till role must not shrink it to a cashier's view.
+    const roles: string[] = allRoles.includes("super_admin")
+        ? allRoles.filter((r) => r === "super_admin" || r === "admin")
+        : allRoles;
     const floorWorker = useIsFloorWorker();
 
     const [period, setPeriod] = useState<typeof PERIODS[number]>(PERIODS[1]); // 7 days default

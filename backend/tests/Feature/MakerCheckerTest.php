@@ -32,9 +32,9 @@ use Tests\TestCase;
  * permission check — so the rule lives in App\Support\MakerChecker, which runs
  * in the controller after the permission gates, not in a gate.
  *
- * And the owner never transacts: super_admin / system_admin get
- * OWNER_DOES_NOT_TRANSACT on the till's write endpoints (route middleware),
- * while every POS screen stays readable to them.
+ * The platform account (system_admin) never transacts: it gets
+ * OWNER_DOES_NOT_TRANSACT on the till's write endpoints (route middleware).
+ * A super admin may transact since 2026-11-09 (owner's decision).
  */
 class MakerCheckerTest extends TestCase
 {
@@ -603,29 +603,28 @@ class MakerCheckerTest extends TestCase
         // controller methods that never existed).
     ];
 
-    public function test_a_super_admin_cannot_transact_on_any_pos_write_endpoint(): void
+    /** Owner, 2026-11-09: every super admin may transact; the platform account never does. */
+    public function test_a_super_admin_reaches_every_pos_write_endpoint(): void
     {
         Sanctum::actingAs($this->user('super_admin'));
 
         foreach (self::TRANSACTING as [$method, $uri]) {
             $res = $this->json($method, $uri, []);
-            $this->assertSame(403, $res->status(), "{$method} {$uri} must refuse the owner (got {$res->status()})");
-            $this->assertSame('OWNER_DOES_NOT_TRANSACT', $res->json('code'), "{$method} {$uri}");
-            $this->assertNotEmpty($res->json('message'));
+            $this->assertNotSame('OWNER_DOES_NOT_TRANSACT', $res->json('code'), "{$method} {$uri} must let a super admin through");
         }
     }
 
-    public function test_holding_a_till_role_as_well_does_not_lift_the_owner_deny(): void
+    public function test_the_platform_account_still_never_transacts_even_with_a_till_role(): void
     {
-        foreach (['super_admin', 'system_admin'] as $ownerRole) {
-            Sanctum::actingAs($this->user($ownerRole, 'pos_clerk'));
+        foreach ([['system_admin'], ['system_admin', 'pos_clerk']] as $roles) {
+            Sanctum::actingAs($this->user(...$roles));
 
-            $this->postJson('/api/v1/admin/pos/sales', [])
-                ->assertForbidden()
-                ->assertJsonPath('code', 'OWNER_DOES_NOT_TRANSACT');
-            $this->postJson('/api/v1/admin/pos/register/open', [])
-                ->assertForbidden()
-                ->assertJsonPath('code', 'OWNER_DOES_NOT_TRANSACT');
+            foreach (self::TRANSACTING as [$method, $uri]) {
+                // Refused — by the owner deny, or before it by a permission the
+                // platform account does not hold. Never let through.
+                $res = $this->json($method, $uri, []);
+                $this->assertSame(403, $res->status(), "{$method} {$uri}");
+            }
         }
     }
 
