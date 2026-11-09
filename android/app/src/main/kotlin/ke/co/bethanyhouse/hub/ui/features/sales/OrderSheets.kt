@@ -35,6 +35,7 @@ import ke.co.bethanyhouse.hub.core.get
 import ke.co.bethanyhouse.hub.core.humanized
 import ke.co.bethanyhouse.hub.core.isNull
 import ke.co.bethanyhouse.hub.core.jsonOf
+import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.records
 import ke.co.bethanyhouse.hub.core.str
 import ke.co.bethanyhouse.hub.core.toJson
@@ -133,9 +134,15 @@ internal fun RecordPaymentSheet(order: Record, onDone: () -> Unit, onDismiss: ()
     val requiresApproval = if (isOther) true else (selected?.get("requires_approval").bool ?: (effectiveMethod !in listOf("cash", "mpesa", "card", "card_paystack", "card_flutterwave", "paystack")))
     val referenceRequired = effectiveMethod == "bank_transfer" || isOther
     val canSubmit = Sales.amountJson(amount) != null && method.isNotEmpty() && (!referenceRequired || reference.isNotBlank()) && (!isOther || customName.isNotBlank())
+    // An M-Pesa receipt is checked with Safaricom first (OrderDetailPage.tsx,
+    // #522). A code Safaricom does not confirm, or with no M-Pesa request on
+    // the order to check against, is recorded only on the explicit choice
+    // below; the payment then follows the method's approval rule.
+    val checkFirst = effectiveMethod == "mpesa" && reference.isNotBlank()
+    var unconfirmed by remember { mutableStateOf<String?>(null) }
 
-    FormSheet("Record payment", onDismiss, saveLabel = if (requiresApproval) "Submit for approval" else "Record", canSave = canSubmit, save = {
-        val amt = Sales.amountJson(amount) ?: return@FormSheet
+    suspend fun record() {
+        val amt = Sales.amountJson(amount) ?: return
         val body = mutableMapOf<String, JsonElement>("method" to JsonPrimitive(effectiveMethod), "amount" to amt, "tax_inclusive" to JsonPrimitive(taxInclusive))
         if (reference.isNotBlank()) body["reference"] = JsonPrimitive(reference)
         if (phone.isNotBlank()) body["phone"] = JsonPrimitive(phone)
@@ -148,7 +155,31 @@ internal fun RecordPaymentSheet(order: Record, onDone: () -> Unit, onDismiss: ()
         val needs = r.json["requires_approval"].bool ?: requiresApproval
         env.toasts.show(if (needs) "Payment submitted — awaiting approval before it takes effect" else "Payment recorded")
         onDone()
+    }
+
+    suspend fun checkWithSafaricom() {
+        val code = reference.trim()
+        unconfirmed = null
+        val pending = order["payments"].records.firstOrNull { it["status"].str == "pending" && it["payment_method"].str == "mpesa" }
+        if (pending == null) {
+            unconfirmed = code
+            throw ApiError.transport("There is no M-Pesa request on this order to check the code against.")
+        }
+        val r = try {
+            env.client.post("/v1/admin/orders/${order.id}/payments/${pending["id"].str}/verify-mpesa", jsonOf("transaction_code" to code))
+        } catch (e: ApiError) { unconfirmed = code; throw e }
+        val waiting = r.status == 202 || r.json["pending"].bool == true
+        // 202: Safaricom took the question; the payment settles when they answer.
+        env.toasts.show(r.json["message"].str ?: if (waiting) "Asked Safaricom — the payment updates when they answer" else "Safaricom confirmed the payment", if (waiting) StatusTone.INFO else StatusTone.SUCCESS)
+        onDone()
+    }
+
+    FormSheet("Record payment", onDismiss, saveLabel = if (checkFirst) "Check with Safaricom" else if (requiresApproval) "Submit for approval" else "Record", canSave = canSubmit, save = {
+        if (checkFirst) checkWithSafaricom() else record()
     }) { error ->
+        unconfirmed?.takeIf { checkFirst && it == reference.trim() }?.let { code ->
+            AsyncButton("Record $code without Safaricom confirmation", outlined = true) { record(); onDismiss() }
+        }
         DetailRow("Order total") { MoneyText(order.money("total_amount")) }
         DetailRow("Payment status", order.string("payment_status")?.humanized)
         if (methods.isEmpty()) SalesCaption("No payment method is set up for $currency. Set them up in Setup › Payment Methods.", Palette.warning)

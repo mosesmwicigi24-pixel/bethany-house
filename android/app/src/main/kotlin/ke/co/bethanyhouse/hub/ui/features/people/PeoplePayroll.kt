@@ -33,7 +33,9 @@ import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.Record
+import ke.co.bethanyhouse.hub.core.HubDates
 import ke.co.bethanyhouse.hub.core.bool
+import ke.co.bethanyhouse.hub.core.date
 import ke.co.bethanyhouse.hub.core.get
 import ke.co.bethanyhouse.hub.core.humanized
 import ke.co.bethanyhouse.hub.core.int
@@ -75,6 +77,7 @@ import ke.co.bethanyhouse.hub.ui.components.parseJsonObject
 import ke.co.bethanyhouse.hub.ui.components.prettyJson
 import ke.co.bethanyhouse.hub.ui.components.toastResult
 import ke.co.bethanyhouse.hub.ui.hub
+import java.time.LocalDate
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 
@@ -244,19 +247,30 @@ private fun RunActions(runId: Int, r: JsonElement, dismiss: () -> Unit, changed:
     }
 }
 
-/** POST /payroll/runs/{id}/pay {lines: [{line_id, payment_method, payment_reference}]} — step-up. */
+/**
+ * POST /payroll/runs/{id}/pay {lines: [{line_id, payment_method, payment_reference, paid_on}]} — step-up.
+ * `paid_on` is the day the money actually went out (#532): it goes on the
+ * payslip, the run and the Salaries expense, so a payment recorded late keeps
+ * its real date. Not after today, not before the run was approved.
+ */
 @Composable
 private fun PayRunSheet(run: JsonElement, onDismiss: () -> Unit, done: () -> Unit) {
     val env = LocalEnv.current
     val lines = remember(run) { run["lines"].toRecords() }
     var methods by remember { mutableStateOf(lines.mapNotNull { l -> l.string("payment_method")?.let { l.id to it } }.toMap()) }
     var refs by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    FormSheet("Record payments", onDismiss, saveLabel = "Mark paid", canSave = lines.all { !methods[it.id].isNullOrEmpty() }, save = {
-        val body = J.obj("lines" to JsonArray(lines.map { l -> J.obj("line_id" to J.i(l.int("id")), "payment_method" to J.s(methods[l.id] ?: "cash"), "payment_reference" to J.sOpt(refs[l.id])) }))
+    val today = remember { LocalDate.now(HubDates.nairobi) }
+    var paidOn by remember { mutableStateOf(today.toString()) }
+    val approvedOn = run["approved_at"].date?.atZone(HubDates.nairobi)?.toLocalDate()
+    val dateOk = runCatching { LocalDate.parse(paidOn) }.getOrNull()?.let { d -> !d.isAfter(today) && (approvedOn == null || !d.isBefore(approvedOn)) } ?: false
+    FormSheet("Record payments", onDismiss, saveLabel = "Mark paid", canSave = dateOk && lines.all { !methods[it.id].isNullOrEmpty() }, save = {
+        val body = J.obj("lines" to JsonArray(lines.map { l -> J.obj("line_id" to J.i(l.int("id")), "payment_method" to J.s(methods[l.id] ?: "cash"), "payment_reference" to J.sOpt(refs[l.id]), "paid_on" to J.s(paidOn)) }))
         val r = env.client.post("/v1/admin/payroll/runs/${run["id"].int ?: 0}/pay", body)
         toastResult(env, r); done()
     }) { e ->
         Text("How each person was paid. Marking paid closes the run; you will be asked to confirm it is you.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
+        DayField("Date paid", paidOn, { if (it.isNotEmpty()) paidOn = it })
+        if (!dateOk) Text("The date paid can't be after today${approvedOn?.let { " or before the run was approved ($it)" } ?: ""}.", style = MaterialTheme.typography.labelSmall, color = Palette.warning)
         lines.forEach { l ->
             Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Text(l["user"]["name"].str ?: "", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f)); MoneyText(peopleKes(l["net"])) }

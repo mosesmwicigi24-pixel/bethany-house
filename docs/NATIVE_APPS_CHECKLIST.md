@@ -127,12 +127,12 @@ were ported (#517–#537). Items 1–7 were checked by hand in both apps.
 | # | Finding | Kind | State |
 |---|---|---|---|
 | P1 | The apps' till priced a customer abroad in shillings and sent no billing currency: a KES 2,500 dress sold to a US customer was billed USD 2,500 (reproduced on a local backend; the console charges USD 25). No "Bills in" choice; the order page's Country & currency sheet sends the country only. | money | Server guard (`TillPriceCurrencyTest`). Apps fixed: the till prices in the customer's billing currency (their country's `sale_currency`, or the "Bills in" choice), reprices the cart on a change and drops a line the Hub cannot price there, and states `price_currency` per line (`TillBillingCurrencyTest`, Android). The order page's Country & currency sheet labels each country with what it bills in and takes a chosen currency with a reason. The payment link's "keep shillings" choice is still console-only (the apps show the Hub's refusal). |
-| P2 | The order page's "Record payment" saves an M-Pesa receipt without asking Safaricom (Android `OrderSheets.kt`, Apple `SalesOrderSheets.swift`); the console asks first since #522. | money | Pending |
-| P3 | Timesheets hidden from finance: the apps gate on `attendance.view_team` only; console and server also accept `timesheets.lock` (#535). | access | Pending |
-| P4 | Paying a payroll line from the apps cannot set the date paid (`paid_on`, #532); today is recorded. | money | Pending |
-| P5 | Payslip footnote ignores "government deductions off" (`structure.statutory`). | wording | Pending |
-| P6 | `money_view` read as text; the server sends an object. No screen uses it yet. | contract | Pending |
-| P7 | The till's Customer sheet offers "Reveal…" even when the contact is not masked (#528). | access log noise | Pending |
+| P2 | The order page's "Record payment" saves an M-Pesa receipt without asking Safaricom (Android `OrderSheets.kt`, Apple `SalesOrderSheets.swift`); the console asks first since #522. | money | Fixed: with M-Pesa and a receipt the sheet asks Safaricom (verify-mpesa); "asked" (202) is shown as waiting; a code it does not confirm, or with no M-Pesa request to check against, is recorded only by "Record … without Safaricom confirmation" (`MpesaOrderPaymentTest`). |
+| P3 | Timesheets hidden from finance: the apps gate on `attendance.view_team` only; console and server also accept `timesheets.lock` (#535). | access | Fixed: `anyOf(attendance.view_team, timesheets.lock)` in both apps. |
+| P4 | Paying a payroll line from the apps cannot set the date paid (`paid_on`, #532); today is recorded. | money | Fixed: a Date paid on the pay sheet, not after today nor before the run was approved, sent as each line's `paid_on`. |
+| P5 | Payslip footnote ignores "government deductions off" (`structure.statutory`). | wording | Fixed: the console's wording. |
+| P6 | `money_view` read as text; the server sends an object. No screen uses it yet. | contract | Fixed: its `label` is read (contract tests in both apps). |
+| P7 | The till's Customer sheet offers "Reveal…" even when the contact is not masked (#528). | access log noise | Fixed: shown only for a masked phone or email. |
 | P8 | Console-only so far: People & pay, Commissions (#532/#533), message notices and "waiting on your reply" (#530), push action buttons (#537), variant price hints (#526). | parity | Backlog |
 
 The installable debug APK (CI artifact `hub-android-debug`) points at the

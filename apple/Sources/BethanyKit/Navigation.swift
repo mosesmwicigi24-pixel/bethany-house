@@ -327,7 +327,8 @@ public enum NavCatalogue {
             NavItem("Attendance", .attendance, gate: .perm("attendance.view_team"), icon: "location"),
             NavItem("Checklists", .formsManage, gate: .perm("forms.manage"), icon: "list.clipboard"),
             NavItem("Roster", .roster, gate: .perm("attendance.view_team"), icon: "calendar.badge.clock"),
-            NavItem("Timesheets", .timesheets, gate: .perm("attendance.view_team"), icon: "tablecells"),
+            // Finance reaches Timesheets with timesheets.lock alone, to lock pay periods (#535, routes/api.php).
+            NavItem("Timesheets", .timesheets, gate: .anyOf(["attendance.view_team", "timesheets.lock"]), icon: "tablecells"),
             NavItem("Leave", .leave, gate: .perm("attendance.view_team"), icon: "airplane"),
             NavItem("Employee files", .people(), gate: .perm("hr.view"), icon: "folder.badge.person.crop"),
             NavItem("Payroll", .payroll, gate: .perm("payroll.view"), icon: "dollarsign.circle"),

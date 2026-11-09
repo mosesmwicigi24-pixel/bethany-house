@@ -232,7 +232,8 @@ struct CustomerSheet: View {
                         Text([revealed["phone"] ?? c.phone, revealed["email"] ?? c.email].filter { !$0.isEmpty }.joined(separator: " · ")).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
-                    if c.id > 0 {
+                    // Only a masked contact needs revealing (#528; a reveal is audited and limited).
+                    if c.id > 0, c.phone.contains("•") || c.email.contains("•") {
                         Menu("Reveal…") {
                             Picker("Reason", selection: $revealReason) { ForEach(Self.reasons, id: \.0) { Text($0.1).tag($0.0) } }
                             Button("Phone") { Task { await reveal("phone") } }

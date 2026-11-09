@@ -41,6 +41,13 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(try Me(json: json(#"{"id":3,"name":"Legacy Name","email":"x@y.z"}"#)).name, "Legacy Name")
     }
 
+    /// AuthController::me sends money_view as {range, period, label} (FinancialVisibility::describe).
+    func testMoneyViewIsReadFromItsObject() throws {
+        let me = try Me(json: json(#"{"id":3,"first_name":"Amina","email":"a@b.c","money_view":{"range":"outlet","period":"today","label":"today, at your outlet"}}"#))
+        XCTAssertEqual(me.moneyView, "today, at your outlet")
+        XCTAssertEqual(try Me(json: json(#"{"id":3,"first_name":"A","email":"a@b.c","money_view":"all"}"#)).moneyView, "all", "an older plain string still reads")
+    }
+
     func testMeRoundTripsThroughTheKeychainCache() throws {
         let original = try Me(json: json(#"{"id":1,"name":"Owner","email":"o@b.c","permissions":["a"],"roles":[],"extra_field":{"kept":true}}"#))
         let data = try HubJSON.encoder.encode(original)

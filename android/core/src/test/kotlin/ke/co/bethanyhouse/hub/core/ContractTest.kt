@@ -15,6 +15,13 @@ import kotlin.test.assertTrue
 class ContractTest {
     private fun j(s: String) = HubJson.parse(s)
 
+    /** AuthController::me sends money_view as {range, period, label} (FinancialVisibility::describe). */
+    @Test fun moneyViewIsReadFromItsObject() {
+        val me = Me(j("""{"id":3,"first_name":"Amina","last_name":"Njeri","email":"a@b.c","permissions":[],"roles":[],"money_view":{"range":"outlet","period":"today","label":"today, at your outlet"}}"""))
+        assertEquals("today, at your outlet", me.moneyView)
+        assertEquals("all", Me(j("""{"id":3,"first_name":"A","email":"a@b.c","money_view":"all"}""")).moneyView, "an older plain string still reads")
+    }
+
     @Test fun loginAnswersWithOneOfThreeShapes() {
         val session = AuthService.outcome(j("""{"message":"Login successful","token":"1|abc","user":{"id":7,"name":"Amina Njeri","email":"a@b.c","permissions":["orders.view"],"roles":[{"id":2,"name":"pos_clerk"}],"session_policy":{"idle_minutes":5,"absolute_minutes":720,"on_idle":"pin_lock"},"is_owner":false,"terminal_pin_set":true}}"""))
         assertTrue(session is AuthService.LoginOutcome.Session)

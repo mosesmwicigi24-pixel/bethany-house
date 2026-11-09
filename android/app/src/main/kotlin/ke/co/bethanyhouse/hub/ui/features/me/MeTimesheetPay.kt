@@ -306,7 +306,11 @@ private fun PayslipItems(line: Record) {
         Box(Modifier.fillMaxWidth().height(2.dp).background(MaterialTheme.hub.text))
         PayRow("Net pay", line.money("net", "KES"), strong = true)
         Text(
-            "Hours: regular ${MeFormat.hm(hours["regular_minutes"].int)}, overtime ${MeFormat.hm(hours["overtime_minutes"].int)}, rest days ${MeFormat.hm(hours["rest_day_minutes"].int)}, holidays ${MeFormat.hm(hours["holiday_minutes"].int)} · paid leave ${hours["paid_leave_days"].str ?: "0"} d, unpaid ${hours["unpaid_leave_days"].str ?: "0"} d, days worked ${hours["days_worked"].str ?: "0"}. Taxable pay ${line.money("taxable", "KES")?.formatted() ?: "—"}. Employer NSSF ${line.money("nssf_employer", "KES")?.formatted() ?: "—"} and Housing Levy ${line.money("housing_employer", "KES")?.formatted() ?: "—"} are not deducted from you.",
+            "Hours: regular ${MeFormat.hm(hours["regular_minutes"].int)}, overtime ${MeFormat.hm(hours["overtime_minutes"].int)}, rest days ${MeFormat.hm(hours["rest_day_minutes"].int)}, holidays ${MeFormat.hm(hours["holiday_minutes"].int)} · paid leave ${hours["paid_leave_days"].str ?: "0"} d, unpaid ${hours["unpaid_leave_days"].str ?: "0"} d, days worked ${hours["days_worked"].str ?: "0"}." + (
+                // Government deductions off for this person (#532): nothing statutory applies (PayslipItems.tsx).
+                if (line["structure"]["statutory"].bool == false) " Government deductions (PAYE, NSSF, SHIF, Housing Levy) do not apply on this payslip."
+                else " Taxable pay ${line.money("taxable", "KES")?.formatted() ?: "—"}. Employer NSSF ${line.money("nssf_employer", "KES")?.formatted() ?: "—"} and Housing Levy ${line.money("housing_employer", "KES")?.formatted() ?: "—"} are not deducted from you."
+            ),
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary,
         )
     }

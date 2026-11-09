@@ -24,7 +24,12 @@ data class Me(val raw: JsonElement) {
         r["name"].str?.let { RoleRef(r["id"].int, it, r["data_scope"].str) } ?: r.str?.let { RoleRef(null, it, null) }
     }
     val isOwner: Boolean = raw["is_owner"].bool ?: false
-    val moneyView: String? = raw["money_view"].str
+    /**
+     * Whose figures the dashboard shows, and for how long
+     * (FinancialVisibility::describe: {range, period, label}, e.g. "today, at
+     * your outlet"). Its `label`; a plain string from an older server is kept.
+     */
+    val moneyView: String? = raw["money_view"]["label"].str ?: raw["money_view"].str
     val outlet: OutletRef? = raw["outlet"].let { o -> o["id"].int?.let { OutletRef(it, o["name"].str ?: "Outlet", o!!) } }
     val sessionPolicy: SessionPolicy? = SessionPolicy.from(raw["session_policy"])
     val terminalPinSet: Boolean = raw["terminal_pin_set"].bool ?: false
