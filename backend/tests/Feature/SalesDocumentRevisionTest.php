@@ -288,7 +288,11 @@ class SalesDocumentRevisionTest extends TestCase
         $payment = $this->paid($order, 'mpesa');
         $url = "/api/v1/admin/orders/{$order->id}/payments/{$payment->id}/revise";
 
-        $this->putJson($url, ['reason' => 'Wrong amount typed', 'amount' => 1])->assertStatus(422);
+        // Amount and currency are correctable since 2026-11-05 (owner: a USD
+        // payment saved as rand), only behind step-up — BillCurrencyTest covers
+        // the correction itself. Without step-up nothing is written.
+        $this->putJson($url, ['reason' => 'Wrong amount typed', 'amount' => 1])->assertStatus(403)->assertJsonPath('code', 'step_up_required');
+        $this->assertEqualsWithDelta((float) $order->total_amount, (float) $payment->fresh()->amount, 0.001);
         $this->putJson($url, ['reason' => 'Was actually cash', 'payment_method' => 'cash'])->assertStatus(422);
         $this->putJson($url, ['reason' => 'Paid tomorrow?', 'paid_at' => now()->addDay()->toIso8601String()])->assertStatus(422);
         $this->putJson($url, ['reason' => 'Nothing at all'])->assertStatus(422);

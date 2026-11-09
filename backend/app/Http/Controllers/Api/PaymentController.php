@@ -1535,7 +1535,7 @@ class PaymentController extends Controller
         $approval = $engine->submit('payment_void', $payment, $request->user(), ['reason' => $validated['reason']]);
 
         return response()->json([
-            'message'  => 'Void requested. It takes effect when finance approves it.',
+            'message'  => $approval->isPending() ? 'Void requested. It takes effect when finance approves it.' : 'Payment voided.',
             'payment'  => $payment->fresh(),
             'approval' => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
         ], 202);
@@ -1576,7 +1576,7 @@ class PaymentController extends Controller
         ]);
 
         return response()->json([
-            'message'  => 'Move requested. It takes effect when finance approves it.',
+            'message'  => $approval->isPending() ? 'Move requested. It takes effect when finance approves it.' : 'Payment moved.',
             'payment'  => $payment->fresh(),
             'approval' => $engine->present($approval->load(['signatures', 'maker']), $request->user()),
         ], 202);

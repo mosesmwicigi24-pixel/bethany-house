@@ -247,12 +247,9 @@ class PosTillApprovalsTest extends TestCase
         $this->assertSame('voided', $order->fresh()->status);
     }
 
-    public function test_a_void_above_finance_needs_the_super_admin_who_approves_but_never_rings(): void
+    public function test_a_void_above_finance_needs_the_super_admin_signature(): void
     {
         $order = $this->sale(150000);
-
-        // The owner cannot ask for a void (owner.no_transact)…
-        $this->requestVoid($order, $this->owner)->assertStatus(403);
 
         $id = $this->requestVoid($order)->assertStatus(202)->json('approval.id');
         $this->assertSame(['pos.approve_reversal', 'approvals.finance_sign', 'approvals.super_sign'],
@@ -638,5 +635,15 @@ class PosTillApprovalsTest extends TestCase
         app(PermissionRegistrar::class)->forgetCachedPermissions();
         $this->assertFalse($om->fresh()->hasPermissionTo('pos.approve_reversal'));
         $this->assertTrue($person->fresh()->hasPermissionTo('pos.approve_reversal', 'sanctum'), 'a direct grant is never touched');
+    }
+
+    /** Owner, 2026-11-09: a super admin may work the till, and their own void needs nobody else (SuperAdminSelfApproval). */
+    public function test_a_super_admins_own_void_goes_straight_through_and_is_audited(): void
+    {
+        $order = $this->sale(150000);
+
+        $this->requestVoid($order, $this->owner)->assertStatus(202)->assertJsonPath('message', 'Sale voided.');
+        $this->assertSame('voided', $order->fresh()->status);
+        $this->assertDatabaseHas('activity_log', ['event' => 'self_approved_super_admin', 'causer_id' => $this->owner->id]);
     }
 }

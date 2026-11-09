@@ -98,7 +98,7 @@ class SettleHeldInstantPayments
             $paid  = (float) DB::table('payments')
                 ->where('order_id', $orderId)
                 ->where('status', 'paid')
-                ->sum('amount');
+                ->sum(DB::raw(\App\Support\PaymentCredit::grossSql('payments')));   // in the order's currency
             $total = (float) $order->total_amount;
 
             $update = ['updated_at' => now()];
