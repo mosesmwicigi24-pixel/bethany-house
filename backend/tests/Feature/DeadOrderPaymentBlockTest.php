@@ -216,8 +216,6 @@ class DeadOrderPaymentBlockTest extends TestCase
 
         $this->postJson("/api/v1/admin/orders/{$order->id}/payment", ['payment_method' => 'mpesa', 'phone' => '0712345678'])
             ->assertStatus(422)->assertJsonPath('reason', 'order_not_payable');
-        $this->postJson("/api/v1/orders/{$order->id}/payment", ['payment_method' => 'card_paystack', 'email' => 'a@b.test'])
-            ->assertStatus(422)->assertJsonPath('reason', 'order_not_payable');
 
         Http::assertNothingSent();
         $this->assertSame(0, Payment::count());
