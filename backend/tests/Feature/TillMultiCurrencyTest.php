@@ -116,7 +116,10 @@ class TillMultiCurrencyTest extends TestCase
             'customer_first_name'   => 'Walk-in',
             'customer_country_code' => $country,
             'payment_method'        => 'cash',
-            'items'                 => [['product_id' => $this->product($kesPrice)->id, 'quantity' => 1, 'unit_price' => $tendered]],
+            // The till states the currency its price is in (TillPriceCurrencyTest);
+            // $tendered is already the price in the customer's currency.
+            'items'                 => [array_filter(['product_id' => $this->product($kesPrice)->id, 'quantity' => 1, 'unit_price' => $tendered,
+                'price_currency' => $country ? \App\Support\SellableCurrency::forCustomer($country) : null])],
             'payments'              => [['method' => 'cash', 'amount' => $tendered, 'cash_received' => $tendered]],
         ]))->assertCreated();
 
