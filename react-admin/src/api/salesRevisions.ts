@@ -1,4 +1,4 @@
-import { get, put } from "./client";
+import { get, post, put } from "./client";
 import type { DocumentRevision } from "./procurement";
 
 // Revisions of issued sales documents (owner, 2026-10-16).
@@ -16,7 +16,12 @@ export const salesRevisionApi = {
         phone_number?: string | null;
         payment_method?: string;
         paid_at?: string | null;
+        amount?: number;
+        currency_code?: string;
     }) => put<{ message: string }>(`/v1/admin/orders/${orderId}/payments/${paymentId}/revise`, data),
+    /** The owner deletes a payment, softly: voided and hidden, the record kept. */
+    removePayment: (orderId: number, paymentId: number, reason: string) =>
+        post<{ message: string; payment_status: string; balance: number }>(`/v1/admin/orders/${orderId}/payments/${paymentId}/remove`, { reason }),
 
     quotationRevisions: (quotationId: number) =>
         get<{ current_revision: number; revisions: DocumentRevision[] }>(`/v1/admin/quotations/${quotationId}/revisions`),

@@ -117,6 +117,15 @@ class ServiceAccountGateTest extends TestCase
         $this->getJson('/api/v1/admin/pos/outlets')->assertOk();
     }
 
+    public function test_neemas_read_calls_stay_open(): void
+    {
+        $this->account();
+
+        // hub_health's probe, then the customer match before every order.
+        $this->getJson('/api/v1/admin/pos/pending-order/open?outlet_id=' . $this->outlet()->id)->assertOk();
+        $this->getJson('/api/v1/admin/pos/customers/search?q=0712')->assertOk();
+    }
+
     public function test_past_the_gate_its_permissions_still_decide(): void
     {
         $this->account();

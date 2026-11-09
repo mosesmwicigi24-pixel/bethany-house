@@ -948,17 +948,18 @@ class UserController extends Controller
         }
 
         // Owner decision, 2026-10-02: "I will set the roles for each person."
-        // Who holds which role is the owner's call — a super administrator's —
-        // and nobody changes their own roles (hard-deny list, Section 12.2 of
-        // the role plan; it applies to super administrators too). Before this,
+        // Who holds which role is the owner's call — a super administrator's.
+        // (Until 2026-11-09 nobody changed their own roles, super administrators
+        // included — role plan §12.2; the owner lifted that for them.) Before this,
         // anyone with users.edit could give themselves or anyone else any role
         // except super_admin.
         if (! $actor->hasRole('super_admin')) {
             abort(403, 'Only a super administrator can change who holds which role.');
         }
-        if ((int) $actor->id === $targetUserId) {
-            abort(403, 'Nobody can change their own roles — another super administrator must make this change.');
-        }
+        // A super admin may set their own roles too (owner, 2026-11-09) — the
+        // step-up confirmation and the audit trail still apply, and update()
+        // still refuses removing your own Super Admin role or the last one.
+        // (Only a super admin reaches this line.)
 
         return true;
     }

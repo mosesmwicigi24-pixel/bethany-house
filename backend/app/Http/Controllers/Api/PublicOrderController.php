@@ -47,7 +47,7 @@ class PublicOrderController extends Controller
 
         $settings  = SettingController::getAll();
         $paid      = Payment::where('order_id', $order->id)->where('status', 'paid');
-        $totalPaid = (float) (clone $paid)->sum('amount');
+        $totalPaid = (float) (clone $paid)->sum(\Illuminate\Support\Facades\DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
         $amountDue = max(0, (float) $order->total_amount - $totalPaid);
         $shipment  = $order->shipments()->orderByDesc('id')->first();
 
@@ -134,7 +134,7 @@ class PublicOrderController extends Controller
         }
 
         $totalPaid = (float) Payment::where('order_id', $order->id)
-            ->where('status', 'paid')->sum('amount');
+            ->where('status', 'paid')->sum(\Illuminate\Support\Facades\DB::raw(\App\Support\PaymentCredit::grossSql('payments')));
         if ($order->payment_status === 'paid' || (float) $order->total_amount - $totalPaid <= 0) {
             return response()->json(['message' => 'This order is already fully paid.'], 409);
         }

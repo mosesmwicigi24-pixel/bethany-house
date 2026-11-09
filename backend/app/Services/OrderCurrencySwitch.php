@@ -35,7 +35,7 @@ class OrderCurrencySwitch
      * their country's (a Botswana customer who wants rand), with $reason. The
      * caller has already checked it is sellable and that a reason was given.
      */
-    public static function toCountry(Order $order, string $countryCode, ?User $actor = null, string $source = 'set_country', ?string $requested = null, ?string $reason = null): array
+    public static function toCountry(Order $order, string $countryCode, ?User $actor = null, string $source = 'set_country', ?string $requested = null, ?string $reason = null, bool $afterPayment = false): array
     {
         $order->loadMissing('items');
         $countryCode     = strtoupper(trim($countryCode));
@@ -50,7 +50,10 @@ class OrderCurrencySwitch
         $oldCurrency     = strtoupper((string) $order->currency_code);
         $oldCountryCode  = $order->customer_country_code;
 
-        if ($why = self::moneyHasMoved($order)) {
+        // After payment only by the super admin's own hand (owner, 2026-11-05):
+        // the caller checks the role and the step-up; each payment then keeps
+        // what it was paid in and is stamped with what it counts for here.
+        if (!$afterPayment && ($why = self::moneyHasMoved($order))) {
             return ['ok' => false, 'changed' => false, 'code' => 'payment_started', 'currency_code' => $oldCurrency, 'is_international' => (bool) $order->is_international, 'message' => $why];
         }
 
@@ -91,9 +94,10 @@ class OrderCurrencySwitch
         $oldTotal = (float) $order->total_amount;
         // Re-check under a row lock: a payment that arrived while we priced wins,
         // and the refusal comes back as a result, never as an exception's text.
-        $lateRefusal = DB::transaction(function () use ($order, $plan, $newCurrency, $countryCode, $isInternational) {
+        $credits = [];
+        $lateRefusal = DB::transaction(function () use ($order, $plan, $newCurrency, $countryCode, $isInternational, $afterPayment, $oldTotal, &$credits) {
             $locked = Order::whereKey($order->id)->lockForUpdate()->first();
-            if ($locked && ($why = self::moneyHasMoved($locked))) {
+            if (!$afterPayment && $locked && ($why = self::moneyHasMoved($locked))) {
                 return $why;
             }
             OrderRepricer::apply($order, $plan, [
@@ -101,9 +105,13 @@ class OrderCurrencySwitch
                 'customer_country_code' => $countryCode,
                 'is_international'      => $isInternational,
             ]);
+            $credits = self::restampPayments($order, $newCurrency, $oldTotal, (float) $plan['total']);
 
             return null;
         });
+        if ($credits) {
+            $order->refresh()->syncPaymentStatus();
+        }
         if ($lateRefusal !== null) {
             return ['ok' => false, 'changed' => false, 'code' => 'payment_started', 'currency_code' => $oldCurrency, 'is_international' => (bool) $order->is_international, 'message' => $lateRefusal];
         }
@@ -120,11 +128,71 @@ class OrderCurrencySwitch
             'actor_id'         => $actor?->id,
             'on_request'       => $onRequest,
             'reason'           => $onRequest ? $reason : null,
+            'after_payment'    => $afterPayment && $credits !== [],
+            'payment_credits'  => $credits,
         ], ($actor ? "{$actor->first_name} moved" : 'Moved') . " {$order->order_number} from {$oldCurrency} to {$newCurrency} ({$countryCode})"
             . ($onRequest ? " at the customer's request: {$reason}" : ''), $actor);
 
         return ['ok' => true, 'changed' => true, 'currency_code' => $newCurrency, 'is_international' => $isInternational,
             'new_total' => $plan['total'], 'old_currency' => $oldCurrency, 'old_total' => $oldTotal];
+    }
+
+    /**
+     * Each payment keeps what it was paid in; it is stamped with what it now
+     * counts for in the order's new currency (App\Support\PaymentCredit):
+     * the SAME SHARE of the order it covered before — a payment that paid the
+     * whole USD 25 shirt pays the whole ZAR 430.77 shirt. A payment already in
+     * the new currency counts as itself again. When the order was fully paid
+     * it stays exactly fully paid (cents go to the largest payment).
+     *
+     * Voided, failed and rejected payments are left alone: they count for
+     * nothing either way.
+     *
+     * @return list<array{payment: string, paid: string, counts_before: float, counts_now: float}>
+     */
+    private static function restampPayments(Order $order, string $newCurrency, float $oldTotal, float $newTotal): array
+    {
+        $payments = \App\Models\Payment::where('order_id', $order->id)
+            ->whereNotIn('status', ['failed', 'cancelled', 'voided', 'void', 'reversed'])
+            ->where(fn ($q) => $q->whereNull('approval_status')->orWhere('approval_status', '!=', 'rejected'))
+            ->lockForUpdate()->orderBy('id')->get();
+        if ($payments->isEmpty() || $oldTotal <= 0) {
+            return [];
+        }
+
+        $before = $payments->mapWithKeys(fn ($p) => [$p->id => \App\Support\PaymentCredit::gross($p)]);
+        $now = [];
+        foreach ($payments as $p) {
+            $now[$p->id] = strtoupper((string) $p->currency_code) === $newCurrency
+                ? (float) $p->amount
+                : round($before[$p->id] * $newTotal / $oldTotal, 2);
+        }
+        // Fully paid before → exactly fully paid now. Only ever a rounding
+        // correction (a few cents): on #1158 a mis-recorded payment made the
+        // order look paid, and an unbounded "correction" set another payment's
+        // counted amount to 0. A gap bigger than cents is real and stays.
+        $gap = round($newTotal - array_sum($now), 2);
+        if (array_sum($before->all()) >= $oldTotal - 0.01 && abs($gap) > 0 && abs($gap) <= 0.05) {
+            $foreign = array_filter(array_keys($now), fn ($id) => strtoupper((string) $payments->firstWhere('id', $id)->currency_code) !== $newCurrency);
+            if ($foreign) {
+                $largest = array_reduce($foreign, fn ($c, $id) => $c === null || $now[$id] > $now[$c] ? $id : $c);
+                $now[$largest] = round($now[$largest] + $gap, 2);
+            }
+        }
+
+        $out = [];
+        foreach ($payments as $p) {
+            $same = strtoupper((string) $p->currency_code) === $newCurrency;
+            DB::table('payments')->where('id', $p->id)->update([
+                'order_amount'        => $same ? null : $now[$p->id],
+                'order_currency_code' => $same ? null : $newCurrency,
+                'updated_at'          => now(),
+            ]);
+            $out[] = ['payment' => (string) $p->payment_number, 'paid' => strtoupper((string) $p->currency_code) . ' ' . number_format((float) $p->amount, 2, '.', ''),
+                'counts_before' => round($before[$p->id], 2), 'counts_now' => $now[$p->id]];
+        }
+
+        return $out;
     }
 
     /**
@@ -143,6 +211,54 @@ class OrderCurrencySwitch
         $plan = $unpriceable ? null : OrderRepricer::plan($order, $repriced, $old, $new);
 
         return $plan ? ['currency_code' => $new, 'total' => (float) $plan['total']] : null;
+    }
+
+    /** The order's total re-priced in $currency, without writing anything; null when it can't be. */
+    public static function totalIn(Order $order, string $currency): ?float
+    {
+        $order->loadMissing('items');
+        $old = strtoupper((string) $order->currency_code);
+        $currency = strtoupper($currency);
+        if ($old === $currency) {
+            return (float) $order->total_amount;
+        }
+        [$repriced, $unpriceable] = self::reprice($order, $old, $currency);
+        $plan = $unpriceable ? null : OrderRepricer::plan($order, $repriced, $old, $currency);
+
+        return $plan ? (float) $plan['total'] : null;
+    }
+
+    /**
+     * A payment left in another currency with nothing saying what it counts
+     * for (switched before 2026-11-05, e.g. order #1158): stamp it with its
+     * share of the order — its amount over the order's total re-priced in the
+     * payment's currency, times the order's total. Returns what was stamped.
+     *
+     * @return list<array{payment: string, paid: string, counts_now: float}>
+     */
+    public static function stampStrayPayments(Order $order, ?User $actor = null): array
+    {
+        $orderCcy = strtoupper((string) $order->currency_code);
+        $stray = \App\Models\Payment::where('order_id', $order->id)
+            ->whereRaw('UPPER(currency_code) <> ?', [$orderCcy])->whereNull('order_currency_code')
+            ->whereNotIn('status', ['failed', 'cancelled', 'voided', 'void', 'reversed'])->get();
+        $out = [];
+        foreach ($stray as $p) {
+            $totalThere = self::totalIn($order, (string) $p->currency_code);
+            if (!$totalThere || $totalThere <= 0) {
+                continue;   // cannot be priced: left for a person
+            }
+            $counts = round((float) $p->amount * (float) $order->total_amount / $totalThere, 2);
+            DB::table('payments')->where('id', $p->id)->update(['order_amount' => $counts, 'order_currency_code' => $orderCcy, 'updated_at' => now()]);
+            $out[] = ['payment' => (string) $p->payment_number, 'paid' => strtoupper((string) $p->currency_code) . ' ' . number_format((float) $p->amount, 2, '.', ''), 'counts_now' => $counts];
+        }
+        if ($out) {
+            $order->refresh()->syncPaymentStatus();
+            ActivityLogService::log('payment_currency_stamped', $order, ['order_currency' => $orderCcy, 'payments' => $out],
+                ($actor ? "{$actor->first_name} set" : 'Set') . " what {$order->order_number}'s payments in another currency count for in {$orderCcy}", $actor);
+        }
+
+        return $out;
     }
 
     /**
@@ -214,7 +330,12 @@ class OrderCurrencySwitch
         $moving = DB::table('payments')->where('order_id', $order->id)
             ->where(function ($q) {
                 $q->whereIn('status', ['paid', 'processing', 'confirmed'])
-                  ->orWhere(fn ($p) => $p->where('status', 'pending')->where('created_at', '>', now()->subMinutes(self::IN_FLIGHT_MINUTES)));
+                  ->orWhere(fn ($p) => $p->where('status', 'pending')->where('created_at', '>', now()->subMinutes(self::IN_FLIGHT_MINUTES)))
+                  // A payment waiting for an admin's approval is money that has
+                  // moved, however long it has waited (order #1158, 2026-11-05:
+                  // a USD 25 payment waited two days, the order was switched to
+                  // ZAR, and the 25 was then counted as rand).
+                  ->orWhere(fn ($p) => $p->where('requires_approval', true)->where('approval_status', 'pending_review')->where('status', '!=', 'cancelled'));
             })->exists();
 
         return $moving ? 'Cannot change currency: a payment on this order is recorded, awaiting review or still in progress.' : null;

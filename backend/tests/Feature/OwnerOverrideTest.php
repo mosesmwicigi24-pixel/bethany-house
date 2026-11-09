@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\User;
-use App\Services\Auth\StepUp;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Notification;
@@ -54,7 +53,7 @@ class OwnerOverrideTest extends TestCase
         return $u->fresh();
     }
 
-    private function pendingExpenseBy(User $as, float $amount = 5000): Expense
+    private function expenseBy(User $as, float $amount = 5000): Expense
     {
         $category = ExpenseCategory::firstOrCreate(
             ['code' => 'WORKSHOP'],
@@ -65,10 +64,8 @@ class OwnerOverrideTest extends TestCase
             'title' => 'Industrial iron boxes', 'category_id' => $category->id, 'expense_date' => now()->toDateString(),
             'amount' => $amount, 'currency_code' => 'KES', 'payment_method' => 'cash', 'vendor_name' => 'Pastor Moses',
         ])->assertCreated()->json('expense.id');
-        $e = Expense::findOrFail($id);
-        $this->assertSame('pending_approval', $e->status);
 
-        return $e;
+        return Expense::findOrFail($id);
     }
 
     private function approve(Expense $e, array $body = [])
@@ -76,53 +73,46 @@ class OwnerOverrideTest extends TestCase
         return $this->postJson("/api/v1/admin/expenses/{$e->id}/approve", $body);
     }
 
-    public function test_without_asking_for_the_override_the_owner_is_refused_like_everyone(): void
+    /**
+     * Since 2026-11-05 a super admin's own expense is approved on entry
+     * (SuperAdminSelfApproval) — no override to ask for, no step-up. It is
+     * marked everywhere exactly as an override was.
+     */
+    public function test_the_owners_own_expense_is_approved_on_entry_and_marked_everywhere(): void
     {
         $owner = $this->owner();
-        $e     = $this->pendingExpenseBy($owner);
-
-        $this->approve($e)->assertForbidden()->assertJsonPath('code', 'SELF_APPROVAL');
-        $this->assertSame('pending_approval', $e->fresh()->status);
-    }
-
-    public function test_the_override_first_asks_the_owner_to_confirm_it_is_them(): void
-    {
-        $owner = $this->owner();
-        $e     = $this->pendingExpenseBy($owner);
-
-        $this->approve($e, ['owner_override' => true])
-            ->assertForbidden()->assertJsonPath('code', 'step_up_required');
-        $this->assertSame('pending_approval', $e->fresh()->status);
-        $this->assertDatabaseMissing('activity_log', ['event' => 'self_approval_overridden']);
-    }
-
-    public function test_after_confirming_the_owner_approves_their_own_expense_and_it_is_marked_everywhere(): void
-    {
-        $owner = $this->owner();
-        $e     = $this->pendingExpenseBy($owner);
-        app(StepUp::class)->confirmFor($owner, null);
-
-        $res = $this->approve($e, ['owner_override' => true, 'comments' => 'Paid the pastor for the boxes'])->assertOk();
-        $this->assertSame('Expense approved.', $res->json('message'));
-        $this->assertTrue($res->json('approval.signatures.0.owner_override'));
+        $e     = $this->expenseBy($owner);
 
         $e->refresh();
         $this->assertSame('approved', $e->status);
         $this->assertSame($owner->id, (int) $e->approved_by);
         $this->assertDatabaseHas('approval_signatures', ['signer_id' => $owner->id, 'decision' => 'approved', 'owner_override' => true]);
         $this->assertDatabaseHas('expense_approvals', ['expense_id' => $e->id, 'approver_id' => $owner->id, 'action' => 'approved', 'owner_override' => true]);
-        $this->assertDatabaseHas('activity_log', ['event' => 'self_approval_overridden', 'causer_id' => $owner->id]);
-        $this->assertDatabaseMissing('activity_log', ['event' => 'self_approval_blocked']);
+        $this->assertDatabaseHas('activity_log', ['event' => 'self_approved_super_admin', 'causer_id' => $owner->id]);
 
         // The detail the console shows carries the mark too.
         $detail = $this->getJson("/api/v1/admin/expenses/{$e->id}")->assertOk();
         $this->assertTrue(collect($detail->json('expense.approvals'))->firstWhere('action', 'approved')['owner_override']);
     }
 
+    public function test_another_super_admins_own_expense_is_approved_on_entry_too(): void
+    {
+        $other = $this->otherSuperAdmin();
+        $e     = $this->expenseBy($other);
+
+        $this->assertSame('approved', $e->fresh()->status);
+        $this->assertDatabaseHas('expense_approvals', ['expense_id' => $e->id, 'approver_id' => $other->id, 'owner_override' => true]);
+    }
+
     public function test_an_approval_by_someone_else_is_not_marked(): void
     {
-        $owner = $this->owner();
-        $e     = $this->pendingExpenseBy($owner);
+        $admin = User::factory()->create(['status' => 'active', 'user_type' => 'staff']);
+        $admin->assignRole(Role::findOrCreate('finance_manager', 'sanctum'));
+        $admin->assignRole(Role::findOrCreate('accountant', 'sanctum'));
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        $e = $this->expenseBy($admin->fresh());
+        $this->assertSame('pending_approval', $e->status, 'anyone but a super admin still waits');
+
         $finance = User::factory()->create(['status' => 'active', 'user_type' => 'staff']);
         $finance->assignRole(Role::findOrCreate('finance_manager', 'sanctum'));
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -130,17 +120,6 @@ class OwnerOverrideTest extends TestCase
         Sanctum::actingAs($finance->fresh());
         $this->approve($e)->assertOk();
         $this->assertDatabaseHas('expense_approvals', ['expense_id' => $e->id, 'approver_id' => $finance->id, 'owner_override' => false]);
-    }
-
-    public function test_another_super_admin_cannot_override_even_after_confirming(): void
-    {
-        $other = $this->otherSuperAdmin();
-        $e     = $this->pendingExpenseBy($other);
-        app(StepUp::class)->confirmFor($other, null);
-
-        $this->approve($e, ['owner_override' => true])->assertForbidden()->assertJsonPath('code', 'SELF_APPROVAL');
-        $this->assertSame('pending_approval', $e->fresh()->status);
-        $this->assertDatabaseHas('activity_log', ['event' => 'self_approval_blocked', 'causer_id' => $other->id]);
     }
 
     public function test_the_override_is_for_expenses_only_and_the_owner_cannot_approve_their_own_purchase_order(): void
