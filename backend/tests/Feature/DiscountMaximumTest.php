@@ -417,14 +417,16 @@ class DiscountMaximumTest extends TestCase
         }
     }
 
-    public function test_a_super_admin_at_the_till_is_refused_by_the_owner_rule_not_the_discount(): void
+    /** Since 2026-11-09 a super admin may ring a sale; they have no discount ceiling. */
+    public function test_a_super_admin_at_the_till_is_not_held_to_a_discount_ceiling(): void
     {
         $this->actAsSuperAdmin();
         $p = $this->product();
 
-        $this->sale([$this->line($p, 'percent', 30)])
-            ->assertStatus(403)
-            ->assertJsonPath('code', 'OWNER_DOES_NOT_TRANSACT');
+        $res = $this->sale([$this->line($p, 'percent', 30)]);
+        $this->assertNotSame('OWNER_DOES_NOT_TRANSACT', $res->json('code'));
+        $this->assertNotSame('DISCOUNT_ABOVE_MAXIMUM', $res->json('code'));
+        $this->assertNotSame('discount_above_maximum', $res->json('reason'));
     }
 
     // ── The older Livewire till, which is still routed ───────────────────────
