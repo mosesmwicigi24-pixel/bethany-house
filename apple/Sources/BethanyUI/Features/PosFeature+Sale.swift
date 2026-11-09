@@ -46,13 +46,19 @@ struct PosSaleView: View {
         .toolbar { toolbar }
         .task { await load() }
         .onChange(of: category) { _, _ in makeProducts() }
+        // The billing currency decides the price list, the shipping fees and the
+        // payment methods (PosPage.tsx: every query is keyed on currencyForQuery).
+        .onChange(of: session.pricingCurrency) { _, _ in
+            makeProducts()
+            Task { await loadCurrencyLists() }
+        }
         .onChange(of: search) { _, q in
             searchTask?.cancel()
             guard q.count >= 2 else { searchResults = nil; return }
             searchTask = Task {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled, let outlet = session.outlet else { return }
-                searchResults = try? await session.api.searchProducts(q, outletId: outlet.id, currency: session.currency)
+                searchResults = try? await session.api.searchProducts(q, outletId: outlet.id, currency: session.pricingCurrency)
             }
         }
         .sheet(item: $variantPicker) { p in VariantSheet(product: p) { v, mto in session.add(product: p, variant: v, production: mto); variantPicker = nil } }
@@ -212,8 +218,8 @@ struct PosSaleView: View {
         guard let outlet = session.outlet else { return }
         if products == nil { makeProducts() }
         session.checkoutConfig = session.checkoutConfig ?? (try? await session.api.checkoutConfig())
-        session.shippingMethods = (try? await session.api.shippingMethods(currency: session.currency)) ?? []
-        session.paymentMethods = (try? await session.api.paymentMethods(currency: session.currency)) ?? []
+        await session.loadBillingLists()
+        await loadCurrencyLists()
         // An unpaid pending order from this session is resumed, never duplicated (PosPage.tsx auto-resume).
         if session.cart.isEmpty, session.pendingOrderId == nil, let open = try? await session.api.openPendingOrder(outletId: outlet.id), let order = open?["order"] {
             session.restore(sale: PosSale(json: order))
@@ -221,11 +227,17 @@ struct PosSaleView: View {
         }
     }
 
+    private func loadCurrencyLists() async {
+        session.shippingMethods = (try? await session.api.shippingMethods(currency: session.pricingCurrency)) ?? []
+        session.paymentMethods = (try? await session.api.paymentMethods(currency: session.pricingCurrency)) ?? []
+    }
+
     private func makeProducts() {
         guard let outlet = session.outlet else { return }
         let api = session.api
         let cat = category
-        products = Resource { try await api.products(outletId: outlet.id, categoryId: cat, currency: nil) }
+        let cur = session.pricingCurrency
+        products = Resource { try await api.products(outletId: outlet.id, categoryId: cat, currency: cur) }
         products?.load()
     }
 
