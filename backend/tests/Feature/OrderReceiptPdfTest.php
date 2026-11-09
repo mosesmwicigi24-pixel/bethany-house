@@ -90,11 +90,11 @@ class OrderReceiptPdfTest extends TestCase
         // The screen's own figures (OrderController / Order::outstandingBalance) agree.
         $this->assertEquals($o->fresh()->outstandingBalance(), $data['balance_due']);
 
-        $this->assertStringContainsString('43,500.00', $html, 'balance due');
-        $this->assertStringContainsString('6,500.00', $html, 'total paid');
+        $this->assertStringContainsString('KES 43,500', $html, 'balance due');
+        $this->assertStringContainsString('KES 6,500', $html, 'total paid');
         $this->assertStringContainsString('Refund', $html, 'the refund is shown, not hidden');
-        $this->assertStringNotContainsString('10,000.00', $html, 'a payment awaiting approval is not money received');
-        $this->assertStringNotContainsString('3,000.00', $html, 'a failed payment is not money received');
+        $this->assertStringNotContainsString('KES 10,000', $html, 'a payment awaiting approval is not money received');
+        $this->assertStringNotContainsString('KES 3,000', $html, 'a failed payment is not money received');
         $this->assertStringNotContainsString('PAID IN FULL', $html);
         $this->assertStringContainsString('Bishop Gitahi', $html);
 
@@ -140,7 +140,7 @@ class OrderReceiptPdfTest extends TestCase
         $this->assertStringContainsString('Please pay the amount due', $html);
         $this->assertStringContainsString($o->order_number, $html);
         $this->assertStringContainsString('No payment received yet.', $html);
-        $this->assertStringNotContainsString('4,000.00', $html, 'a failed payment is not listed as received');
+        $this->assertStringNotContainsString('KES 4,000', $html, 'a failed payment is not listed as received');
         $this->assertStringContainsString('Invoice', $html);
     }
 
@@ -158,8 +158,8 @@ class OrderReceiptPdfTest extends TestCase
         foreach ([[$inv, $invHtml], [$rec, $recHtml]] as [$data, $html]) {
             $this->assertSame(6_750.0, (float) $data['total_paid']);
             $this->assertSame(13_250.0, (float) $data['balance_due']);
-            $this->assertStringContainsString('13,250.00', $html);
-            $this->assertStringNotContainsString('5,000.00', $html, 'pending money is not received');
+            $this->assertStringContainsString('KES 13,250', $html);
+            $this->assertStringNotContainsString('KES 5,000', $html, 'pending money is not received');
         }
     }
 
@@ -213,5 +213,114 @@ class OrderReceiptPdfTest extends TestCase
 
         // Recorded for the owner's morning digest like invoices and receipts.
         $this->assertSame('exempt', DownloadRequest::where('user_id', $clerk->id)->sole()->category);
+    }
+
+    // ── The receipt redesign (owner, 2026-11-05) ─────────────────────────────
+
+    public function test_tax_included_in_prices_is_shown_as_included_never_as_an_added_line(): void
+    {
+        // The owner's WA-261027-QUAKB: USD 25 with 16% VAT inside the price.
+        $this->person('admin');
+        $o = $this->order(25);
+        $o->update(['currency_code' => 'USD', 'tax_amount' => 3.45, 'prices_include_tax' => true]);
+        Payment::factory()->create(['order_id' => $o->id, 'amount' => 25, 'currency_code' => 'USD', 'status' => 'paid', 'payment_method' => 'other', 'paid_at' => now()]);
+
+        [, $html] = $this->receipt($o);
+        $this->assertStringContainsString('Prices include tax of USD 3.45', $html);
+        $this->assertStringNotContainsString('<td class="s-k">Tax</td>', $html, 'no Tax line that looks added on');
+        $this->assertStringNotContainsString('Discount', $html, 'a zero discount is not printed');
+        $this->assertStringNotContainsString('Shipping', $html, 'zero shipping is not printed');
+        $this->assertStringContainsString('PAID IN FULL', $html);
+        $this->assertStringContainsString('>PAID<', $html);
+    }
+
+    public function test_tax_added_on_top_is_a_line_and_the_summary_adds_up(): void
+    {
+        $this->person('admin');
+        // Independent arithmetic: 10,000 − 500 + 1,520 tax + 800 shipping = 11,820.
+        $o = $this->order(11_820);
+        $o->update(['subtotal' => 10_000, 'discount_amount' => 500, 'tax_amount' => 1_520, 'shipping_amount' => 800, 'prices_include_tax' => false]);
+        $this->pay($o, 4_000);
+
+        [$data, $html] = $this->receipt($o);
+        $this->assertSame(7_820.0, (float) $data['balance_due']);
+        foreach (['KES 10,000', '− KES 500', 'KES 1,520', 'KES 800', 'KES 11,820', 'KES 4,000', 'KES 7,820'] as $figure) {
+            $this->assertStringContainsString(str_replace('−', '&minus;', $figure), $html, $figure);
+        }
+        $this->assertStringContainsString('<td class="s-k">Tax</td>', $html);
+        $this->assertStringContainsString('PARTIALLY PAID', $html);
+        $this->assertStringContainsString('Balance due', $html);
+        $this->assertStringNotContainsString('PAID IN FULL', $html);
+    }
+
+    public function test_a_payment_in_another_currency_shows_what_arrived_and_what_it_counts_for(): void
+    {
+        $this->person('admin');
+        $o = $this->order(450);
+        $o->update(['currency_code' => 'USD']);
+        Payment::factory()->create(['order_id' => $o->id, 'amount' => 405.77, 'currency_code' => 'ZAR', 'order_amount' => 23.61, 'order_currency_code' => 'USD',
+            'status' => 'paid', 'payment_method' => 'mukuru', 'paid_at' => now()->subDay()]);
+        Payment::factory()->create(['order_id' => $o->id, 'amount' => 426.39, 'currency_code' => 'USD', 'status' => 'paid', 'payment_method' => 'other', 'paid_at' => now()]);
+
+        [$data, $html] = $this->receipt($o);
+        $this->assertSame(450.0, (float) $data['total_paid']);   // 23.61 + 426.39
+        $this->assertStringContainsString('ZAR 405.77', $html);
+        $this->assertStringContainsString('counts USD 23.61', $html);
+        $this->assertStringNotContainsString('USD 405.77', $html, 'rand is never printed as dollars');
+        $this->assertStringContainsString('PAID IN FULL', $html);
+
+        // The invoice lists the same payment the same way.
+        [, $invHtml] = $this->invoice($o);
+        $this->assertStringContainsString('ZAR 405.77', $invHtml);
+        $this->assertStringNotContainsString('USD 405.77', $invHtml);
+    }
+
+    public function test_a_payment_awaiting_approval_is_neither_listed_nor_counted(): void
+    {
+        $this->person('admin');
+        $o = $this->order(10_000);
+        $this->pay($o, 3_000);
+        Payment::factory()->create(['order_id' => $o->id, 'amount' => 6_500, 'currency_code' => 'KES', 'status' => 'paid', 'payment_method' => 'bank_transfer',
+            'requires_approval' => true, 'approval_status' => 'pending_review', 'paid_at' => now()]);
+
+        [$data, $html] = $this->receipt($o);
+        $this->assertSame(3_000.0, (float) $data['total_paid']);
+        $this->assertCount(1, $data['settled_payments'], 'the list holds exactly what Total Paid sums');
+        $this->assertStringNotContainsString('KES 6,500', $html);
+        $this->assertStringContainsString('KES 7,000', $html, 'balance due: 10,000 − 3,000');
+        $this->assertStringNotContainsString('PAID IN FULL', $html);
+    }
+
+    public function test_many_long_items_still_make_a_valid_pdf_with_every_line(): void
+    {
+        $this->person('admin');
+        $o = $this->order(0);
+        $total = 0;
+        for ($i = 1; $i <= 30; $i++) {
+            \App\Models\OrderItem::forceCreate(['order_id' => $o->id, 'product_id' => \App\Models\Product::factory()->create()->id, 'product_name' => "Vestment {$i} — " . str_repeat('hand-embroidered gold thread detail, ', 4),
+                'sku' => "VST-{$i}", 'quantity' => 1, 'unit_price' => 1_000, 'discount_amount' => 0, 'total_price' => 1_000]);
+            $total += 1_000;
+        }
+        $o->update(['subtotal' => $total, 'total_amount' => $total]);
+        $this->pay($o, $total);
+
+        [, $html] = $this->receipt($o);
+        $this->assertSame(30, substr_count($html, '<td class="c-desc">'));
+        $res = $this->get("/api/v1/admin/pdf/orders/{$o->id}/receipt")->assertOk();
+        $this->assertStringStartsWith('%PDF', (string) $res->getContent());
+        $this->assertStringContainsString('KES 30,000', $html);
+    }
+
+    public function test_the_per_payment_receipt_prints_the_payment_in_its_own_currency(): void
+    {
+        $html = \App\Services\PdfService::receipt([
+            'receipt_number' => 'RCT-1', 'order_number' => 'BH-1', 'issued_at' => now()->toIso8601String(), 'currency_code' => 'USD',
+            'payment' => ['method' => 'mukuru', 'reference' => 'MK-1', 'amount' => 405.77, 'currency_code' => 'ZAR'],
+            'invoice_total' => 450, 'paid_to_date' => 23.61, 'balance_due' => 426.39, 'fully_paid' => false,
+        ]);
+        $this->assertStringContainsString('ZAR 405.77', $html);
+        $this->assertStringContainsString('USD 426.39', $html);
+        $this->assertStringContainsString('PARTIALLY PAID', $html);
+        $this->assertStringNotContainsString('PAID IN FULL', $html);
     }
 }

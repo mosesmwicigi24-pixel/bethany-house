@@ -3468,6 +3468,50 @@
                 }
             }
         },
+        "/api/v1/admin/channels/attention": {
+            "get": {
+                "operationId": "get_v1_admin_channels_attention",
+                "summary": "Attention (Channel)",
+                "tags": [
+                    "channels"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/channels/audiences": {
             "get": {
                 "operationId": "get_v1_admin_channels_audiences",
@@ -4043,6 +4087,73 @@
             "patch": {
                 "operationId": "patch_v1_admin_channels_by_id",
                 "summary": "Update (Channel)",
+                "tags": [
+                    "channels"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/channels/{id}/acknowledge": {
+            "post": {
+                "operationId": "post_v1_admin_channels_by_id_acknowledge",
+                "summary": "Acknowledge (Channel)",
                 "tags": [
                     "channels"
                 ],
@@ -4716,6 +4827,73 @@
                     },
                     {
                         "name": "msgId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/channels/{id}/notice-dismiss": {
+            "post": {
+                "operationId": "post_v1_admin_channels_by_id_notice_dismiss",
+                "summary": "Dismiss Notice (Channel)",
+                "tags": [
+                    "channels"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
                         "in": "path",
                         "required": true,
                         "schema": {
@@ -20476,6 +20654,77 @@
                 }
             }
         },
+        "/api/v1/admin/orders/{id}/bill-currency": {
+            "post": {
+                "operationId": "post_v1_admin_orders_by_id_bill_currency",
+                "summary": "Bill Currency (Order)",
+                "tags": [
+                    "orders"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "orders.view",
+                    "orders.edit"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/orders/{id}/document-revisions": {
             "get": {
                 "operationId": "get_v1_admin_orders_by_id_document_revisions",
@@ -21115,6 +21364,84 @@
                     "orders.view",
                     "payments.void",
                     "payments.request_void"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/orders/{id}/payments/{paymentId}/remove": {
+            "post": {
+                "operationId": "post_v1_admin_orders_by_id_payments_by_paymentId_remove",
+                "summary": "Remove Payment (SalesDocumentRevision)",
+                "tags": [
+                    "orders"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "paymentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "orders.view"
                 ],
                 "x-staff-only": true,
                 "x-throttle": [
@@ -22798,7 +23125,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-staff-only": true,
                 "x-throttle": [
@@ -22844,6 +23172,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "hr.edit"
                 ],
                 "x-staff-only": true,
@@ -22915,6 +23244,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "hr.edit"
                 ],
                 "x-staff-only": true,
@@ -23056,7 +23386,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-step-up": true,
                 "x-staff-only": true,
@@ -24945,6 +25276,434 @@
                 "parameters": [
                     {
                         "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view",
+                    "payroll.run"
+                ],
+                "x-step-up": true,
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/commissions": {
+            "get": {
+                "operationId": "get_v1_admin_payroll_commissions",
+                "summary": "Index (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            },
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions",
+                "summary": "Store (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view",
+                    "payroll.run"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/commissions/paye": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions_paye",
+                "summary": "Set Paye (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-step-up": true,
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/commissions/{id}/approve": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions_by_id_approve",
+                "summary": "Approve (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-step-up": true,
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/commissions/{id}/void": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_commissions_by_id_void",
+                "summary": "Void (Commissions)",
+                "tags": [
+                    "payroll"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view",
+                    "payroll.run"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/people": {
+            "get": {
+                "operationId": "get_v1_admin_payroll_people",
+                "summary": "People (Payroll)",
+                "tags": [
+                    "payroll"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "payroll.view"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payroll/people/{user}/deductions": {
+            "post": {
+                "operationId": "post_v1_admin_payroll_people_by_user_deductions",
+                "summary": "Set Deductions (Payroll)",
+                "tags": [
+                    "payroll"
+                ],
+                "parameters": [
+                    {
+                        "name": "user",
                         "in": "path",
                         "required": true,
                         "schema": {
@@ -48439,7 +49198,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-staff-only": true,
                 "x-throttle": [
@@ -48545,7 +49305,8 @@
                     }
                 ],
                 "x-permissions": [
-                    "attendance.view_team"
+                    "attendance.view_team",
+                    "timesheets.lock"
                 ],
                 "x-staff-only": true,
                 "x-throttle": [
@@ -48603,6 +49364,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "attendance.manage"
                 ],
                 "x-staff-only": true,
@@ -48674,6 +49436,7 @@
                 ],
                 "x-permissions": [
                     "attendance.view_team",
+                    "timesheets.lock",
                     "attendance.manage"
                 ],
                 "x-staff-only": true,
@@ -52406,6 +53169,58 @@
                 }
             }
         },
+        "/api/v1/pay/{token}/currency": {
+            "post": {
+                "operationId": "post_v1_pay_by_token_currency",
+                "summary": "Choose Currency (PublicPayment)",
+                "tags": [
+                    "pay"
+                ],
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "x-throttle": [
+                    "60,1",
+                    "10,1"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/pay/{token}/initiate": {
             "post": {
                 "operationId": "post_v1_pay_by_token_initiate",
@@ -53458,6 +54273,66 @@
                                 }
                             }
                         }
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
+        "/api/v1/push-actions/channels/{id}/{action}": {
+            "post": {
+                "operationId": "post_v1_push_actions_channels_by_id_by_action",
+                "summary": "Push Action (Channel)",
+                "tags": [
+                    "push-actions"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "action",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "x-signed-url": true,
+                "x-throttle": [
+                    "60,1"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
                     },
                     "429": {
                         "$ref": "#/components/responses/RateLimited"
@@ -55705,6 +56580,9 @@
         },
         {
             "name": "push"
+        },
+        {
+            "name": "push-actions"
         },
         {
             "name": "quotations"

@@ -18,7 +18,7 @@ export interface PayrollLine {
     user: { id: number; name?: string };
     hours: LineHours;
     items: PayslipItem[];
-    structure: { kind: StructureKind | null; base_amount: number | null; hourly_equivalent: number | null; service_fraction: number | null };
+    structure: { kind: StructureKind | null; base_amount: number | null; hourly_equivalent: number | null; service_fraction: number | null; /** False when government deductions did not apply. */ statutory?: boolean };
     payment_method: "mpesa" | "bank" | "cash" | null;
     payment_reference: string | null;
     paid_at: string | null;
@@ -90,6 +90,55 @@ export interface PayStructure {
     created_at: string | null;
 }
 
+/** One row of Payroll › People & pay. */
+export interface PayPerson {
+    id: number;
+    name: string;
+    salary: { kind: StructureKind; base_amount: number; effective_from: string } | null;
+    /** PAYE, NSSF, SHIF (SHA) and Housing Levy together — off unless accounts added them. */
+    deductions: { applies: boolean; since: string | null; reason: string | null; next: { applies: boolean; from: string } | null };
+    advances_owed: number;
+    /** Commission approved and not yet paid (owed), and recorded awaiting a super admin (pending). */
+    commission: { owed: number; pending: number };
+    last_paid: { net: number; paid_on: string; method: string | null; run: string | null } | null;
+}
+
+export type CommissionStatus = "recorded" | "approved" | "paid" | "void";
+/** A commission on top of salary: finance records, a super admin approves, the pay run pays. */
+export interface Commission {
+    id: number;
+    user: { id: number; name: string | null };
+    transaction_ref: string;
+    order: { id: number; number: string } | null;
+    amount: number;
+    earned_on: string;
+    note: string | null;
+    status: CommissionStatus;
+    recorded_by: string | null;
+    approved_by: string | null;
+    approved_at: string | null;
+    run: string | null;
+    paid_on: string | null;
+    void_reason: string | null;
+    can_approve: boolean;
+    can_void: boolean;
+}
+export const COMMISSION_LABEL: Record<CommissionStatus, string> = { recorded: "Awaiting approval", approved: "Approved · next pay run", paid: "Paid", void: "Void" };
+export const COMMISSION_TONE: Record<CommissionStatus, string> = { recorded: "bg-warning-light text-warning-dark", approved: "bg-info-light text-info", paid: "bg-success-light text-success-dark", void: "bg-surface-100 text-surface-500 line-through" };
+
+export const commissionsApi = {
+    list: (params: { user_id?: number; status?: CommissionStatus | "open" }) =>
+        get<{ data: Commission[]; totals: { awaiting_approval: number; owed: number; paid: number }; paye_applies: boolean; can_record: boolean; can_approve: boolean }>(
+            "/v1/admin/payroll/commissions", { params: Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])) }),
+    record: (data: { user_id: number; transaction_ref: string; amount: number; earned_on: string; note?: string }) =>
+        post<{ message: string; commission: Commission }>("/v1/admin/payroll/commissions", data),
+    /** Super admin; the server asks for a step-up first. */
+    approve: (id: number) => post<{ message: string; commission: Commission }>(`/v1/admin/payroll/commissions/${id}/approve`),
+    void: (id: number, reason: string) => post<{ message: string }>(`/v1/admin/payroll/commissions/${id}/void`, { reason }),
+    /** PAYE on commission, on or off — super admin; step-up. */
+    setPaye: (applies: boolean) => post<{ message: string; paye_applies: boolean }>("/v1/admin/payroll/commissions/paye", { applies }),
+};
+
 export const payrollApi = {
     runs: (year?: number) => get<RunsIndex>("/v1/admin/payroll/runs", { params: year ? { year: String(year) } : undefined }),
     draft: (periodId: number) => post<{ message: string; run: PayrollRun }>("/v1/admin/payroll/runs", { pay_period_id: periodId }),
@@ -98,7 +147,7 @@ export const payrollApi = {
     discard: (id: number) => del<{ message: string }>(`/v1/admin/payroll/runs/${id}`),
     /** The server asks for a step-up first. */
     approve: (id: number) => post<{ message: string; run: PayrollRun }>(`/v1/admin/payroll/runs/${id}/approve`),
-    pay: (id: number, lines: { line_id: number; payment_method: "mpesa" | "bank" | "cash"; payment_reference?: string }[]) =>
+    pay: (id: number, lines: { line_id: number; payment_method: "mpesa" | "bank" | "cash"; payment_reference?: string; paid_on?: string }[]) =>
         post<{ message: string; run: PayrollRun }>(`/v1/admin/payroll/runs/${id}/pay`, { lines }),
     payslipPdf: (runId: number, lineId: number) => get<Blob>(`/v1/admin/payroll/runs/${runId}/lines/${lineId}/payslip`, { responseType: "blob" }),
 
@@ -111,6 +160,12 @@ export const payrollApi = {
     structures: (userId: number) => get<{ data: PayStructure[]; can_edit: boolean }>(`/v1/admin/people/${userId}/pay`),
     addStructure: (userId: number, data: { effective_from: string; kind: StructureKind; base_amount: number; allowances?: Allowance[]; notes?: string }) =>
         post<{ message: string; structure: PayStructure }>(`/v1/admin/people/${userId}/pay`, data),
+
+    // ── People & pay: salary, government deductions and last payment per person ──
+    people: () => get<{ data: PayPerson[]; can_edit: boolean }>("/v1/admin/payroll/people"),
+    /** Add (applies) or stop every government deduction from a date. The server asks for a step-up first. */
+    setDeductions: (userId: number, data: { applies: boolean; effective_from: string; reason: string }) =>
+        post<{ message: string }>(`/v1/admin/payroll/people/${userId}/deductions`, data),
 
     // ── Me ──
     myPayslips: () => get<{ data: PayrollLine[] }>("/v1/admin/me/payslips"),

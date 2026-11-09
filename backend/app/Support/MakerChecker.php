@@ -65,6 +65,14 @@ final class MakerChecker
             return;
         }
 
+        // A super admin approves their own entries (owner, 2026-11-05) —
+        // recorded, never silent (SuperAdminSelfApproval).
+        if (SuperAdminSelfApproval::applies($actor)) {
+            SuperAdminSelfApproval::log($actor, $action, $subject, $makers);
+
+            return;
+        }
+
         $message = self::MESSAGES[$action] ?? self::FALLBACK;
 
         ActivityLogService::log('self_approval_blocked', $subject, [

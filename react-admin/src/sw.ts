@@ -268,13 +268,94 @@ self.addEventListener("push", (event: PushEvent) => {
         },
     } as NotificationOptions;
 
+    // A chat message (owner, 2026-11-02): while a hub window is in front the
+    // in-app notice stack shows it, so the OS banner would only repeat it.
+    // In the background, one banner per conversation — a newer message
+    // replaces the older one instead of piling up.
+    //
+    // Over other programs (owner, 2026-11-04): the banner stays on screen until
+    // it is acted on — Open, Acknowledge (handled, without opening the hub) or
+    // the system's ✕ (dismisses the notice; the message stays unread). It is
+    // also skipped while the "keep on top" message window is open, which
+    // already shows it.
+    const channelId = payload.data?.channel_id;
+    if (payload.data?.channel_message_id && channelId) {
+        const links = payload.data?.actions as { acknowledge?: string; dismiss?: string } | undefined;
+        (options as any).tag                = `bh-chat-${channelId}`;
+        (options as any).renotify           = true;
+        (options as any).requireInteraction = true;
+        (options as any).actions            = links?.acknowledge
+            ? [{ action: "open", title: "Open" }, { action: "acknowledge", title: "Acknowledge" }]
+            : [{ action: "open", title: "Open" }];
+        event.waitUntil(
+            self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (wins) => {
+                const inFront = wins.some((w) => (w as WindowClient).focused && (w as WindowClient).visibilityState === "visible");
+                if (inFront) return;
+                const answers = await Promise.all(wins.map((w) => askPage(w as WindowClient, { type: "bh-pip-open?" })));
+                if (answers.some((a) => (a as { open?: boolean } | null)?.open)) return;
+                await self.registration.showNotification(title, options);
+            }),
+        );
+        return;
+    }
+
     event.waitUntil(self.registration.showNotification(title, options));
 });
 
 // ── Notification click handler ────────────────────────────────────────────────
 
+/** Ask an open hub page a question; null if it does not answer in time. */
+function askPage(win: WindowClient, question: unknown, ms = 400): Promise<unknown> {
+    return new Promise((resolve) => {
+        const channel = new MessageChannel();
+        const timer = setTimeout(() => resolve(null), ms);
+        channel.port1.onmessage = (e) => { clearTimeout(timer); resolve(e.data); };
+        try { win.postMessage(question, [channel.port2]); } catch { clearTimeout(timer); resolve(null); }
+    });
+}
+
+/** Tell every open hub tab that message state changed (they refetch). */
+function nudgeTabs(): void {
+    try { const bus = new BroadcastChannel("bh-comms"); bus.postMessage({ type: "attention" }); bus.close(); } catch { /* not supported */ }
+}
+
+/** Run a banner's signed link (Acknowledge or dismiss). True when it worked. */
+async function runBannerLink(path: string | undefined): Promise<boolean> {
+    if (!path) return false;
+    try {
+        const base = new URL(import.meta.env.VITE_API_URL ?? "/api", self.location.origin).origin;
+        const res = await fetch(base + path, { method: "POST", headers: { Accept: "application/json" } });
+        if (res.ok) nudgeTabs();
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
+// The system ✕ on a message banner: the notice goes, the message stays unread.
+self.addEventListener("notificationclose", (event: NotificationEvent) => {
+    const links = (event.notification.data as { actions?: { dismiss?: string } })?.actions;
+    if (links?.dismiss) event.waitUntil(runBannerLink(links.dismiss));
+});
+
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
     event.notification.close();
+
+    // Acknowledge: handled, without opening the hub. If the link fails
+    // (expired, offline) the conversation opens instead, so nothing is lost.
+    const links = (event.notification.data as { actions?: { acknowledge?: string } })?.actions;
+    if (event.action === "acknowledge" && links?.acknowledge) {
+        const notification = event.notification;
+        event.waitUntil((async () => {
+            if (await runBannerLink(links.acknowledge)) return;
+            const raw = (notification.data as { url?: string })?.url ?? "/admin";
+            const url = raw.startsWith("http") ? raw : self.location.origin + raw;
+            const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+            const hub = wins.find((w) => w.url.startsWith(self.location.origin)) as WindowClient | undefined;
+            if (hub) { await hub.navigate(url); await hub.focus(); } else { await self.clients.openWindow(url); }
+        })());
+        return;
+    }
 
     // URL from payload is a path like "/admin/sales/orders/1"
     // Build the full URL using the SW's origin so openWindow works correctly.

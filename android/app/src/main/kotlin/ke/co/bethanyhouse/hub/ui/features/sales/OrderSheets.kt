@@ -382,7 +382,7 @@ internal fun ShippingFeeSheet(order: Record, onDone: () -> Unit, onDismiss: () -
         val paid = order.string("payment_status")
         if (paid != null && paid != "pending" && !env.session.current.can("orders.reduce_shipping_fee")) SalesCaption("Money has been collected on this order; lowering the fee needs orders.reduce_shipping_fee.", Palette.warning)
         OptionPicker("Shipping method", methodId, listOf("" to "Type an amount") + methods.map { m ->
-            m.id to "${m.string("name") ?: ""} — ${Money.from(m["fee"], m.string("fee_currency") ?: currency)?.formatted() ?: "no pricing rate"}"
+            m.id to "${m.string("name") ?: ""} — ${Money.from(m["fee"], m.string("fee_currency") ?: currency)?.customerFormatted() ?: "no pricing rate"}"
         }, { methodId = it }, allowNone = true)
         if (chosen == null) DecimalField("Fee ($currency)", amount, { amount = it }, error = error?.field("amount"))
         else if (fee.isNull) SalesCaption("This method has no fee in the order's currency (no pricing rate).", Palette.warning)

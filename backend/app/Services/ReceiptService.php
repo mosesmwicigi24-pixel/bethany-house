@@ -136,6 +136,7 @@ class ReceiptService
                 'method'    => $payment->payment_method,
                 'reference' => $payment->provider_reference,
                 'amount'    => (float) $payment->amount,
+                'currency_code' => $payment->currency_code ?: $order->currency_code,
                 'paid_at'   => optional($payment->paid_at)->toIso8601String(),
             ],
             'invoice_total' => (float) $order->total_amount,

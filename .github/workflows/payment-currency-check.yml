@@ -1,0 +1,86 @@
+name: Payments in another currency
+
+# orders:payment-currency on the VPS (owner, 2026-11-05 — order #1158: a USD
+# payment counted as rand after the order moved to ZAR).
+#
+#   "Email me the list": read-only; the list goes to the owner's address
+#   (AUDIT_OWNER_EMAIL), the log shows only how many orders.
+#   "Fix one order": stamps ONE order the owner has checked and approved —
+#   each payment keeps what it was paid in and is recorded as counting its
+#   price-list share of the order. The log shows only that it was done.
+#
+# The repository is public: no order number, name or amount is printed.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to do"
+        type: choice
+        options:
+          - "Email me the list"
+          - "Fix one order (approved)"
+        default: "Email me the list"
+      order_id:
+        description: "Fix one order: the order's id (the number after /sales/orders/ in its address)"
+        required: false
+        default: ""
+      actor:
+        description: "Fix one order: your hub login email (recorded as who approved it; not printed)"
+        required: false
+        default: ""
+
+concurrency:
+  group: payment-currency-check
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Payments in another currency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          ORDER: ${{ inputs.order_id }}
+          ACTOR: ${{ inputs.actor }}
+        run: |
+          if [ "$MODE" = "Fix one order (approved)" ]; then
+            [[ "$ORDER" =~ ^[0-9]+$ ]] || { echo "::error::order_id must be a number"; exit 1; }
+            [[ "$ACTOR" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$ ]] || { echo "::error::actor must be an email"; exit 1; }
+            echo "::add-mask::$ACTOR"
+          fi
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Run it (nothing private printed)
+        env:
+          MODE: ${{ inputs.mode }}
+          ORDER: ${{ inputs.order_id }}
+          ACTOR: ${{ inputs.actor }}
+        run: |
+          if [ "$MODE" = "Fix one order (approved)" ]; then
+            CMD="php artisan orders:payment-currency --apply --order=$ORDER --actor=$ACTOR"
+            KEEP='^(Stamped|Order [0-9]+ has no payment|Nothing could be priced)'
+          else
+            CMD="php artisan orders:payment-currency --mail"
+            KEEP='^(Orders with a payment|List emailed|No owner email)'
+          fi
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel $CMD 2>&1 | grep -E '$KEEP' | sed -E 's/^Stamped [^:]+:.*/Stamped the order./'"
+        timeout-minutes: 10

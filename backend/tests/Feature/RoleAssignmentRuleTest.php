@@ -96,13 +96,31 @@ class RoleAssignmentRuleTest extends TestCase
         $this->assertSame(['outlet_manager'], $person->fresh()->getRoleNames()->all(), 'clicking a role out removes it');
     }
 
-    public function test_nobody_changes_their_own_roles_outlet_or_2fa_requirement(): void
+    /**
+     * Owner, 2026-11-09: a super admin may set their own roles (after the
+     * step-up confirmation), but never drops their own Super Admin role.
+     * Their own outlet and 2FA requirement stay someone else's to change,
+     * and nobody else changes their own roles.
+     */
+    public function test_a_super_admin_sets_their_own_roles_but_nobody_else_does(): void
     {
         $owner = $this->owner();
         $this->owner();   // a second super admin exists, as production requires
         Sanctum::actingAs($owner);
+        $super = $this->role('super_admin')->id;
 
-        $this->putJson("/api/v1/admin/users/{$owner->id}", ['role_ids' => [$this->role('super_admin')->id, $this->role('pos_clerk')->id]])->assertForbidden();
+        // Without confirming who they are: refused (step-up), nothing changes.
+        $this->putJson("/api/v1/admin/users/{$owner->id}", ['role_ids' => [$super, $this->role('pos_clerk')->id]])
+            ->assertForbidden()->assertJsonPath('code', 'step_up_required');
+        $this->assertSame(['super_admin'], $owner->fresh()->getRoleNames()->all());
+
+        $this->stepUp($owner);
+        $this->putJson("/api/v1/admin/users/{$owner->id}", ['role_ids' => [$super, $this->role('admin')->id, $this->role('pos_clerk')->id]])->assertOk();
+        $this->assertEqualsCanonicalizing(['super_admin', 'admin', 'pos_clerk'], $owner->fresh()->getRoleNames()->all());
+
+        $this->putJson("/api/v1/admin/users/{$owner->id}", ['role_ids' => [$this->role('admin')->id]])->assertStatus(422);
+        $this->assertContains('super_admin', $owner->fresh()->getRoleNames()->all(), 'never drops their own Super Admin role');
+
         $this->putJson("/api/v1/admin/users/{$owner->id}", ['must_setup_2fa' => ! (bool) $owner->fresh()->must_setup_2fa])->assertForbidden();
 
         $admin = $this->admin();

@@ -28,9 +28,10 @@ use Illuminate\Validation\ValidationException;
  *     It is never applied earlier than effective_from, and effective_from is
  *     never in the past.
  *
- * Maker ≠ checker and escalation are the engine's: a super admin's own change
- * that crosses a band still waits — for another holder of the band (production
- * has two super admins), and a super-admin band no one else holds waits.
+ * Maker ≠ checker and escalation are the engine's. A super admin's own change
+ * is approved on entry (owner, 2026-11-05 — SuperAdminSelfApproval): it is
+ * still a proposal and an approval request, signed by them and audited, and an
+ * effective-dated one still waits for its date.
  */
 final class ProposalService
 {
@@ -173,7 +174,8 @@ final class ProposalService
                 'message' => "You cannot propose a {$h->title()} change."];
         }
         $open     = $this->openFor($event, $h->subjectType(), $subjectId);
-        $direct   = $this->qualifiesDirect($h, $p, $maker);
+        // A super admin's own change is approved on entry (SuperAdminSelfApproval).
+        $direct   = $this->qualifiesDirect($h, $p, $maker) || \App\Support\SuperAdminSelfApproval::applies($maker);
         $needs    = $direct ? [] : $this->needs($h, $p);
         // Cost and below-cost figures are need-to-know (judged on them, shown only to cost viewers).
         $measures = $this->seesCost($maker, $event) ? $p->measures : array_intersect_key($p->measures ?? [], array_flip(['unit']));

@@ -26,6 +26,7 @@ import { discountCapHint, maxDiscountAmount, useDiscountCap } from "@/lib/discou
 import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 import { CorrectPaymentModal, OrderDocumentHistory } from "@/components/documents/SalesRevisions";
+import { formatAmount, formatMoney } from "@/lib/customerMoney";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -120,8 +121,8 @@ const PAYMENT_METHODS: Record<string, { label: string; icon: string }> = {
     other:         { label: "Other",         icon: "money"    },
 };
 
-const fmt = (n: number | null | undefined, cc = "KES") =>
-    `${cc} ${(n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+// "KES 4,500" — cents only when there are some (lib/customerMoney).
+const fmt = (n: number | null | undefined, cc = "KES") => formatMoney(n, cc);
 
 // ── M-Pesa receipt verification in flight ─────────────────────────────────
 // Verify-with-receipt asks Safaricom and answers 202; Safaricom's answer comes
@@ -535,7 +536,7 @@ function StatusUpdateModal({ order, onClose, onUpdated }: {
     );
     const totalPaid = (order as any).payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
+        .reduce((s: number, p: any) => s + countedNet(p), 0) ?? 0;
     const hasUnpaidBalance = totalPaid < (order.total_amount ?? 0) - 0.01;
 
     // Payments that are pending admin approval block all order progression
@@ -644,7 +645,7 @@ function VoidOrderModal({ order, onClose, onDone }: {
         onError: (e: ApiError) => toast.error(e.message),
     });
 
-    const fmt = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
+    const fmt = (n: number) => formatAmount(n);
     const cc   = order.currency_code ?? "KES";
 
     return (
@@ -694,7 +695,7 @@ function RefundModal({ order, onClose, onDone }: {
     const toast = useToastStore();
     const paidAmount = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount), 0) ?? order.total_amount;
+        .reduce((s: number, p: any) => s + countedGross(p), 0) ?? order.total_amount;
     const alreadyRefunded = order.payments
         ?.reduce((s: number, p: any) => s + Number(p.refund_amount ?? 0), 0) ?? 0;
     const maxRefund = paidAmount - alreadyRefunded;
@@ -826,7 +827,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
     // moves; the amount already paid and the product prices never change.
     const paid = (order.payments ?? [])
         .filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0);
+        .reduce((s: number, p: any) => s + countedNet(p), 0);
     const oldShipping = order.shipping_amount ?? 0;
     const newTotal    = Math.max(0, order.total_amount - oldShipping + effectiveAmount);
     const newBalance  = Math.max(0, newTotal - paid);
@@ -849,7 +850,7 @@ function SetShippingFeeModal({ order, onClose, onDone }: {
         onError:   (e: ApiError) => toast.error(e.message),
     });
 
-    const fmt2 = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
+    const fmt2 = (n: number) => formatAmount(n);
 
     return (
         <Modal open title="Set Shipping" onClose={onClose}>
@@ -1076,7 +1077,7 @@ function ChangeCurrencyModal({ order, onClose, onDone }: {
             if (res.changed) {
                 const intlNote = res.is_international ? " - marked as international" : "";
                 const totalNote = res.new_total != null
-                    ? ` · New total: ${res.currency_code} ${(res.new_total as number).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`
+                    ? ` · New total: ${res.currency_code} ${formatAmount(res.new_total as number)}`
                     : "";
                 toast.success(`Currency updated to ${res.currency_code}${intlNote}${totalNote}`);
             } else {
@@ -1323,7 +1324,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
     const toast = useToastStore();
     const totalPaid = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
+        .reduce((s: number, p: any) => s + countedNet(p), 0) ?? 0;
     const outstanding = Math.max(0, order.total_amount - totalPaid);
 
     const [method, setMethod]                     = useState("");
@@ -1440,7 +1441,7 @@ function AddPaymentModal({ order, onClose, onDone }: {
     // We use the stored tax_amount/total_amount ratio so it works with mixed per-product rates.
     const orderTaxRatio  = order.total_amount > 0 ? (order.tax_amount ?? 0) / order.total_amount : 0;
     const taxOnAmount    = !taxInclusive && orderTaxRatio > 0 ? Math.round(amount * orderTaxRatio * 100) / 100 : 0;
-    const fmt = (n: number) => n.toLocaleString("en-KE", { minimumFractionDigits: 2 });
+    const fmt = (n: number) => formatAmount(n);
 
     // ── M-Pesa STK Push ───────────────────────────────────────────────────────
     const initiateStkPush = async () => {
@@ -2155,7 +2156,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
     const selectedPayment = selectedPaymentId ? payments.find((p: any) => p.id === selectedPaymentId) : null;
     const cc = order.currency_code ?? "KES";
 
-    const totalPaid = paidPayments.reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0);
+    const totalPaid = paidPayments.reduce((s: number, p: any) => s + countedNet(p), 0);
     const outstanding = Math.max(0, Number(order.total_amount ?? 0) - totalPaid);
 
     // Derived receipt values
@@ -2225,7 +2226,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                         <option value="">Select a payment…</option>
                         {paidPayments.map((p: any) => (
                             <option key={p.id} value={p.id}>
-                                {PAYMENT_METHODS[p.payment_method]?.label ?? p.payment_method} - {fmt(p.amount, cc)}
+                                {PAYMENT_METHODS[p.payment_method]?.label ?? p.payment_method} - {fmt(p.amount, p.currency_code ?? cc)}
                                 {p.paid_at ? ` (${new Date(p.paid_at).toLocaleDateString("en-KE")})` : ""}
                             </option>
                         ))}
@@ -2303,12 +2304,12 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                                 </span>
                                                 <span style={{ flex: "0 0 24px", textAlign: "center" }}>{item.quantity}</span>
                                                 <span style={{ flex: "0 0 18px", textAlign: "center" }}>{taxCode}</span>
-                                                <span style={{ flex: "0 0 52px", textAlign: "right" }}>{subtotal.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                                <span style={{ flex: "0 0 52px", textAlign: "right" }}>{formatAmount(subtotal)}</span>
                                             </div>
                                             <div style={{ paddingLeft: "28px", fontSize: "9px", color: "#555" }}>
-                                                {item.quantity} × {(item.unit_price ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}
-                                                {item.discount_amount > 0 && ` · DISC: -${(item.discount_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`}
-                                                                        {(item as any).price_adjusted && (item as any).original_price && ` · ADJ from ${((item as any).original_price).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`}
+                                                {item.quantity} × {formatAmount(item.unit_price ?? 0)}
+                                                {item.discount_amount > 0 && ` · DISC: -${formatAmount(item.discount_amount)}`}
+                                                                        {(item as any).price_adjusted && (item as any).original_price && ` · ADJ from ${formatAmount((item as any).original_price)}`}
                                                 {item.is_production_item && " · Made-to-Order"}
                                             </div>
                                         </div>
@@ -2320,25 +2321,25 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
 
                             {/* Totals */}
                             <div style={{ fontSize: "11px" }}>
-                                <div style={rowStyle}><span>Subtotal</span><span>{(order.subtotal ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                <div style={rowStyle}><span>Subtotal</span><span>{formatAmount(order.subtotal ?? 0)}</span></div>
                                 {(order.discount_amount ?? 0) > 0 && (
-                                    <div style={rowStyle}><span>Discount</span><span>-{(order.discount_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                    <div style={rowStyle}><span>Discount</span><span>-{formatAmount(order.discount_amount)}</span></div>
                                 )}
                                 {(order.shipping_amount ?? 0) > 0 && (
                                     <div style={rowStyle}>
                                         <span>Shipping{order.shipping_method ? ` (${order.shipping_method})` : ""}</span>
-                                        <span>{(order.shipping_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                        <span>{formatAmount(order.shipping_amount)}</span>
                                     </div>
                                 )}
                                 {(order.tax_amount ?? 0) > 0 && (
                                     <div style={rowStyle}>
                                         <span>Tax{order.prices_include_tax ? " (incl.)" : ""}</span>
-                                        <span>{(order.tax_amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                        <span>{formatAmount(order.tax_amount)}</span>
                                     </div>
                                 )}
                                 <div style={{ ...rowStyle, ...dashedBorder, fontWeight: "bold", fontSize: "13px" }}>
                                     <span>Totals</span>
-                                    <span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                    <span>{formatAmount(order.total_amount ?? 0)}</span>
                                 </div>
                             </div>
 
@@ -2351,30 +2352,30 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         <div key={i}>
                                             <div style={rowStyle}>
                                                 <span style={{ textTransform: "uppercase" }}>{(p.payment_method ?? "other").replace(/_/g, " ")}</span>
-                                                <span>{Number(p.amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                                <span>{formatAmount(p.amount)}</span>
                                             </div>
                                             {(p.payment_method === "mpesa" || p.payment_method === "m_pesa") && p.provider_reference && (
                                                 <div style={{ paddingLeft: "8px", fontSize: "9px", color: "#555" }}>
                                                     <div>TRN #: {p.provider_reference}</div>
                                                     {order.customer_phone && <div>Cell: {receiptMaskPhone(order.customer_phone)}</div>}
-                                                    <div>Amount: {Number(p.amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</div>
+                                                    <div>Amount: {formatAmount(p.amount)}</div>
                                                 </div>
                                             )}
                                             {p.payment_method === "cash" && p.cash_received > 0 && (
                                                 <div style={{ paddingLeft: "8px", fontSize: "10px" }}>
-                                                    <div style={rowStyle}><span>Tendered</span><span>{Number(p.cash_received).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                                    <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{Number(p.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                                    <div style={rowStyle}><span>Tendered</span><span>{formatAmount(p.cash_received)}</span></div>
+                                                    <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{formatAmount(p.change_given ?? 0)}</span></div>
                                                 </div>
                                             )}
                                         </div>
                                     ))
                                 ) : paidPayments[0] ? (
                                     <>
-                                        <div style={rowStyle}><span>Tendered</span><span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                        <div style={rowStyle}><span>Change</span><span>{(cashPayment?.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                        <div style={rowStyle}><span>Tendered</span><span>{formatAmount(order.total_amount ?? 0)}</span></div>
+                                        <div style={rowStyle}><span>Change</span><span>{formatAmount(cashPayment?.change_given ?? 0)}</span></div>
                                         <div style={{ ...rowStyle, marginTop: "2px" }}>
                                             <span style={{ textTransform: "uppercase" }}>{(paidPayments[0].payment_method ?? "").replace(/_/g, " ")}</span>
-                                            <span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                            <span>{formatAmount(order.total_amount ?? 0)}</span>
                                         </div>
                                     </>
                                 ) : (
@@ -2389,7 +2390,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         <div style={{ fontSize: "10px" }}>
                                             <div style={rowStyle}><span>TRN #</span><span style={{ fontWeight: "bold" }}>{mpesaPayments[0].provider_reference}</span></div>
                                             {order.customer_phone && <div style={rowStyle}><span>Cell</span><span>{receiptMaskPhone(order.customer_phone)}</span></div>}
-                                            <div style={rowStyle}><span>Amount</span><span>{(order.total_amount ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                            <div style={rowStyle}><span>Amount</span><span>{formatAmount(order.total_amount ?? 0)}</span></div>
                                         </div>
                                     </>
                                 )}
@@ -2398,15 +2399,15 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                 {!hasSplit && cashPayment && (cashPayment.cash_received ?? 0) > 0 && (
                                     <>
                                         <p style={dividerStyle} />
-                                        <div style={rowStyle}><span>Cash Received</span><span>{cc} {Number(cashPayment.cash_received).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{cc} {Number(cashPayment.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                        <div style={rowStyle}><span>Cash Received</span><span>{cc} {formatAmount(cashPayment.cash_received)}</span></div>
+                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>Change</span><span>{cc} {formatAmount(cashPayment.change_given ?? 0)}</span></div>
                                     </>
                                 )}
 
                                 {outstanding > 0.01 && (
                                     <>
                                         <p style={dividerStyle} />
-                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>BALANCE DUE</span><span>{cc} {outstanding.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                        <div style={{ ...rowStyle, fontWeight: "bold" }}><span>BALANCE DUE</span><span>{cc} {formatAmount(outstanding)}</span></div>
                                     </>
                                 )}
                                 {outstanding <= 0.01 && paidPayments.length > 0 && (
@@ -2436,8 +2437,8 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                     {taxBreakdown.map(({ code, vatable, vat }) => (
                                         <div key={code} style={{ display: "flex", gap: "4px" }}>
                                             <span style={{ flex: "0 0 20px" }}>{code}</span>
-                                            <span style={{ flex: 1, textAlign: "right" }}>{vatable.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
-                                            <span style={{ flex: "0 0 60px", textAlign: "right" }}>{vat.toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                            <span style={{ flex: 1, textAlign: "right" }}>{formatAmount(vatable)}</span>
+                                            <span style={{ flex: "0 0 60px", textAlign: "right" }}>{formatAmount(vat)}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -2450,7 +2451,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         =========== PROMOTION ===========
                                     </p>
                                     <p style={{ ...centerStyle, fontSize: "10px", fontWeight: "bold", margin: "2px 0" }}>
-                                        You have SAVED {cc} {totalSavings.toLocaleString("en-KE", { minimumFractionDigits: 2 })}
+                                        You have SAVED {cc} {formatAmount(totalSavings)}
                                     </p>
                                     <p style={{ ...centerStyle, borderBottom: "1px dashed #000", margin: "4px 0", fontSize: "10px" }}>
                                         =========== PROMOTION ===========
@@ -2541,13 +2542,13 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                                         )}
                                         {selectedPayment.cash_received > 0 && (
                                             <>
-                                                <div style={rowStyle}><span>Cash Received</span><span>{cc} {Number(selectedPayment.cash_received).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
-                                                <div style={rowStyle}><span>Change Given</span><span>{cc} {Number(selectedPayment.change_given ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span></div>
+                                                <div style={rowStyle}><span>Cash Received</span><span>{cc} {formatAmount(selectedPayment.cash_received)}</span></div>
+                                                <div style={rowStyle}><span>Change Given</span><span>{cc} {formatAmount(selectedPayment.change_given ?? 0)}</span></div>
                                             </>
                                         )}
                                         <div style={{ ...rowStyle, ...dashedBorder, fontWeight: "bold" }}>
                                             <span>AMOUNT PAID</span>
-                                            <span>{cc} {Number(selectedPayment.amount).toLocaleString("en-KE", { minimumFractionDigits: 2 })}</span>
+                                            <span>{cc} {formatAmount(selectedPayment.amount)}</span>
                                         </div>
                                     </div>
                                     <p style={dividerStyle} />
@@ -3611,7 +3612,7 @@ function ReversePaymentModal({ order, payment, immediate, onClose, onDone }: {
     const [reason, setReason]   = useState("");
     const [restore, setRestore] = useState(true);
     const cc = order.currency_code || "KES";
-    const fmtMoney = (n: number) => `${cc} ${Number(n).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+    const fmtMoney = (n: number) => `${cc} ${formatAmount(n)}`;
     const autoAdvanced = ["processing", "confirmed"].includes(order.status);
 
     const mutation = useMutation({
@@ -3625,7 +3626,7 @@ function ReversePaymentModal({ order, payment, immediate, onClose, onDone }: {
             <div className="space-y-4 p-5">
                 <div className="rounded-xl border border-line bg-surface-50 p-3 text-xs space-y-1">
                     <div className="flex justify-between"><span className="text-surface-500">Payment</span><span className="font-mono">{payment.payment_number ?? "—"}</span></div>
-                    <div className="flex justify-between"><span className="text-surface-500">Amount</span><span className="font-semibold">{fmtMoney(payment.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Amount</span><span className="font-semibold">{payment.currency_code && payment.currency_code !== cc ? `${payment.currency_code} ${formatAmount(payment.amount)}` : fmtMoney(payment.amount)}</span></div>
                     <div className="flex justify-between"><span className="text-surface-500">Method</span><span className="uppercase">{String(payment.payment_method ?? "").replace(/_/g, " ")}</span></div>
                 </div>
                 <p className="text-xs text-surface-600">
@@ -3653,6 +3654,137 @@ function ReversePaymentModal({ order, payment, immediate, onClose, onDone }: {
                         {mutation.isPending ? "Working…" : immediate ? "Reverse payment" : "Send request"}
                     </button>
                 </div>
+            </div>
+        </Modal>
+    );
+}
+
+
+/**
+ * What a payment counts for on its order, in the ORDER's currency (owner,
+ * 2026-11-05; server rule App\Support\PaymentCredit). A payment keeps the
+ * currency it was paid in; after the order switches currency it counts its
+ * share (order_amount). Otherwise it counts as its own amount.
+ */
+const countedGross = (p: any): number => p.order_currency_code ? Number(p.order_amount ?? 0) : Number(p.amount ?? 0);
+const countedNet = (p: any): number => {
+    const amount = Number(p.amount ?? 0), refunded = Number(p.refund_amount ?? 0);
+    if (!p.order_currency_code || amount === 0) return amount - refunded;
+    return (amount - refunded) * Number(p.order_amount ?? 0) / amount;
+};
+
+
+/**
+ * "Bill in" (owner, 2026-11-05): a customer abroad pays in US dollars or their
+ * own country's currency. Pick one, then Apply; the lines are re-priced from
+ * the price list. Before payment: anyone who edits orders. After payment:
+ * the super admin only (with step-up and a reason) — each payment keeps the
+ * currency it was paid in and counts its share in the new one.
+ */
+function BillCurrencyControl({ order }: { order: Order }) {
+    const qc = useQueryClient();
+    const toast = useToastStore();
+    const { can, isSuperAdmin } = usePermissions();
+    const country = (order as any).customer_country_code as string | null;
+    const { data: countryData } = useQuery({
+        queryKey: ["countries-all"],
+        queryFn:  () => get<{ data: Array<{ code: string; sale_currency?: string | null; is_active: boolean }> }>("/v1/admin/countries"),
+        staleTime: 300_000,
+        enabled: !!(order as any).is_international && !!country,
+    });
+    const own = countryData?.data?.find(c => c.code === country)?.sale_currency ?? null;
+    const choices = Array.from(new Set([own, "USD"].filter((c): c is string => !!c)));
+    const current = order.currency_code ?? "";
+    const [pick, setPick] = useState(current);
+    const [reason, setReason] = useState("");
+    useEffect(() => setPick(current), [current]);
+
+    const paidStarted = order.payment_status !== "pending" || (order.payments ?? []).some((p: any) =>
+        ["paid", "processing", "confirmed"].includes(p.status) || (p.requires_approval && p.approval_status === "pending_review"));
+    const dead = ["cancelled", "voided", "refunded"].includes(order.status);
+    const mayApply = !dead && can("orders.edit") && (!paidStarted || isSuperAdmin);
+
+    const apply = useMutation({
+        mutationFn: () => post<{ message: string }>(`/v1/admin/orders/${order.id}/bill-currency`, {
+            currency_code: pick, ...(paidStarted ? { reason: reason.trim() } : {}),
+        }),
+        onSuccess: (r) => {
+            toast.success(r.message);
+            setReason("");
+            void qc.invalidateQueries({ queryKey: ["order"] });   // the page keys it by the URL's id
+            void qc.invalidateQueries({ queryKey: ["orders"] });
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+
+    if (!(order as any).is_international || !country || choices.length < 2 || !mayApply) return null;
+    const changed = pick !== current;
+
+    return (
+        <div className="rounded-lg border border-info-200 bg-info-50/60 p-2.5 space-y-2">
+            <label className="flex items-center justify-between gap-2">
+                <span className="text-surface-500 shrink-0">Bill in</span>
+                <select value={pick} onChange={e => setPick(e.target.value)} aria-label="Bill this order in"
+                    className="input input-sm max-w-[120px] py-1 text-xs font-mono font-bold">
+                    {choices.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+            </label>
+            {changed && paidStarted && (
+                <>
+                    <p className="text-2xs text-surface-600">Payment has started. Each payment keeps the currency it was paid in and counts its share of the order in {pick}.</p>
+                    <input className="input input-sm text-xs" placeholder="Reason (kept in the audit trail)" maxLength={300}
+                        value={reason} onChange={e => setReason(e.target.value)} />
+                </>
+            )}
+            {changed && (
+                <button type="button" onClick={() => apply.mutate()}
+                    disabled={apply.isPending || (paidStarted && reason.trim().length < 3)}
+                    className="btn-primary btn-sm w-full justify-center">
+                    {apply.isPending ? <Spinner size="xs" className="border-white/30 border-t-white" /> : null}
+                    Apply — bill in {pick}
+                </button>
+            )}
+        </div>
+    );
+}
+
+
+/**
+ * The owner deletes a payment that should never have been there (owner,
+ * 2026-11-05). Softly: it is voided — counts for nothing anywhere — and
+ * hidden on this page; the record, who and why stay ("Show deleted").
+ */
+function DeletePaymentModal({ order, payment, onClose, onDone }: { order: Order; payment: any; onClose: () => void; onDone: () => void }) {
+    const toast = useToastStore();
+    const [reason, setReason] = useState("");
+    const del = useMutation({
+        mutationFn: () => post<{ message: string }>(`/v1/admin/orders/${order.id}/payments/${payment.id}/remove`, { reason: reason.trim() }),
+        onSuccess: (r) => { toast.success(r.message); onDone(); },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+    const ccy = payment.currency_code ?? order.currency_code;
+
+    return (
+        <Modal open onClose={onClose} title="Delete this payment (owner)" size="sm"
+            footer={<>
+                <button onClick={onClose} className="btn-ghost btn-sm" disabled={del.isPending}>Cancel</button>
+                <button onClick={() => del.mutate()} disabled={del.isPending || reason.trim().length < 5} className="btn-danger btn-sm">
+                    {del.isPending ? <Spinner size="xs" className="border-white/30 border-t-white" /> : null} Delete payment
+                </button>
+            </>}>
+            <div className="space-y-3 text-sm">
+                <div className="rounded-xl border border-line bg-surface-50 p-3 text-xs space-y-1">
+                    <div className="flex justify-between"><span className="text-surface-500">Payment</span><span className="font-mono">{payment.payment_number ?? "—"}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Amount</span><span className="font-semibold">{ccy} {formatAmount(payment.amount)}</span></div>
+                    <div className="flex justify-between"><span className="text-surface-500">Method</span><span className="uppercase">{String(payment.payment_method ?? "").replace(/_/g, " ")}</span></div>
+                </div>
+                <p className="text-xs text-surface-600">
+                    It stops counting everywhere — the balance, reports and cash — and the order&apos;s balance is worked out again.
+                    The record stays behind &ldquo;Show deleted&rdquo; with your reason, for the audit trail. You will be asked to confirm it is you.
+                </p>
+                <label className="block space-y-1"><span className="text-xs font-medium text-surface-700">Why is it deleted? *</span>
+                    <input value={reason} onChange={(e) => setReason(e.target.value)} className="input w-full" maxLength={500}
+                        placeholder="e.g. Customer never sent it; recorded in error" /></label>
             </div>
         </Modal>
     );
@@ -3710,6 +3842,15 @@ export default function OrderDetailPage() {
     // The owner corrects a recorded payment's details (2026-10-16).
     const [correctingPayment, setCorrectingPayment] = useState<any | null>(null);
     const [reversingPayment,  setReversingPayment]  = useState<any | null>(null);
+    const [deletingPayment,   setDeletingPayment]   = useState<any | null>(null);
+    const [showDeleted,       setShowDeleted]       = useState(false);
+    // Currencies a payment may be corrected to: the order's, USD, the customer's own.
+    const { data: countriesForPay } = useQuery({
+        queryKey: ["countries-all"],
+        queryFn:  () => get<{ data: Array<{ code: string; sale_currency?: string | null }> }>("/v1/admin/countries"),
+        staleTime: 300_000,
+        enabled: isSuperAdmin,
+    });
     // A settled payment recorded by mistake: the owner reverses it at once, finance-grade staff ask.
     const canReverse = isSuperAdmin || canDo("payments.void") || canDo("payments.request_void");
 
@@ -3767,6 +3908,11 @@ export default function OrderDetailPage() {
     const [editingLineKey, setEditingLineKey] = useState<string | null>(null);
     const [showAddItem, setShowAddItem]   = useState(false);
     const [itemsReason, setItemsReason]   = useState("");
+    // The order-level discount being edited (owner, 2026-11-06); null = as booked.
+    const [itemsOrderDiscount, setItemsOrderDiscount] = useState<string | null>(null);
+    const orderDiscountChanged = itemsOrderDiscount !== null
+        && itemsOrderDiscount.trim() !== ""
+        && Number(itemsOrderDiscount) !== Number(order?.discount_amount ?? 0);
     // Set when the server asks for an explicit acknowledgement (paid / shipped).
     const [itemsConfirm, setItemsConfirm] = useState<{ reason: string; message: string } | null>(null);
     // An order can be BOTH paid and shipped, so the server refuses twice.
@@ -3792,6 +3938,7 @@ export default function OrderDetailPage() {
                     discount_amount: l.discount_amount,
                 })),
                 ...(itemsReason.trim() ? { reason: itemsReason.trim() } : {}),
+                ...(orderDiscountChanged ? { order_discount: Math.max(0, Number(itemsOrderDiscount)) } : {}),
                 ...(confirm?.paid    ? { confirm_paid_change: true }    : {}),
                 ...(confirm?.shipped ? { confirm_shipped_change: true } : {}),
             }),
@@ -3799,6 +3946,7 @@ export default function OrderDetailPage() {
             setItemsDraft(null);
             setEditingLineKey(null);
             setItemsReason("");
+            setItemsOrderDiscount(null);
             setItemsConfirm(null);
             setItemsConfirmed({ paid: false, shipped: false });
             setItemsResult(res);
@@ -3862,7 +4010,7 @@ export default function OrderDetailPage() {
         setPaymentLinkLoading(true);
         try {
             const r: any = await ordersApi.updateCurrency(order.id, currencyCheck.country);
-            toast.success(`Order moved to ${r.currency_code}${r.new_total != null ? ` · ${r.currency_code} ${Number(r.new_total).toLocaleString("en-KE", { minimumFractionDigits: 2 })}` : ""}`);
+            toast.success(`Order moved to ${r.currency_code}${r.new_total != null ? ` · ${r.currency_code} ${formatAmount(r.new_total)}` : ""}`);
             refresh();
         } catch (e: any) {
             toast.error(e.message ?? "Could not switch the currency");
@@ -3947,7 +4095,7 @@ export default function OrderDetailPage() {
     // Payment summary
     const totalPaid = order.payments
         ?.filter((p: any) => p.status === "paid")
-        .reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0) ?? 0;
+        .reduce((s: number, p: any) => s + countedNet(p), 0) ?? 0;
     const outstanding = Math.max(0, order.total_amount - totalPaid);
     const canAddPayment = outstanding > 0 && !["cancelled", "voided", "refunded"].includes(order.status);
 
@@ -4111,8 +4259,10 @@ export default function OrderDetailPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-line overflow-hidden">
 
                 {/* ── Top action bar ──────────────────────────────────────────── */}
-                <div className="flex items-center justify-between gap-3 px-6 py-3 bg-surface-50/80 border-b border-line">
-                    <div className="flex items-center gap-2.5 min-w-0">
+                {/* Wraps on a phone: the tags take one line, the buttons the next and
+                    scroll sideways, so nothing slides under anything (owner, 2026-11-05). */}
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 sm:px-6 py-3 bg-surface-50/80 border-b border-line">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
                         <button onClick={() => navigate("/sales/orders")}
                             className="flex items-center gap-1.5 text-xs text-surface-500 hover:text-surface-900 font-medium transition-colors shrink-0">
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -4136,7 +4286,7 @@ export default function OrderDetailPage() {
                             </button>
                         )}
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 max-w-full overflow-x-auto no-scrollbar -mx-1 px-1 [&>*]:shrink-0 [&>*]:whitespace-nowrap">
                         <button onClick={shareReceipt} disabled={pdfLoading} className="btn-secondary btn-sm gap-1.5" title={`Send the ${docLabel.toLowerCase()} PDF to the customer`}>
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" /></svg>
                             Share
@@ -4656,6 +4806,16 @@ export default function OrderDetailPage() {
                                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg>
                                                 Add another
                                             </button>
+                                            <label className="inline-flex items-center gap-1.5 text-2xs font-medium text-surface-600">
+                                                Order discount
+                                                <input
+                                                    type="number" min={0} step={1} inputMode="numeric"
+                                                    value={itemsOrderDiscount ?? String(Number(order.discount_amount ?? 0))}
+                                                    onChange={e => setItemsOrderDiscount(e.target.value)}
+                                                    className="w-24 text-right text-xs border border-line rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-brand-500"
+                                                    aria-label="Order discount"
+                                                />
+                                            </label>
                                             <input
                                                 value={itemsReason}
                                                 onChange={e => setItemsReason(e.target.value)}
@@ -4670,7 +4830,7 @@ export default function OrderDetailPage() {
                                             <div className="flex items-center gap-2 shrink-0">
                                                 <button
                                                     onClick={() => {
-                                                        setItemsDraft(null); setEditingLineKey(null); setItemsReason("");
+                                                        setItemsDraft(null); setEditingLineKey(null); setItemsReason(""); setItemsOrderDiscount(null);
                                                         setItemsConfirm(null); setItemsConfirmed({ paid: false, shipped: false });
                                                     }}
                                                     disabled={updateItemsMutation.isPending}
@@ -4726,9 +4886,19 @@ export default function OrderDetailPage() {
                                     <div className="flex justify-between text-surface-500 py-1.5 border-b border-surface-50">
                                         <span>Subtotal</span><span className="tabular-nums font-medium text-surface-700">{fmt(order.subtotal, cc)}</span>
                                     </div>
-                                    {order.discount_amount > 0 && (
+                                    {(order.discount_amount > 0 || canEditItems) && (
                                         <div className="flex justify-between text-warning-dark py-1.5 border-b border-surface-50">
-                                            <span>Discount</span><span className="tabular-nums">-{fmt(order.discount_amount, cc)}</span>
+                                            <span className="flex items-center gap-1.5">Discount
+                                                {/* Opens the items editor with the order discount field:
+                                                    the server recalculates tax, total and balance. */}
+                                                {canEditItems && !itemsDraft && (
+                                                    <button
+                                                        onClick={() => { setItemsDraft(beginDraft()); setItemsOrderDiscount(String(Number(order.discount_amount ?? 0))); }}
+                                                        className="text-brand-500 hover:underline text-2xs"
+                                                    >{order.discount_amount > 0 ? "edit" : "+ add"}</button>
+                                                )}
+                                            </span>
+                                            <span className="tabular-nums">-{fmt(order.discount_amount ?? 0, cc)}</span>
                                         </div>
                                     )}
                                     <div className="flex justify-between text-surface-500 py-1.5 border-b border-surface-50">
@@ -4841,7 +5011,7 @@ export default function OrderDetailPage() {
                                 <div className="mb-4 rounded-xl border border-danger/30 bg-danger-light px-4 py-3 text-xs text-danger">
                                     <p className="font-semibold">Paid after cancel — refund needed</p>
                                     <p className="mt-0.5">
-                                        {fmt(lateUnrefunded.reduce((s: number, p: any) => s + Number(p.amount) - Number(p.refund_amount ?? 0), 0), cc)}
+                                        {fmt(lateUnrefunded.reduce((s: number, p: any) => s + countedNet(p), 0), cc)}
                                         {" "}arrived after this order was {order.status}. The money is recorded and the order stays {order.status} — refund the customer.
                                     </p>
                                 </div>
@@ -4849,8 +5019,10 @@ export default function OrderDetailPage() {
                             {order.payments && order.payments.length > 0 ? (
                                 <div className="rounded-xl border border-line overflow-hidden">
                                     <div className="overflow-x-auto">
-                                    <table className="w-full text-xs min-w-[560px]">
-                                        <thead>
+                                    {/* A phone stacks each payment (method · amount, then reference, then status);
+                                        from sm up it is the table (owner, 2026-11-05: the amount sat off-screen). */}
+                                    <table className="w-full text-xs sm:min-w-[560px]">
+                                        <thead className="hidden sm:table-header-group">
                                             <tr className="bg-surface-50 border-b border-line">
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Method</th>
                                                 <th className="text-left px-4 py-2.5 font-semibold text-surface-500">Reference / Proof</th>
@@ -4860,10 +5032,11 @@ export default function OrderDetailPage() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-line">
-                                            {order.payments.map((p: any) => (
-                                                <tr key={p.id} className={clsx("hover:bg-surface-50/50 transition-colors",
-                                                    p.requires_approval && p.approval_status !== "approved" && "bg-amber-50/40")}>
-                                                    <td className="px-4 py-3 align-top">
+                                            {order.payments.filter((p: any) => showDeleted || !p.removed_at).map((p: any) => (
+                                                <tr key={p.id} className={clsx("grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 px-4 py-3 sm:table-row sm:p-0 hover:bg-surface-50/50 transition-colors",
+                                                    p.requires_approval && p.approval_status !== "approved" && !p.removed_at && "bg-amber-50/40",
+                                                    p.removed_at && "opacity-60 line-through decoration-surface-300")}>
+                                                    <td className="order-1 sm:order-none p-0 sm:px-4 sm:py-3 align-top">
                                                         <span className="flex items-center gap-1.5 font-medium text-surface-900">
                                                             <span className="w-6 h-6 rounded-lg bg-surface-100 flex items-center justify-center shrink-0">
                                                                 <PaymentMethodIcon method={p.payment_method} className="w-3.5 h-3.5 text-surface-500" />
@@ -4871,7 +5044,7 @@ export default function OrderDetailPage() {
                                                             {PAYMENT_METHODS[p.payment_method]?.label ?? p.payment_method}
                                                         </span>
                                                     </td>
-                                                    <td className="px-4 py-3 align-top">
+                                                    <td className="order-3 col-span-2 sm:order-none sm:col-span-1 p-0 sm:px-4 sm:py-3 align-top">
                                                         <p className="font-mono text-surface-500 text-2xs">{p.payment_number ?? "-"}</p>
                                                         {p.provider_reference && <p className="text-surface-400 font-mono text-2xs">{p.provider_reference}</p>}
                                                         {isSuperAdmin && !["voided", "failed", "cancelled"].includes(p.status) && (
@@ -4879,7 +5052,17 @@ export default function OrderDetailPage() {
                                                                 Correct details (owner)
                                                             </button>
                                                         )}
-                                                        {canReverse && p.status === "paid" && (!p.requires_approval || p.approval_status === "approved") && (
+                                                        {p.removed_at && (
+                                                            <p className="mt-1 text-2xs font-medium text-danger no-underline" style={{ textDecoration: "none" }}>
+                                                                Deleted {new Date(p.removed_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}: {p.removed_reason}
+                                                            </p>
+                                                        )}
+                                                        {isSuperAdmin && !p.removed_at && (
+                                                            <button onClick={() => setDeletingPayment(p)} className="mt-1 block text-2xs font-medium text-danger hover:underline">
+                                                                Delete (owner)
+                                                            </button>
+                                                        )}
+                                                        {canReverse && p.status === "paid" && !p.removed_at && (!p.requires_approval || p.approval_status === "approved") && (
                                                             <button onClick={() => setReversingPayment(p)} className="mt-1 block text-2xs font-medium text-danger hover:underline">
                                                                 {isSuperAdmin ? "Reverse — recorded by mistake (owner)" : "Request reversal — recorded by mistake"}
                                                             </button>
@@ -4896,10 +5079,10 @@ export default function OrderDetailPage() {
                                                             <div className="mt-1.5"><ProofUploadButton paymentId={p.id} onDone={refresh} /></div>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 align-top text-surface-500 hidden sm:table-cell">
+                                                    <td className="hidden sm:table-cell px-4 py-3 align-top text-surface-500">
                                                         {p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-KE", {dateStyle:"medium"}) : "—"}
                                                     </td>
-                                                    <td className="px-4 py-3 align-top">
+                                                    <td className="order-4 col-span-2 sm:order-none sm:col-span-1 p-0 sm:px-4 sm:py-3 align-top">
                                                         <span className={clsx("inline-flex items-center text-2xs font-semibold px-2 py-0.5 rounded-full",
                                                             p.status === "paid" && (!p.requires_approval || p.approval_status === "approved") ? "bg-success-light text-success-dark" :
                                                             p.requires_approval ? "bg-amber-100 text-amber-700" :
@@ -4931,7 +5114,14 @@ export default function OrderDetailPage() {
                                                             <button onClick={() => { setVerifyingPaystackPaymentId(p.id); setPaystackVerifyRef(""); }} className="mt-1 block text-2xs text-info-600 hover:underline font-medium">Verify with Paystack →</button>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 align-top text-right font-bold text-surface-900 tabular-nums">{fmt(p.amount, cc)}</td>
+                                                    <td className="order-2 sm:order-none p-0 sm:px-4 sm:py-3 align-top text-right font-bold text-surface-900 tabular-nums whitespace-nowrap">
+                                                        {fmt(p.amount, p.currency_code ?? cc)}
+                                                        {p.order_currency_code && (
+                                                            <div className="text-2xs font-medium text-surface-500" title="Paid in its own currency; counts its share of the order in the order's currency">
+                                                                counts {fmt(p.order_amount, p.order_currency_code)}
+                                                            </div>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -4958,10 +5148,23 @@ export default function OrderDetailPage() {
                                     onDone={() => { setReversingPayment(null); refresh(); }}
                                 />
                             )}
+                            {(order.payments ?? []).some((p: any) => p.removed_at) && (
+                                <button type="button" onClick={() => setShowDeleted((v) => !v)} className="mt-2 text-2xs font-medium text-surface-500 hover:text-surface-800 hover:underline">
+                                    {showDeleted ? "Hide deleted payments" : `Show deleted (${(order.payments ?? []).filter((p: any) => p.removed_at).length})`}
+                                </button>
+                            )}
+                            {deletingPayment && (
+                                <DeletePaymentModal order={order} payment={deletingPayment}
+                                    onClose={() => setDeletingPayment(null)}
+                                    onDone={() => { setDeletingPayment(null); refresh(); }} />
+                            )}
                             {correctingPayment && (
                                 <CorrectPaymentModal
                                     orderId={order.id}
                                     payment={correctingPayment}
+                                    currencies={Array.from(new Set([order.currency_code, "USD",
+                                        countriesForPay?.data?.find((c) => c.code === (order as any).customer_country_code)?.sale_currency ?? null,
+                                    ].filter((c): c is string => !!c)))}
                                     onClose={() => setCorrectingPayment(null)}
                                     onSaved={() => {
                                         setCorrectingPayment(null);
@@ -5140,6 +5343,7 @@ export default function OrderDetailPage() {
                                     <span className="text-surface-400 shrink-0">Currency</span>
                                     <span className="font-mono font-bold text-surface-700 flex items-center gap-1">{cc}{(order as any).is_international && <span className="text-info-600">🌐</span>}</span>
                                 </div>
+                                <BillCurrencyControl order={order} />
                                 {(order as any).customer_country_code && (
                                     <div className="flex justify-between gap-2">
                                         <span className="text-surface-400 shrink-0">Country</span>

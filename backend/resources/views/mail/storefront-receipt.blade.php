@@ -33,17 +33,17 @@
               @endif
             </td>
             <td style="padding:10px 4px;border-bottom:1px solid #e7e8ec;text-align:right;">{{ $item->quantity }}</td>
-            <td style="padding:10px 4px;border-bottom:1px solid #e7e8ec;text-align:right;">{{ number_format((float) $item->total_price, 2) }}</td>
+            <td style="padding:10px 4px;border-bottom:1px solid #e7e8ec;text-align:right;">{{ \App\Support\CustomerMoney::format((float) $item->total_price) }}</td>
           </tr>
           @endforeach
         </tbody>
       </table>
 
       <table style="width:100%;font-size:14px;margin-top:14px;">
-        <tr><td style="color:#555;">Subtotal</td><td style="text-align:right;">{{ $order->currency_code }} {{ number_format((float) $order->subtotal, 2) }}</td></tr>
-        <tr><td style="color:#555;">Delivery</td><td style="text-align:right;">{{ (float) $order->shipping_amount > 0 ? $order->currency_code . ' ' . number_format((float) $order->shipping_amount, 2) : 'Confirmed on dispatch' }}</td></tr>
+        <tr><td style="color:#555;">Subtotal</td><td style="text-align:right;">{{ $order->currency_code }} {{ \App\Support\CustomerMoney::format((float) $order->subtotal) }}</td></tr>
+        <tr><td style="color:#555;">Delivery</td><td style="text-align:right;">{{ (float) $order->shipping_amount > 0 ? $order->currency_code . ' ' . \App\Support\CustomerMoney::format((float) $order->shipping_amount) : 'Confirmed on dispatch' }}</td></tr>
         <tr><td style="font-weight:800;padding-top:8px;border-top:2px solid #0a1425;font-size:16px;">Total</td>
-            <td style="font-weight:800;padding-top:8px;border-top:2px solid #0a1425;text-align:right;font-size:16px;">{{ $order->currency_code }} {{ number_format((float) $order->total_amount, 2) }}</td></tr>
+            <td style="font-weight:800;padding-top:8px;border-top:2px solid #0a1425;text-align:right;font-size:16px;">{{ $order->currency_code }} {{ \App\Support\CustomerMoney::format((float) $order->total_amount) }}</td></tr>
       </table>
 
       @if ($paymentLink)

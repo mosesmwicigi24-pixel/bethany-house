@@ -100,11 +100,11 @@ internal fun OrderItemsSection(order: Record, reload: () -> Unit, onProduction: 
                             val sub = listOfNotNull(item.string("variant_name")?.takeIf { it.isNotEmpty() }, item.string("sku")).joinToString(" · ")
                             if (sub.isNotEmpty()) SalesCaption(sub)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                SalesCaption("${item.string("quantity") ?: "1"} × ${item.money("unit_price", currency)?.formatted() ?: "—"}", MaterialTheme.hub.text)
+                                SalesCaption("${item.string("quantity") ?: "1"} × ${item.money("unit_price", currency)?.customerFormatted() ?: "—"}", MaterialTheme.hub.text)
                                 if (item["price_adjusted"].bool == true) item.money("original_price", currency)?.let { orig ->
-                                    Text("was ${orig.formatted()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary, textDecoration = TextDecoration.LineThrough)
+                                    Text("was ${orig.customerFormatted()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary, textDecoration = TextDecoration.LineThrough)
                                 }
-                                item.money("discount_amount", currency)?.takeIf { !it.isZero }?.let { SalesCaption("− ${it.formatted()} discount", Palette.pink) }
+                                item.money("discount_amount", currency)?.takeIf { !it.isZero }?.let { SalesCaption("− ${it.customerFormatted()} discount", Palette.pink) }
                                 item["tax_rate"].str?.let { SalesCaption("tax $it%", MaterialTheme.hub.textTertiary) }
                             }
                             item.int("production_order_id")?.let { poId ->
@@ -215,7 +215,7 @@ private fun OrderLineEditor(order: Record, onDone: () -> Unit, onCancel: () -> U
             if (confirmedShipped) body["confirm_shipped_change"] = JsonPrimitive(true)
             val r = env.client.put("/v1/admin/orders/${order.id}/items", JsonObject(body))
             var msg = r.json["message"].str ?: "Lines updated"
-            Money.from(r.json["overpaid"], currency)?.takeIf { !it.isZero }?.let { msg += " — overpaid by ${it.formatted()}" }
+            Money.from(r.json["overpaid"], currency)?.takeIf { !it.isZero }?.let { msg += " — overpaid by ${it.customerFormatted()}" }
             env.toasts.show(msg)
             onDone()
         } catch (e: ApiError) {
@@ -324,7 +324,7 @@ internal fun ProductPickerSheet(currency: String, onPicked: (SalesLine) -> Unit,
                     SalesCaption("${p.string("sku") ?: ""}${if (vc > 0) " · $vc variants" else ""}")
                 }
                 val bp = p["base_price"]
-                Money.from(bp["sale_price"] ?: bp["regular_price"], "KES")?.let { SalesCaption(it.formatted(), MaterialTheme.hub.textTertiary) }
+                Money.from(bp["sale_price"] ?: bp["regular_price"], "KES")?.let { SalesCaption(it.customerFormatted(), MaterialTheme.hub.textTertiary) }
                 if (picked?.id == p.id) { Spacer(Modifier.width(6.dp)); Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = Palette.brand, modifier = Modifier.size(18.dp)) }
             }
         }

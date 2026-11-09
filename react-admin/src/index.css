@@ -305,6 +305,21 @@
     animation: slide-in-right 280ms cubic-bezier(0.32, 0.72, 0, 1) both;
   }
 
+  /* ── Message notices (floating stack, top-right) ─────────────────────── */
+  @keyframes notice-in {
+    from { transform: translateY(-8px) scale(0.98); opacity: 0; }
+    to   { transform: translateY(0) scale(1);       opacity: 1; }
+  }
+  @keyframes notice-out {
+    from { transform: translateX(0);    opacity: 1; }
+    to   { transform: translateX(24px); opacity: 0; }
+  }
+  .animate-notice-in  { animation: notice-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .animate-notice-out { animation: notice-out 160ms ease-in both; }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-notice-in, .animate-notice-out { animation-duration: 1ms; }
+  }
+
   /* ── Touch press feedback ─────────────────────────────────────────────── */
   /* Applied via active: pseudo-class - gives physical press feeling        */
   .touch-press {

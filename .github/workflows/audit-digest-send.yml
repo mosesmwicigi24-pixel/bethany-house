@@ -1,0 +1,80 @@
+name: Send the morning briefing now
+
+# Runs `php artisan audit:daily-digest` on the VPS on demand (owner,
+# 2026-11-05: "run a test email"), the same way history-audit.yml reaches
+# the box. It goes ONLY to the configured owner address (AUDIT_OWNER_EMAIL);
+# there is no recipient input. The repository is public, so the log prints
+# only the day reported and "sent" — never the address or any figure.
+#
+# "07:30 morning brief" sends the insights brief to the owner ONLY
+# (insights:digest --owner-only): no other recipient, no WhatsApp, and the
+# real 07:30 send is not affected. "all email recipients" re-sends today's
+# brief by email to every EoD recipient (insights:digest --force
+# --email-only), never WhatsApp. The date applies to the 06:30 briefing.
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: "Which email"
+        type: choice
+        options:
+          - "06:30 briefing (audit)"
+          - "07:30 morning brief (owner only)"
+          - "07:30 morning brief (all email recipients, no WhatsApp)"
+        default: "06:30 briefing (audit)"
+      date:
+        description: "Day to report, YYYY-MM-DD (empty = yesterday, as the 06:30 email)"
+        required: false
+        default: ""
+
+concurrency:
+  group: audit-digest-send
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Send the morning briefing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the date
+        env:
+          DAY: ${{ inputs.date }}
+        run: |
+          if [ -n "$DAY" ] && ! [[ "$DAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::date must be YYYY-MM-DD or empty"; exit 1
+          fi
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Send it (address and figures never printed)
+        env:
+          DAY: ${{ inputs.date }}
+          WHICH: ${{ inputs.email }}
+        run: |
+          if [ "$WHICH" = "07:30 morning brief (owner only)" ]; then
+            CMD="php artisan insights:digest --owner-only"
+          elif [ "$WHICH" = "07:30 morning brief (all email recipients, no WhatsApp)" ]; then
+            CMD="php artisan insights:digest --force --email-only"
+          else
+            CMD="php artisan audit:daily-digest"
+            [ -n "$DAY" ] && CMD="$CMD --date=$DAY"
+          fi
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel $CMD 2>&1 | sed -E 's/ sent to .*/ sent to the owner./; s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[address]/g' | grep -E '^(Digest for|No owner email|Test brief sent|Sent to|Nothing needs attention|No EoD|Failed for)'"
+        timeout-minutes: 10

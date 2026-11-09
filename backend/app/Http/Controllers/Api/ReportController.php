@@ -473,7 +473,7 @@ class ReportController extends Controller
         // the aggregate returns one row of 0 rather than a NULL row; the
         // COALESCE(pay.paid, 0) downstream makes those identical.
         $paidPerOrder = DB::table('payments')
-            ->selectRaw('(COALESCE(SUM(payments.amount - COALESCE(payments.refund_amount, 0)), 0))::float8 AS paid')
+            ->selectRaw('(COALESCE(SUM(' . \App\Support\PaymentCredit::netSql('payments') . '), 0))::float8 AS paid')   // in the order's currency
             ->whereColumn('payments.order_id', 'orders.id')
             ->tap(fn ($q) => \App\Support\SettledPayment::where($q, 'payments'));
 

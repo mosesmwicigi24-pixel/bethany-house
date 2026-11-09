@@ -84,8 +84,29 @@ class Payroll
         return [['label' => sprintf('Recognition %d point%s × %s', $points, $points === 1 ? '' : 's', number_format($value, 2)), 'amount' => round($points * $value, 2)]];
     }
 
-    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates, array $deductions = [], array $extras = []): array
+    /**
+     * Approved commissions not yet on an approved payslip, earned by the period
+     * end, as earnings on top of salary (owner, 2026-11-04). PAYE is charged on
+     * them only while payroll.commission_paye is on — off for now.
+     *
+     * @return list<array{label:string, amount:float, taxable:bool, commission_id:int}>
+     */
+    public static function commissionExtras(User $user, PayPeriod $period): array
     {
+        $taxable = \App\Models\StaffCommission::payeApplies();
+
+        return \App\Models\StaffCommission::where('user_id', $user->id)->where('status', 'approved')->whereNull('payroll_line_id')
+            ->where('earned_on', '<=', $period->ends_on->toDateString())->orderBy('earned_on')->orderBy('id')->get()
+            ->map(fn ($c) => ['label' => "Commission · {$c->transaction_ref}" . ($taxable ? '' : ' (no PAYE)'), 'amount' => round((float) $c->amount, 2),
+                'taxable' => $taxable, 'commission_id' => (int) $c->id])
+            ->all();
+    }
+
+    public static function computeLine(User $user, PayPeriod $period, PayGroup $group, PayStructure $s, array $hours, array $rates, array $deductions = [], array $extras = [], ?bool $statutory = null): array
+    {
+        // Government deductions apply only to someone accounts enrolled
+        // (StatutoryEnrolment, owner 2026-11-03: staff are on contracts).
+        $statutory ??= \App\Models\StatutoryEnrolment::applies((int) $user->id, $period->ends_on);
         $r2 = fn (float $v) => round($v, 2);
         $workingDays = self::workingDays($period);
         $stdHours = (float) $group->standard_hours_per_day;
@@ -129,10 +150,15 @@ class Payroll
             $items[] = ['label' => ($a['name'] ?? 'Allowance') . (empty($a['taxable']) ? ' (non-taxable)' : ''), 'amount' => $amt, 'kind' => 'earning'];
         }
 
+        $commissionIds = [];
         foreach ($extras as $x) {
             $amt = $r2((float) ($x['amount'] ?? 0));
             if ($amt <= 0) continue;
             $allowTotal += $amt;
+            // An extra is taxable unless it says otherwise (commission while
+            // PAYE on commission is off).
+            if (array_key_exists('taxable', $x) && !$x['taxable']) $allowNonTax += $amt;
+            if (!empty($x['commission_id'])) $commissionIds[] = (int) $x['commission_id'];
             $items[] = ['label' => (string) ($x['label'] ?? 'Extra'), 'amount' => $amt, 'kind' => 'earning'];
         }
 
@@ -142,8 +168,9 @@ class Payroll
 
         $gross = max(0.0, $r2($basic + $overtime + $rest + $holiday + $allowTotal - $unpaid));
 
-        // ── Statutory ──
-        $nssfC = $rates['nssf']?->config ?? null; $shifC = $rates['shif']?->config ?? null; $hlC = $rates['housing_levy']?->config ?? null; $payeC = $rates['paye']?->config ?? null;
+        // ── Statutory ── (none at all for someone not enrolled)
+        $nssfC = $statutory ? ($rates['nssf']?->config ?? null) : null; $shifC = $statutory ? ($rates['shif']?->config ?? null) : null;
+        $hlC   = $statutory ? ($rates['housing_levy']?->config ?? null) : null; $payeC = $statutory ? ($rates['paye']?->config ?? null) : null;
         $nssfEmp = $nssfC ? $r2(min($gross, (float) ($nssfC['tier2_limit'] ?? PHP_FLOAT_MAX)) * (float) $nssfC['employee_rate']) : 0.0;
         $nssfEr  = $nssfC ? $r2(min($gross, (float) ($nssfC['tier2_limit'] ?? PHP_FLOAT_MAX)) * (float) $nssfC['employer_rate']) : 0.0;
         $shif    = $shifC ? ($gross > 0 ? $r2(max((float) ($shifC['minimum'] ?? 0), $gross * (float) $shifC['rate'])) : 0.0) : 0.0;
@@ -151,9 +178,9 @@ class Payroll
         $hlEr    = $hlC ? $r2($gross * (float) $hlC['employer_rate']) : 0.0;
 
         $taxable = $gross - $allowNonTax;
-        if ($rates['nssf']?->reduces_taxable_pay) $taxable -= $nssfEmp;
-        if ($rates['shif']?->reduces_taxable_pay) $taxable -= $shif;
-        if ($rates['housing_levy']?->reduces_taxable_pay) $taxable -= $hlEmp;
+        if ($statutory && $rates['nssf']?->reduces_taxable_pay) $taxable -= $nssfEmp;
+        if ($statutory && $rates['shif']?->reduces_taxable_pay) $taxable -= $shif;
+        if ($statutory && $rates['housing_levy']?->reduces_taxable_pay) $taxable -= $hlEmp;
         $taxable = max(0.0, $r2($taxable));
 
         $paye = 0.0;
@@ -190,9 +217,10 @@ class Payroll
         return [
             'structure' => ['id' => $s->id, 'kind' => $s->kind, 'base_amount' => $base, 'allowances' => $s->allowances ?? [], 'effective_from' => $s->effective_from->toDateString(),
                 'hourly_equivalent' => $r2($hourly), 'working_days_in_period' => $workingDays, 'service_fraction' => $fraction,
+                'statutory' => $statutory,
                 'multipliers' => ['overtime' => (float) $group->overtime_multiplier, 'rest_day' => (float) $group->rest_day_multiplier, 'holiday' => (float) $group->holiday_multiplier]],
             'hours' => $hours,
-            'items' => $items, 'deductions' => $taken,
+            'items' => $items, 'deductions' => $taken, 'commissions' => $commissionIds,
             'basic' => $basic, 'overtime_pay' => $overtime, 'rest_day_pay' => $rest, 'holiday_pay' => $holiday, 'allowances' => $r2($allowTotal), 'unpaid_deduction' => $unpaid,
             'gross' => $gross, 'taxable' => $taxable, 'paye' => $paye, 'nssf_employee' => $nssfEmp, 'nssf_employer' => $nssfEr, 'shif' => $shif,
             'housing_employee' => $hlEmp, 'housing_employer' => $hlEr, 'other_deductions' => $other, 'net' => $net, 'employer_cost' => $employerCost,
@@ -229,7 +257,8 @@ class Payroll
                 if (!$s)     { $unpayable[] = ['id' => $u->id, 'name' => trim("{$u->first_name} {$u->last_name}"), 'why' => 'No pay structure']; continue; }
                 $hours = ['regular_minutes' => (int) $sheet->regular_minutes, 'overtime_minutes' => (int) $sheet->overtime_minutes, 'rest_day_minutes' => (int) $sheet->rest_day_minutes,
                     'holiday_minutes' => (int) $sheet->holiday_minutes, 'paid_leave_days' => (float) $sheet->paid_leave_days, 'unpaid_leave_days' => (float) $sheet->unpaid_leave_days, 'days_worked' => (int) $sheet->days_worked];
-                $line = self::computeLine($u, $period, $group, $s, $hours, $rates, self::advanceDeductions($u), self::recognitionExtras($u, $period));
+                $line = self::computeLine($u, $period, $group, $s, $hours, $rates, self::advanceDeductions($u),
+                    [...self::recognitionExtras($u, $period), ...self::commissionExtras($u, $period)]);
                 PayrollLine::create($line + ['payroll_run_id' => $run->id, 'user_id' => $u->id, 'timesheet_id' => $sheet->id]);
                 foreach (PayrollRun::MONEY as $c) $totals[$c] += (float) $line[$c];
                 $n++;
@@ -268,10 +297,28 @@ class Payroll
             ]);
             $run->update(['status' => 'approved', 'approved_by' => $by->id, 'approved_at' => now(), 'expense_id' => $expense->id]);
             self::recordRepayments($run, $by);
+            self::attachCommissions($run);
             ActivityLogService::log('payroll_run_approved', $run, ['people' => $run->people, 'gross' => (string) $run->gross, 'net' => (string) $run->net, 'employer_cost' => (string) $run->employer_cost, 'expense_id' => $expense->id],
                 "{$by->first_name} approved payroll {$run->reference}: {$run->people} people, employer cost {$run->employer_cost}");
             return $run->fresh();
         });
+    }
+
+    /**
+     * Tie each commission on the run's lines to the payslip that pays it, so it
+     * can never be paid twice. A commission voided, or taken by another run,
+     * since the draft was built refuses the approval: recalculate first.
+     */
+    private static function attachCommissions(PayrollRun $run): void
+    {
+        foreach ($run->lines()->get() as $line) {
+            $ids = $line->commissions ?? [];
+            if ($ids === []) continue;
+            $n = \App\Models\StaffCommission::whereIn('id', $ids)->where('user_id', $line->user_id)
+                ->where('status', 'approved')->whereNull('payroll_line_id')
+                ->update(['payroll_line_id' => $line->id, 'updated_at' => now()]);
+            abort_if($n !== count($ids), 422, 'A commission on this run changed after it was drafted. Recalculate the run, then approve.');
+        }
     }
 
     /** Record payment on lines; when all are paid the run and its expense are paid. */
@@ -282,12 +329,19 @@ class Payroll
             foreach ($payments as $p) {
                 $line = $run->lines()->whereKey($p['line_id'])->firstOrFail();
                 if ($line->paid_at) continue;
-                $line->update(['payment_method' => $p['payment_method'], 'payment_reference' => $p['payment_reference'] ?? null, 'paid_at' => now(), 'paid_by' => $by->id]);
+                // The day the money actually went out (owner, 2026-11-03), not
+                // the moment it was recorded; today when not given.
+                $paidOn = !empty($p['paid_on']) ? Carbon::parse($p['paid_on'])->setTimeFrom(now()) : now();
+                $line->update(['payment_method' => $p['payment_method'], 'payment_reference' => $p['payment_reference'] ?? null, 'paid_at' => $paidOn, 'paid_by' => $by->id]);
+                // Its commissions are paid with it: the person's balance is back to zero.
+                \App\Models\StaffCommission::where('payroll_line_id', $line->id)->where('status', 'approved')
+                    ->update(['status' => 'paid', 'paid_at' => $paidOn, 'updated_at' => now()]);
             }
             if ($run->lines()->whereNull('paid_at')->doesntExist()) {
-                $run->update(['status' => 'paid', 'paid_at' => now()]);
+                $lastPaid = Carbon::parse($run->lines()->max('paid_at'));
+                $run->update(['status' => 'paid', 'paid_at' => $lastPaid]);
                 if ($run->expense && $run->expense->status === 'approved') {
-                    $run->expense->update(['status' => 'paid', 'paid_by' => $by->id, 'paid_at' => now()]);
+                    $run->expense->update(['status' => 'paid', 'paid_by' => $by->id, 'paid_at' => $lastPaid]);
                 }
                 ActivityLogService::log('payroll_run_paid', $run, [], "{$by->first_name} recorded payroll {$run->reference} as fully paid");
             }

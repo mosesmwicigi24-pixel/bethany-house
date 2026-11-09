@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
+import ke.co.bethanyhouse.hub.core.bool
 import ke.co.bethanyhouse.hub.core.Money
 import ke.co.bethanyhouse.hub.core.date
 import ke.co.bethanyhouse.hub.core.get
@@ -72,8 +73,9 @@ import kotlinx.serialization.json.JsonPrimitive
  * with a note each, the day in her words, submitted before the till can be
  * counted; management's acknowledgement and the comment thread below it.
  *
- * docs/NATIVE_APPS_CHECKLIST.md F5: `pos/reports/user-eod` totals carry no
- * currency key; they are labelled in the outlet's currency.
+ * Since F5 (2026-11-04) the Hub states her day as her supervisor sees it:
+ * totals in KES at each order's reporting rate with the native figures
+ * beside them; each order in its own currency; a cart listed, not counted.
  */
 @Composable
 internal fun UserEodSheet(
@@ -97,7 +99,6 @@ internal fun UserEodSheet(
     var reply by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var hydratedFor by remember { mutableStateOf<String?>(null) }
-    val currency = session.outlet?.currencyCode ?: "KES"
 
     fun make() {
         val d = day
@@ -140,13 +141,13 @@ internal fun UserEodSheet(
 
     fun printReport() {
         val s = value ?: return
-        fun m(v: JsonElement?) = v?.let { Money.from(it, currency) }?.formatted() ?: "—"
+        fun m(v: JsonElement?, cur: String = "KES") = v?.let { Money.from(it, cur) }?.formatted() ?: "—"
         val h = StringBuilder("<html><body style='font-family:Helvetica,sans-serif;font-size:12px'><h2>End of Day report</h2>")
         h.append("<div>${ReceiptHtml.esc(outletName)} · ${ReceiptHtml.esc(day)} · ${ReceiptHtml.esc(s["user_name"].str ?: "")}</div>")
         h.append("<p>Orders ${s["order_count"].int ?: 0} · Sales ${m(s["total_sales"])} · Paid ${m(s["total_paid"])} · Balance ${m(s["total_balance"])}</p><table width='100%' border='0'>")
         for (o in s["orders"].records) {
             val note = notes[o["id"].str ?: ""] ?: ""
-            h.append("<tr><td>${ReceiptHtml.esc(o["order_number"].str ?: "")}</td><td>${ReceiptHtml.esc(o["customer_name"].str ?: "")}</td><td align='right'>${m(o["total_amount"])}</td><td>${ReceiptHtml.esc(o["payment_status"].str ?: "")}</td></tr>")
+            h.append("<tr><td>${ReceiptHtml.esc(o["order_number"].str ?: "")}</td><td>${ReceiptHtml.esc(o["customer_name"].str ?: "")}</td><td align='right'>${m(o["total_amount"], o["currency_code"].str ?: "KES")}</td><td>${ReceiptHtml.esc(o["payment_status"].str ?: "")}</td></tr>")
             if (note.isNotEmpty()) h.append("<tr><td colspan='4'><i>${ReceiptHtml.esc(note)}</i></td></tr>")
         }
         h.append("</table><h3>How the day went</h3><p>${ReceiptHtml.esc(sentiments)}</p></body></html>")
@@ -173,22 +174,25 @@ internal fun UserEodSheet(
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 TileGrid(minWidth = 140.dp) {
                     StatTile("Orders", s["order_count"].str ?: "0", modifier = TileModifier)
-                    StatTile("Sales", Money.from(s["total_sales"], currency)?.formatted() ?: "—", modifier = TileModifier)
-                    StatTile("Paid", Money.from(s["total_paid"], currency)?.formatted() ?: "—", modifier = TileModifier)
-                    StatTile("Balance", Money.from(s["total_balance"], currency)?.formatted() ?: "—", tone = if (s["total_balance"].money?.isZero == false) StatusTone.WARNING else null, modifier = TileModifier)
+                    StatTile("Sales", Money.from(s["total_sales"], "KES")?.formatted() ?: "—", modifier = TileModifier)
+                    StatTile("Paid", Money.from(s["total_paid"], "KES")?.formatted() ?: "—", modifier = TileModifier)
+                    StatTile("Balance", Money.from(s["total_balance"], "KES")?.formatted() ?: "—", tone = if (s["total_balance"].money?.isZero == false) StatusTone.WARNING else null, modifier = TileModifier)
                 }
-                CaptionText("Figures are the Hub's for your orders on this day at this outlet, in $currency.")
+                eodCurrencyLines(s["sales_by_currency"])?.let { CaptionText("Sales by currency: $it") }
+                CaptionText("Figures are the Hub's for your sales on this day at this outlet: ${s["money_basis"].str ?: "KES at the reporting rate"}.")
                 s["orders"].records.forEach { o ->
                     val oid = o["id"].str ?: ""
                     Column(Modifier.fillMaxWidth().background(MaterialTheme.hub.card, MaterialTheme.shapes.small).padding(Space.m), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                             Text(o["order_number"].str ?: "", style = MaterialTheme.typography.bodyMedium)
-                            StatusBadge(o["payment_status"].str)
+                            if (o["counts_as_sale"].bool == false) StatusBadge("cart · not a sale", StatusTone.NEUTRAL) else StatusBadge(o["payment_status"].str)
                             Spacer(Modifier.weight(1f))
-                            MoneyText(Money.from(o["total_amount"], currency))
+                            val cur = o["currency_code"].str ?: "KES"
+                            MoneyText(Money.from(o["total_amount"], cur))
                         }
+                        val cur = o["currency_code"].str ?: "KES"
                         Text(
-                            "${o["customer_name"].str ?: "Walk-in"} · paid ${Money.from(o["amount_paid"], currency)?.formatted() ?: "—"} · balance ${Money.from(o["balance"], currency)?.formatted() ?: "—"}",
+                            "${o["customer_name"].str ?: "Walk-in"} · paid ${Money.from(o["amount_paid"], cur)?.formatted() ?: "—"} · balance ${Money.from(o["balance"], cur)?.formatted() ?: "—"}",
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary,
                         )
                         val items = o["items"].records

@@ -184,8 +184,9 @@ class ApprovalEngineTest extends TestCase
 
     public function test_the_maker_is_blocked_at_every_band(): void
     {
-        // Holds every authority there is — and still signs none of his own.
-        $maker = $this->user('procurement_officer', 'procurement_manager', 'finance_manager', 'super_admin');
+        // Holds every band's authority — and still signs none of his own. (A super
+        // admin is the one exception: SuperAdminSelfApprovalTest.)
+        $maker = $this->user('procurement_officer', 'procurement_manager', 'finance_manager');
         $po = $this->submitPo($maker, 600000);
         $r  = $this->requestFor($po);
 

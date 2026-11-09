@@ -212,7 +212,8 @@ class RoleCatalogueV2Test extends TestCase
             // People PR 2 (sync, 2026-10-26): employee files and, behind step-up, pay details.
             'hr.view', 'hr.view_sensitive',
             // People PR 5 (sync, 2026-10-29): locks pay periods and exports approved hours.
-            'attendance.view_team', 'timesheets.lock',
+            // Timesheets only, through timesheets.lock — no other People page (owner, 2026-11-04).
+            'timesheets.lock',
             // People PR 6 (sync, 2026-10-30): runs payroll; approval and payment behind step-up.
             'payroll.view', 'payroll.run',
         ],
@@ -254,14 +255,12 @@ class RoleCatalogueV2Test extends TestCase
             'production.confirm_order', 'production.manage_assignees',
             'production.raise_order', 'production.submit_qc', 'production.view',
             'products.view', 'reports.production',
-            // People PR 3 (sync, 2026-10-27): rosters the floor.
-            'attendance.view_team', 'roster.manage',
+            // People PR 3/4 (rosters and leave) were taken back: no People
+            // pages (owner, 2026-11-04; 2026_11_13_100000).
             // People C3 (sync, 2026-11-03): posts on the Updates feed.
             'updates.post',
             // People C4 (sync, 2026-11-04): checklists and forms.
             'forms.manage',
-            // People PR 4 (sync, 2026-10-28): decides the floor's leave.
-            'leave.approve',
         ],
     ];
 
@@ -278,6 +277,8 @@ class RoleCatalogueV2Test extends TestCase
     private const LATER_REVOKES = [
         // Tailoring PR 2 (2026_10_05_100001): the person who sewed it does not pass it.
         'tailor' => ['production.submit_qc'],
+        // People visibility (2026_11_13_100000): staff accounts, not their attendance or leave.
+        'system_admin' => ['attendance.manage', 'attendance.view_team'],
     ];
 
     private static function withoutLaterRevokes(array $shape): array

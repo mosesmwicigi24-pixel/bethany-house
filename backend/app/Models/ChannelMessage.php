@@ -47,6 +47,23 @@ class ChannelMessage extends Model
     /**
      * Parse @mention tags from body and return user IDs.
      */
+    /**
+     * The message as one line of plain text, for a list row or a notice:
+     * images, files, links and @mentions reduced to their labels.
+     */
+    public static function plainPreview(?string $body, int $length = 100): string
+    {
+        $text = (string) $body;
+        $text = preg_replace('/!\[([^\]]*)\]\([^)]+\)/', '$1', $text);       // images
+        $text = preg_replace('/\[📎\s*([^\]]+)\]\([^)]+\)/', '$1', $text);   // files
+        $text = preg_replace('/@\[([^\]]+)\]\(user:\d+\)/', '@$1', $text);   // mentions
+        $text = preg_replace('/#\[([^\]]+)\]\(entity:[^)]+\)/', '#$1', $text); // order tags
+        $text = preg_replace('/\[([^\]]+)\]\([^)]+\)/', '$1', $text);        // any link
+        $text = trim(preg_replace('/\s+/', ' ', $text));
+
+        return mb_substr($text, 0, $length);
+    }
+
     public static function parseMentions(string $body): array
     {
         preg_match_all('/@\[([^\]]+)\]\(user:(\d+)\)/', $body, $matches);

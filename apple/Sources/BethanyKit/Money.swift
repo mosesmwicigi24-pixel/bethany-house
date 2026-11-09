@@ -45,6 +45,18 @@ public struct Money: Hashable, Sendable {
         let text = f.string(from: amount as NSDecimalNumber) ?? "\(amount)"
         return "\(currency) \(text)"
     }
+
+    /// As a customer reads it (owner, 2026-10-30): "KES 4,500", not
+    /// "KES 4,500.00"; cents only when there are some (VAT inside a price,
+    /// an older amount), so nothing is hidden. Display only. Mirrors
+    /// `App\Support\CustomerMoney::format` and the console's customerMoney.ts.
+    public func customerFormatted() -> String {
+        var cents = amount, rounded = Decimal()
+        NSDecimalRound(&rounded, &cents, 2, .plain)
+        var whole = rounded, truncated = Decimal()
+        NSDecimalRound(&truncated, &whole, 0, .down)
+        return Money(amount: rounded, currency: currency).formatted(decimals: rounded == truncated ? 0 : 2)
+    }
 }
 
 /// The server's shape for a list of rows in several currencies

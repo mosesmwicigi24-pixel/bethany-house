@@ -4,6 +4,8 @@ import { clsx } from "clsx";
 import { useSearchParams } from "react-router-dom";
 import { payrollApi, advancesApi, kes, saveBlob, RUN_TONE, RUN_LABEL, RATE_LABEL, type PayrollRun, type PayrollLine, type RateTable, type RateCode } from "@/api/payroll";
 import { AdvancesPanel, ReturnsPanel } from "@/components/people/AdvancesPanel";
+import { PeopleAndPay } from "@/components/people/PeopleAndPay";
+import { CommissionsPanel } from "@/components/people/CommissionsPanel";
 import { PayslipItems } from "@/components/people/PayslipItems";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
@@ -19,7 +21,7 @@ type Method = "mpesa" | "bank" | "cash";
  */
 export default function PayrollPage() {
     const [params, setParams] = useSearchParams();
-    const tab = (["runs", "advances", "returns", "rates"].includes(params.get("tab") ?? "") ? params.get("tab") : "runs") as "runs" | "advances" | "returns" | "rates";
+    const tab = (["runs", "people", "commissions", "advances", "returns", "rates"].includes(params.get("tab") ?? "") ? params.get("tab") : "runs") as "runs" | "people" | "commissions" | "advances" | "returns" | "rates";
     const setTab = (t: string) => setParams(t === "runs" ? {} : { tab: t });
     const [open, setOpen] = useState<number | null>(null);
     return (
@@ -29,11 +31,13 @@ export default function PayrollPage() {
                     <h1 className="text-xl font-bold text-surface-900">Payroll</h1>
                     <p className="text-sm text-surface-500">Pay runs from locked timesheets. Approving posts the labour cost to Expenses.</p>
                 </div>
-                <div className="flex rounded-xl border border-line bg-surface-50 p-0.5 text-xs font-semibold">
-                    {([["runs", "Runs"], ["advances", "Advances & loans"], ["returns", "Returns"], ["rates", "Statutory rates"]] as const).map(([t, label]) => <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 rounded-lg", tab === t ? "bg-white shadow-sm text-surface-900" : "text-surface-500")}>{label}</button>)}
+                <div className="flex max-w-full overflow-x-auto no-scrollbar whitespace-nowrap rounded-xl border border-line bg-surface-50 p-0.5 text-xs font-semibold">
+                    {([["runs", "Runs"], ["people", "People & pay"], ["commissions", "Commissions"], ["advances", "Advances & loans"], ["returns", "Returns"], ["rates", "Statutory rates"]] as const).map(([t, label]) => <button key={t} onClick={() => setTab(t)} className={clsx("px-3 py-1.5 rounded-lg", tab === t ? "bg-white shadow-sm text-surface-900" : "text-surface-500")}>{label}</button>)}
                 </div>
             </div>
             {tab === "runs" && <Runs onOpen={setOpen} />}
+            {tab === "people" && <PeopleAndPay />}
+            {tab === "commissions" && <CommissionsPanel />}
             {tab === "advances" && <AdvancesPanel />}
             {tab === "returns" && <ReturnsPanel />}
             {tab === "rates" && <Rates />}
@@ -115,13 +119,13 @@ function RunModal({ id, onClose }: { id: number; onClose: () => void }) {
     const payoutFile = async (method: "mpesa" | "bank") => {
         try { saveBlob(await advancesApi.payoutFile(id, method), `payout-${method}-${data?.run.reference}.csv`); } catch (e) { const err = e as ApiError; if (err?.message) toast.error(err.message); }
     };
-    const [paying, setPaying] = useState<{ line: PayrollLine | null; method: Method; reference: string } | null>(null);
+    const [paying, setPaying] = useState<{ line: PayrollLine | null; method: Method; reference: string; paidOn: string } | null>(null);
     const refresh = () => { void qc.invalidateQueries({ queryKey: ["payroll-run", id] }); void qc.invalidateQueries({ queryKey: ["payroll-runs"] }); };
     const onErr = (e: ApiError) => toast.error(e.message);
     const recalc = useMutation({ mutationFn: () => payrollApi.recalculate(id), onSuccess: r => { toast.success(r.message); refresh(); }, onError: onErr });
     const discard = useMutation({ mutationFn: () => payrollApi.discard(id), onSuccess: r => { toast.success(r.message); refresh(); onClose(); }, onError: onErr });
     const approve = useMutation({ mutationFn: () => payrollApi.approve(id), onSuccess: r => { toast.success(r.message); refresh(); }, onError: onErr });
-    const pay = useMutation({ mutationFn: (lines: { line_id: number; payment_method: Method; payment_reference?: string }[]) => payrollApi.pay(id, lines), onSuccess: r => { toast.success(r.message); refresh(); setPaying(null); }, onError: onErr });
+    const pay = useMutation({ mutationFn: (lines: { line_id: number; payment_method: Method; payment_reference?: string; paid_on?: string }[]) => payrollApi.pay(id, lines), onSuccess: r => { toast.success(r.message); refresh(); setPaying(null); }, onError: onErr });
     const slip = async (l: PayrollLine) => {
         try { saveBlob(await payrollApi.payslipPdf(id, l.id), `payslip-${data?.run.reference}-${l.user.id}.pdf`); } catch (e) { const err = e as ApiError; if (err?.message) toast.error(err.message); }
     };
@@ -179,7 +183,7 @@ function RunModal({ id, onClose }: { id: number; onClose: () => void }) {
                                         <td className="px-3 py-2 text-right tabular-nums">{kes(l.shif)}</td>
                                         <td className="px-3 py-2 text-right tabular-nums">{kes(l.housing_employee)}</td>
                                         <td className="px-3 py-2 text-right tabular-nums font-semibold">{kes(l.net)}</td>
-                                        <td className="px-3 py-2 text-2xs text-surface-500">{l.paid_at ? `${l.payment_method}${l.payment_reference ? ` · ${l.payment_reference}` : ""}` : run.status === "draft" ? "" : <button onClick={() => setPaying({ line: l, method: "mpesa", reference: "" })} className="text-brand-700 hover:underline">Record payment</button>}</td>
+                                        <td className="px-3 py-2 text-2xs text-surface-500">{l.paid_at ? `${l.payment_method}${l.payment_reference ? ` · ${l.payment_reference}` : ""}` : run.status === "draft" ? "" : <button onClick={() => setPaying({ line: l, method: "mpesa", reference: "", paidOn: new Date().toLocaleDateString("en-CA") })} className="text-brand-700 hover:underline">Record payment</button>}</td>
                                         <td className="px-3 py-2 text-right">{run.status !== "draft" && <button onClick={() => void slip(l)} className="btn-ghost btn-sm text-xs">Payslip</button>}</td>
                                     </tr>
                                 ))}
@@ -193,7 +197,7 @@ function RunModal({ id, onClose }: { id: number; onClose: () => void }) {
                                 <button onClick={() => recalc.mutate()} disabled={recalc.isPending} className="btn-secondary btn-sm">Recalculate</button>
                                 <button onClick={() => approve.mutate()} disabled={approve.isPending || run.people === 0} className="btn-primary btn-sm">{approve.isPending && <Spinner size="xs" className="border-white/30 border-t-white" />}Approve and post {kes(run.totals.employer_cost)} to Expenses</button>
                             </>}
-                            {run.status === "approved" && unpaid.length > 0 && <button onClick={() => setPaying({ line: null, method: "mpesa", reference: "" })} className="btn-primary btn-sm">Record payment for all {unpaid.length} unpaid</button>}
+                            {run.status === "approved" && unpaid.length > 0 && <button onClick={() => setPaying({ line: null, method: "mpesa", reference: "", paidOn: new Date().toLocaleDateString("en-CA") })} className="btn-primary btn-sm">Record payment for all {unpaid.length} unpaid</button>}
                         </div>
                     )}
                     {run.status === "draft" && <p className="text-2xs text-surface-500">Approving freezes every line and posts one expense of the employer cost under Salaries &amp; wages, dated the last day of the period. Net pay and statutory remittances are then recorded as they are paid out.</p>}
@@ -207,13 +211,17 @@ function RunModal({ id, onClose }: { id: number; onClose: () => void }) {
             )}
             {paying && (
                 <Modal open onClose={() => setPaying(null)} size="sm" title={paying.line ? `Record payment · ${paying.line.user.name ?? ""}` : `Record payment · ${unpaid.length} people`}
-                    footer={<button onClick={() => pay.mutate(targets.map(l => ({ line_id: l.id, payment_method: paying.method, payment_reference: paying.reference || undefined })))} disabled={pay.isPending} className="btn-primary btn-sm">{pay.isPending && <Spinner size="xs" className="border-white/30 border-t-white" />}Record as paid</button>}>
+                    footer={<button onClick={() => pay.mutate(targets.map(l => ({ line_id: l.id, payment_method: paying.method, payment_reference: paying.reference || undefined, paid_on: paying.paidOn })))} disabled={pay.isPending} className="btn-primary btn-sm">{pay.isPending && <Spinner size="xs" className="border-white/30 border-t-white" />}Record as paid</button>}>
                     <div className="space-y-2">
                         <p className="text-sm text-surface-600">Net {kes(targets.reduce((s, l) => s + l.net, 0))}{paying.line ? "" : ` across ${targets.length} people`}. This records that the money went out; it does not send it.</p>
                         <label className="text-xs text-surface-500">Paid by
                             <select className="input mt-1" value={paying.method} onChange={e => setPaying({ ...paying, method: e.target.value as Method })}>
                                 <option value="mpesa">M-Pesa</option><option value="bank">Bank transfer</option><option value="cash">Cash</option>
                             </select>
+                        </label>
+                        <label className="text-xs text-surface-500">Date paid
+                            <input type="date" className="input mt-1" value={paying.paidOn} max={new Date().toLocaleDateString("en-CA")}
+                                onChange={e => setPaying({ ...paying, paidOn: e.target.value })} />
                         </label>
                         <label className="text-xs text-surface-500">Reference (optional)<input className="input mt-1" maxLength={80} value={paying.reference} onChange={e => setPaying({ ...paying, reference: e.target.value })} placeholder="M-Pesa code, batch or bank reference" /></label>
                     </div>

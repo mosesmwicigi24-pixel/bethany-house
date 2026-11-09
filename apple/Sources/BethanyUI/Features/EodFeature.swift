@@ -80,9 +80,7 @@ struct EodReportsView: View {
                     if row["acknowledged_at"]?.isNull == false { StatusBadge("acknowledged", tone: .success) } else { StatusBadge("to read", tone: .amber) }
                 }
                 Text("\(row["report_date"]?.string ?? "") · \(row["order_count"]?.int ?? 0) orders · \(row["note_count"]?.int ?? 0) notes\(row["has_sentiments"]?.bool == true ? " · has a write-up" : "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                if let by = row["sales_by_currency"]?.array, by.count > 1 || by.first?["currency_code"]?.string != "KES" {
-                    Text(by.map { "\($0["currency_code"]?.string ?? "") \(Money(json: $0["amount"] ?? .null, currency: $0["currency_code"]?.string ?? "KES")?.formatted() ?? "")" }.joined(separator: " · ")).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
-                }
+                if let line = eodCurrencyLines(row["sales_by_currency"]) { Text(line).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
@@ -150,18 +148,26 @@ struct EodReportDetailSheet: View {
         }
         TileGrid(minWidth: 140) {
             StatTile("Orders", value: r["order_count"]?.string ?? "0")
-            StatTile("Sales", value: plainFigure(r["total_sales"]))
-            StatTile("Paid", value: plainFigure(r["total_paid"]))
-            StatTile("Balance", value: plainFigure(r["total_balance"]))
+            StatTile("Sales", value: kes(r["total_sales"]))
+            StatTile("Paid", value: kes(r["total_paid"]))
+            StatTile("Balance", value: kes(r["total_balance"]))
         }
-        Text("Figures as the Hub returns them for this report, in the orders' own currency. The list shows the shilling figure at the reporting rate.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+        if let line = eodCurrencyLines(r["sales_by_currency"]) { Text("Sales by currency: \(line)").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
+        Text(r["money_basis"]?.string ?? "KES at the reporting rate").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
         let orders = r["orders"]?.array ?? []
         if !orders.isEmpty {
             SectionCard("Orders") {
                 ForEach(Array(orders.enumerated()), id: \.offset) { _, o in
                     VStack(alignment: .leading, spacing: 2) {
-                        HStack { Text(o["order_number"]?.string ?? "").font(Theme.Font.body); Text(o["customer_name"]?.string ?? "").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); StatusBadge(o["payment_status"]?.string); Spacer(); Text(plainFigure(o["total_amount"])).monospacedDigit() }
-                        HStack { Text("paid \(plainFigure(o["amount_paid"])) · balance \(plainFigure(o["balance"]))").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
+                        let cur = o["currency_code"]?.string ?? "KES"
+                        HStack {
+                            Text(o["order_number"]?.string ?? "").font(Theme.Font.body)
+                            Text(o["customer_name"]?.string ?? "").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
+                            if o["counts_as_sale"]?.bool == false { StatusBadge("cart · not a sale", tone: .neutral) } else { StatusBadge(o["payment_status"]?.string) }
+                            Spacer()
+                            MoneyText(Money(json: o["total_amount"] ?? .null, currency: cur))
+                        }
+                        Text("paid \(Money(json: o["amount_paid"] ?? .null, currency: cur)?.formatted() ?? "—") · balance \(Money(json: o["balance"] ?? .null, currency: cur)?.formatted() ?? "—")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                         if let n = o["eod_note"]?.string, !n.isEmpty { Text(n).font(Theme.Font.caption).italic() }
                     }
                     .padding(.vertical, 3)
@@ -188,8 +194,8 @@ struct EodReportDetailSheet: View {
         }
     }
 
-    /// A server figure with no currency stated by the endpoint: shown as sent, never converted.
-    private func plainFigure(_ v: JSONValue?) -> String { v.flatMap { Money(json: $0, currency: "") }.map { plainAmount($0) } ?? "—" }
+    /// A KES total as the Hub states it (each order at its reporting rate).
+    private func kes(_ v: JSONValue?) -> String { v.flatMap { Money(json: $0, currency: "KES") }?.formatted() ?? "—" }
 
     /// The write-up is stored as light HTML (bold, italic, bullets); shown as text here.
     private func plainText(_ html: String) -> String {
@@ -332,4 +338,12 @@ struct EodSettingsView: View {
             env.toasts.show(r.json?["message"]?.string ?? "Test queued")
         } catch { env.toasts.error(error) }
     }
+}
+
+/// The native figures per currency beside a KES total (`*_by_currency` from
+/// MoneyByCurrency), or nil when the day is shillings only. Never summed here.
+func eodCurrencyLines(_ by: JSONValue?) -> String? {
+    guard let rows = by?.array, !rows.isEmpty else { return nil }
+    if rows.count == 1, rows[0]["currency_code"]?.string == "KES" { return nil }
+    return rows.map { Money(json: $0["amount"] ?? .null, currency: $0["currency_code"]?.string ?? "KES")?.formatted() ?? "" }.joined(separator: " · ")
 }

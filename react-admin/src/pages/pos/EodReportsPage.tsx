@@ -17,6 +17,7 @@ import { get, post } from "@/api/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { groupRowsByDate, DateGroupHeaderRow } from "@/lib/dateGrouping";
+import { foreignLine } from "@/lib/moneyByCurrency";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -48,12 +49,6 @@ interface EodComment {
     created_at: string;
 }
 
-/** "USD 40.00 · ZMW 100.00" for a figure that mixes currencies; empty when it is shillings only. */
-function foreignLine(by?: { currency_code: string; amount: number }[], prefix = ""): string {
-    const foreign = (by ?? []).filter((c) => c.currency_code !== "KES");
-    if (!foreign.length) return "";
-    return prefix + foreign.map((c) => `${c.currency_code} ${c.amount.toLocaleString("en-KE", { minimumFractionDigits: 2 })}`).join(" · ");
-}
 
 interface EodReportDetail extends EodReportRow {
     sentiments: string;           // HTML from WYSIWYG
@@ -69,6 +64,10 @@ interface EodReportDetail extends EodReportRow {
         amount_paid: number;
         balance: number;
         payment_status: string;
+        /** The order's own currency; the totals above are KES at the reporting rate. */
+        currency_code?: string;
+        /** False for a cart (not confirmed, nothing settled): listed, not in the totals. */
+        counts_as_sale?: boolean;
         eod_note?: string | null;
     }[];
 }
@@ -561,9 +560,11 @@ export default function EodReportsPage() {
                                                             <p className="text-2xs text-surface-400">#{order.order_number}</p>
                                                         </div>
                                                         <div className="text-right shrink-0">
-                                                            <p className="text-xs font-bold text-surface-900">KES {fmt(order.total_amount)}</p>
-                                                            {order.balance > 0.01 ? (
-                                                                <p className="text-2xs text-warning font-medium">Bal: KES {fmt(order.balance)}</p>
+                                                            <p className="text-xs font-bold text-surface-900">{order.currency_code ?? "KES"} {fmt(order.total_amount)}</p>
+                                                            {order.counts_as_sale === false ? (
+                                                                <p className="text-2xs text-surface-400 font-medium">Cart · not a sale</p>
+                                                            ) : order.balance > 0.01 ? (
+                                                                <p className="text-2xs text-warning font-medium">Bal: {order.currency_code ?? "KES"} {fmt(order.balance)}</p>
                                                             ) : (
                                                                 <p className="text-2xs text-success font-medium">Paid</p>
                                                             )}

@@ -306,13 +306,19 @@ class DocumentPdfController extends Controller
         return $data;
     }
 
-    /** Money received on an order: settled payments (status paid), oldest first — what Order::totalPaid sums. */
+    /**
+     * Money received on an order: settled payments, oldest first — exactly
+     * the rows Order::totalPaid sums (SettledPayment: paid AND, where it needs
+     * approval, approved). Each keeps its own currency; order_amount /
+     * order_currency_code say what it counts for here (PaymentCredit).
+     */
     private static function settledPayments(Order $order): array
     {
-        return $order->payments()->where('status', 'paid')
+        return \App\Support\SettledPayment::where($order->payments(), 'payments')
             ->orderBy('paid_at')->orderBy('id')
-            ->get(['id', 'payment_method', 'provider_reference', 'amount', 'refund_amount', 'paid_at', 'created_at'])
-            ->toArray();
+            ->get(['id', 'payment_method', 'provider_reference', 'amount', 'currency_code', 'order_amount', 'order_currency_code', 'refund_amount', 'paid_at', 'created_at'])
+            ->map(fn ($p) => collect($p->getAttributes())->only(['id', 'payment_method', 'provider_reference', 'amount', 'currency_code', 'order_amount', 'order_currency_code', 'refund_amount', 'paid_at', 'created_at'])->all())
+            ->all();
     }
 
     // ─── Quotation ────────────────────────────────────────────────────────────

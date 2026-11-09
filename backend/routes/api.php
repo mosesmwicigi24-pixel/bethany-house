@@ -144,11 +144,20 @@ Route::prefix('v1')->group(function () {
         Route::get('/{token}',                 [PublicPaymentController::class, 'show']);
         Route::post('/{token}/initiate',       [PublicPaymentController::class, 'initiate']);
         Route::get('/{token}/status',          [PublicPaymentController::class, 'status']);
+        // The buyer's choice of currency (USD or their own), before paying.
+        Route::post('/{token}/currency',       [PublicPaymentController::class, 'chooseCurrency'])->middleware('throttle:10,1');
         Route::post('/{token}/mpesa-callback', [PublicPaymentController::class, 'mpesaCallback']);
         Route::post('/{token}/upload-proof',   [PublicPaymentController::class, 'uploadProof']);
         Route::post('/{token}/mpesa-confirm',  [PublicPaymentController::class, 'confirmMpesa']);
         Route::post('/{token}/paystack-verify', [PublicPaymentController::class, 'verifyPaystack']);
     });
+
+    // ═══ MESSAGE BANNER BUTTONS (owner, 2026-11-04) ═════════════════════════
+    // Acknowledge / dismiss from the system banner, with no session: the link
+    // is signed for one person, conversation and message (Comms\PushActions).
+    Route::post('/push-actions/channels/{id}/{action}', [\App\Http\Controllers\Api\ChannelController::class, 'pushAction'])
+        ->whereNumber('id')->whereIn('action', ['acknowledge', 'dismiss'])
+        ->middleware(['signed:relative', 'throttle:60,1'])->name('push-actions.channel');
 
     // ═══ SIGNED ATTACHMENT LINKS (role hardening 4D) ═════════════════════════
     // Issued for ≤5 minutes by the console's attachment endpoints AFTER their
@@ -340,6 +349,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('/entity-search',                       [ChannelController::class, 'entitySearch']);
                 // ── Message search across your conversations (chat list search box) ──
                 Route::get('/search',                              [ChannelController::class, 'search']);
+                // ── What still needs me: unread, floating notices, waiting on my reply ──
+                Route::get('/attention',                           [ChannelController::class, 'attention']);
                 // ── Quick replies: the business's saved messages, inserted with `/` ──
                 Route::get('/quick-replies',                       [\App\Http\Controllers\Api\QuickReplyController::class, 'index']);
                 Route::post('/quick-replies',                      [\App\Http\Controllers\Api\QuickReplyController::class, 'store']);
@@ -357,6 +368,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{id}/messages/{msgId}/react',        [ChannelController::class, 'react']);
                 Route::post('/{id}/messages/{msgId}/forward',      [ChannelController::class, 'forward']);
                 Route::post('/{id}/read',                          [ChannelController::class, 'markRead']);
+                Route::post('/{id}/notice-dismiss',                [ChannelController::class, 'dismissNotice']);
+                Route::post('/{id}/acknowledge',                   [ChannelController::class, 'acknowledge']);
                 // ── Per-user thread dismissal — order/production threads only ───
                 Route::post('/{id}/dismiss',                       [ChannelController::class, 'dismiss']);
                 Route::post('/{id}/undismiss',                     [ChannelController::class, 'undismiss']);
@@ -621,7 +634,8 @@ Route::prefix('v1')->group(function () {
             Route::post('/me/timesheet/submit', [\App\Http\Controllers\Api\TimesheetController::class, 'submit']);
 
             // ── Timesheets, team side (People PR 5) ─────────────────────────
-            Route::middleware('permission:attendance.view_team,sanctum')->group(function () {
+            // Finance reaches them with timesheets.lock alone, to lock pay periods (owner, 2026-11-04).
+            Route::middleware('permission:attendance.view_team|timesheets.lock,sanctum')->group(function () {
                 $ts = \App\Http\Controllers\Api\TimesheetController::class;
                 Route::get('/timesheets',                        [$ts, 'index']);
                 Route::get('/timesheets/export',                 [$ts, 'export'])->middleware(['permission:timesheets.lock,sanctum', 'step.up']);
@@ -654,6 +668,16 @@ Route::prefix('v1')->group(function () {
                 Route::get('/runs/{id}/payout',                  [$pay, 'payoutFile'])->whereNumber('id')->middleware(['permission:payroll.run,sanctum', 'step.up']);
                 Route::get('/runs/{id}/payout-readiness',        [$pay, 'payoutReadiness'])->whereNumber('id');
                 Route::get('/returns',                           [$pay, 'returns'])->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                // People & pay: salary, government deductions and last payment per person
+                Route::get('/people',                            [$pay, 'people']);
+                Route::post('/people/{user}/deductions',         [$pay, 'setDeductions'])->whereNumber('user')->middleware(['permission:payroll.run,sanctum', 'step.up']);
+                // Commission on top of salary: finance records, a super admin approves, the pay run pays
+                $com = \App\Http\Controllers\Api\CommissionsController::class;
+                Route::get('/commissions',                       [$com, 'index']);
+                Route::post('/commissions',                      [$com, 'store'])->middleware('permission:payroll.run,sanctum');
+                Route::post('/commissions/paye',                 [$com, 'setPaye'])->middleware('step.up');
+                Route::post('/commissions/{id}/approve',         [$com, 'approve'])->whereNumber('id')->middleware('step.up');
+                Route::post('/commissions/{id}/void',            [$com, 'void'])->whereNumber('id')->middleware('permission:payroll.run,sanctum');
                 // Advances and loans (People PR 7)
                 $adv = \App\Http\Controllers\Api\AdvancesController::class;
                 Route::get('/advances',                          [$adv, 'index']);
@@ -1017,11 +1041,18 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:orders.set_deposit,sanctum');
                 Route::post('/{id}/update-currency',     [OrderController::class, 'updateCurrency'])
                     ->middleware('permission:orders.edit,sanctum');
+                // "Bill in" USD or the customer's own currency (owner, 2026-11-05);
+                // after payment the controller requires the super admin and step-up.
+                Route::post('/{id}/bill-currency',       [OrderController::class, 'billCurrency'])
+                    ->middleware('permission:orders.edit,sanctum');
                 // Revisions of the order's issued documents (2026-10-16): the
                 // invoice copy's history; the owner's payment-detail correction
                 // (super admin only, checked in the controller).
                 Route::get('/{id}/document-revisions', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'index'])->whereNumber('id');
                 Route::put('/{id}/payments/{paymentId}/revise', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'revisePayment'])
+                    ->whereNumber('id')->whereNumber('paymentId');
+                // The owner deletes a payment, softly (voided and hidden; the record stays).
+                Route::post('/{id}/payments/{paymentId}/remove', [\App\Http\Controllers\Api\SalesDocumentRevisionController::class, 'removePayment'])
                     ->whereNumber('id')->whereNumber('paymentId');
                 Route::post('/{id}/shipments',           [ShipmentController::class, 'create'])
                     ->middleware('permission:shipment.create,sanctum');

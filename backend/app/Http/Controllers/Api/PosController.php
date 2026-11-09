@@ -1501,7 +1501,7 @@ class PosController extends Controller
         $approval = app(TillReversals::class)->requestVoid($order, $validated['reason'], $request->user());
 
         return response()->json([
-            'message'  => 'Void requested. It needs an approver\'s signature before the sale is voided.',
+            'message'  => $approval->isPending() ? 'Void requested. It needs an approver\'s signature before the sale is voided.' : 'Sale voided.',
             'approval' => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),
             'pending'  => app(TillReversals::class)->pendingForOrder($order->id),
         ], 202);
@@ -1607,7 +1607,7 @@ class PosController extends Controller
         [$refund, $approval] = app(TillReversals::class)->requestRefund($order, $validated, $request->user());
 
         return response()->json([
-            'message'           => 'Refund requested. It needs an approver\'s signature before the refund is made.',
+            'message'           => $approval->isPending() ? 'Refund requested. It needs an approver\'s signature before the refund is made.' : 'Refund approved.',
             'refund_request_id' => $refund->id,
             'refund_amount'     => (float) $refund->refund_amount,
             'approval'          => app(ApprovalEngine::class)->present($approval->load(['signatures.signer', 'maker']), $request->user()),
@@ -1796,20 +1796,20 @@ class PosController extends Controller
             ->orderBy('created_at')
             ->get();
 
-        $totalSales   = 0.0;
-        $totalPaid    = 0.0;
-        $totalBalance = 0.0;
+        // The money is the same day the supervisor reviews (eodDayOrders):
+        // settled payments net of refunds, sales only in the totals, each
+        // currency at its order's reporting rate (F4/F5, 2026-11-04).
+        $day   = $this->eodDayOrders((object) ['outlet_id' => $outletId, 'user_id' => $user->id, 'report_date' => $date])->keyBy('id');
+        $sales = $day->where('counts_as_sale', true)->values();
 
-        $ordersData = $orders->map(function (Order $order) use (&$totalSales, &$totalPaid, &$totalBalance) {
-            $paid = $order->payments
-                ->whereIn('status', ['completed', 'approved', 'paid'])
-                ->sum('amount');
+        $salesMoney   = \App\Support\MoneyByCurrency::of($sales, 'total_amount', 'currency_code', 'reporting_rate_to_kes');
+        $paidMoney    = \App\Support\MoneyByCurrency::of($sales, 'amount_paid', 'currency_code', 'reporting_rate_to_kes');
+        $balanceMoney = \App\Support\MoneyByCurrency::of($sales, 'balance', 'currency_code', 'reporting_rate_to_kes');
 
-            $balance = max(0, $order->total_amount - $paid);
-
-            $totalSales   += $order->total_amount;
-            $totalPaid    += $paid;
-            $totalBalance += $balance;
+        $ordersData = $orders->map(function (Order $order) use ($day) {
+            $money   = $day[$order->id];
+            $paid    = $money->amount_paid;
+            $balance = $money->balance;
 
             $customerName = trim(
                 ($order->customer_first_name ?? '') . ' ' . ($order->customer_last_name ?? '')
@@ -1834,10 +1834,12 @@ class PosController extends Controller
                     'unit_price'   => (float) $i->unit_price,
                     'total_price'  => (float) $i->total_price,
                 ])->values(),
+                'currency_code'  => $money->currency_code,
                 'total_amount'   => round((float) $order->total_amount, 2),
                 'amount_paid'    => round($paid, 2),
                 'balance'        => round($balance, 2),
                 'payment_status' => $order->payment_status,
+                'counts_as_sale' => $money->counts_as_sale,
                 'created_at'     => $order->created_at->toIso8601String(),
                 'eod_note'       => null, // merged from report below
             ];
@@ -1884,10 +1886,14 @@ class PosController extends Controller
                 'register_id'     => $register?->id,
                 'user_name'       => $userName,
                 'outlet_name'     => Outlet::find($outletId)?->name,
-                'order_count'     => count($ordersData),
-                'total_sales'     => round($totalSales, 2),
-                'total_paid'      => round($totalPaid, 2),
-                'total_balance'   => round($totalBalance, 2),
+                'order_count'     => $sales->count(),
+                'total_sales'     => round((float) $salesMoney['kes_total'], 2),
+                'total_paid'      => round((float) $paidMoney['kes_total'], 2),
+                'total_balance'   => round((float) $balanceMoney['kes_total'], 2),
+                'sales_by_currency'   => $salesMoney['by_currency'],
+                'paid_by_currency'    => $paidMoney['by_currency'],
+                'balance_by_currency' => $balanceMoney['by_currency'],
+                'money_basis'         => 'KES at the reporting rate',
                 'orders'          => $ordersData,
                 'existing_report' => $existingReport,
             ],
@@ -2063,33 +2069,8 @@ class PosController extends Controller
         $reportData = $rows->map(function ($row) {
             $orderNotes = json_decode($row->order_notes ?? '{}', true) ?: [];
 
-            // Fetch orders for this user+outlet+date
-            // The cashier's day per currency with a KES total at each
-            // order's own reporting rate (Step 5); settled money only.
-            $orders = DB::table('orders as ord')
-                ->leftJoin('payments as p', function ($j) {
-                    $j->on('p.order_id', '=', 'ord.id')
-                      ->whereRaw(\App\Support\SettledPayment::sql('p'));
-                })
-                ->where('ord.outlet_id', $row->outlet_id)
-                ->where('ord.created_by', $row->user_id)
-                ->whereDate('ord.created_at', $row->report_date)
-                ->whereNotIn('ord.status', ['voided', 'cancelled'])
-                // Confirmed or paid only (Step 5): an unconfirmed cart is not a sale on the cashier's day either.
-                ->where(fn ($q) => $q->whereIn('ord.status', \App\Models\Order::RECOGNISED_STATUSES)->orWhereIn('ord.payment_status', \App\Models\Order::SETTLED_PAYMENT_STATUSES))
-                ->where('ord.order_type', 'pos')
-                ->groupBy('ord.id', 'ord.total_amount', 'ord.currency_code', 'ord.reporting_rate_to_kes')
-                ->select([
-                    'ord.id',
-                    DB::raw('COALESCE(SUM(p.amount - COALESCE(p.refund_amount, 0)), 0) as amount_paid'),
-                    'ord.total_amount',
-                    'ord.currency_code',
-                    'ord.reporting_rate_to_kes',
-                ])
-                ->get()
-                ->map(fn ($o) => (object) ['total_amount' => (float) $o->total_amount, 'amount_paid' => (float) $o->amount_paid,
-                    'balance' => max(0, (float) $o->total_amount - (float) $o->amount_paid),
-                    'currency_code' => $o->currency_code, 'reporting_rate_to_kes' => $o->reporting_rate_to_kes]);
+            // The cashier's day: sales only (eodDayOrders).
+            $orders = $this->eodDayOrders($row)->where('counts_as_sale', true)->values();
 
             $salesMoney   = \App\Support\MoneyByCurrency::of($orders, 'total_amount', 'currency_code', 'reporting_rate_to_kes');
             $paidMoney    = \App\Support\MoneyByCurrency::of($orders, 'amount_paid', 'currency_code', 'reporting_rate_to_kes');
@@ -2258,6 +2239,58 @@ class PosController extends Controller
     }
 
     /**
+     * A cashier's POS orders for one end-of-day report: that outlet, that
+     * cashier, that Nairobi day, voided and cancelled left out. Each order
+     * carries its settled money net of refunds (SettledPayment) and whether
+     * it counts as a sale (confirmed, or paid: Order::RECOGNISED_STATUSES /
+     * SETTLED_PAYMENT_STATUSES). The one source for the list and the detail,
+     * so the two cannot state the same day differently (F4).
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    private function eodDayOrders(object $row): \Illuminate\Support\Collection
+    {
+        return DB::table('orders as ord')
+            ->leftJoin('payments as p', function ($j) {
+                $j->on('p.order_id', '=', 'ord.id')
+                  ->whereRaw(\App\Support\SettledPayment::sql('p'));
+            })
+            ->where('ord.outlet_id', $row->outlet_id)
+            ->where('ord.created_by', $row->user_id)
+            ->whereDate('ord.created_at', $row->report_date)
+            ->whereNotIn('ord.status', ['voided', 'cancelled'])
+            ->where('ord.order_type', 'pos')
+            ->groupBy('ord.id', 'ord.order_number', 'ord.total_amount', 'ord.currency_code', 'ord.reporting_rate_to_kes',
+                'ord.status', 'ord.payment_status', 'ord.customer_first_name', 'ord.customer_last_name', 'ord.created_at')
+            ->orderBy('ord.created_at')
+            ->select([
+                'ord.id', 'ord.order_number', 'ord.total_amount', 'ord.currency_code', 'ord.reporting_rate_to_kes',
+                'ord.status', 'ord.payment_status', 'ord.customer_first_name', 'ord.customer_last_name',
+                DB::raw('COALESCE(SUM(' . \App\Support\PaymentCredit::netSql('p') . '), 0) as amount_paid'),   // in the order's currency
+            ])
+            ->get()
+            ->map(function ($o) {
+                $total = (float) $o->total_amount;
+                $paid  = (float) $o->amount_paid;
+
+                return (object) [
+                    'id'                    => (int) $o->id,
+                    'order_number'          => $o->order_number,
+                    'customer_name'         => trim(($o->customer_first_name ?? '') . ' ' . ($o->customer_last_name ?? '')) ?: 'Walk-in',
+                    'currency_code'         => strtoupper((string) ($o->currency_code ?: 'KES')),
+                    'reporting_rate_to_kes' => $o->reporting_rate_to_kes,
+                    'total_amount'          => $total,
+                    'amount_paid'           => $paid,
+                    'balance'               => max(0, $total - $paid),
+                    'status'                => $o->status,
+                    'payment_status'        => $o->payment_status,
+                    'counts_as_sale'        => in_array($o->status, \App\Models\Order::RECOGNISED_STATUSES, true)
+                        || in_array($o->payment_status, \App\Models\Order::SETTLED_PAYMENT_STATUSES, true),
+                ];
+            });
+    }
+
+    /**
      * Post a comment on a report and tell the other side.
      */
     public function addEodReportComment(Request $request, int $id): JsonResponse
@@ -2329,45 +2362,29 @@ class PosController extends Controller
         $orderNotes = json_decode($row->order_notes ?? '{}', true) ?: [];
         $comments   = $this->eodComments($id);
 
-        // Fetch orders with items and payments
-        $orders = Order::with(['items', 'payments'])
-            ->where('outlet_id', $row->outlet_id)
-            ->where('created_by', $row->user_id)
-            ->whereDate('created_at', $row->report_date)
-            ->whereNotIn('status', ['voided', 'cancelled'])
-            ->where('order_type', 'pos')
-            ->orderBy('created_at')
-            ->get();
+        // The same day as the list, the email and the Slack digest
+        // (eodDayOrders). Carts stay on the page with the cashier's notes but
+        // out of the totals (F4, 2026-11-04).
+        $day   = $this->eodDayOrders($row);
+        $sales = $day->where('counts_as_sale', true)->values();
 
-        $totalSales   = 0.0;
-        $totalPaid    = 0.0;
-        $totalBalance = 0.0;
+        $salesMoney   = \App\Support\MoneyByCurrency::of($sales, 'total_amount', 'currency_code', 'reporting_rate_to_kes');
+        $paidMoney    = \App\Support\MoneyByCurrency::of($sales, 'amount_paid', 'currency_code', 'reporting_rate_to_kes');
+        $balanceMoney = \App\Support\MoneyByCurrency::of($sales, 'balance', 'currency_code', 'reporting_rate_to_kes');
 
-        $ordersData = $orders->map(function (Order $order) use (&$totalSales, &$totalPaid, &$totalBalance, $orderNotes) {
-            $paid = $order->payments
-                ->whereIn('status', ['completed', 'approved', 'paid'])
-                ->sum('amount');
-
-            $balance = max(0, $order->total_amount - $paid);
-            $totalSales   += $order->total_amount;
-            $totalPaid    += $paid;
-            $totalBalance += $balance;
-
-            $customerName = trim(
-                ($order->customer_first_name ?? '') . ' ' . ($order->customer_last_name ?? '')
-            ) ?: 'Walk-in';
-
-            return [
-                'id'             => $order->id,
-                'order_number'   => $order->order_number,
-                'customer_name'  => $customerName,
-                'total_amount'   => round((float) $order->total_amount, 2),
-                'amount_paid'    => round($paid, 2),
-                'balance'        => round($balance, 2),
-                'payment_status' => $order->payment_status,
-                'eod_note'       => $orderNotes[strval($order->id)] ?? null,
-            ];
-        })->values();
+        $ordersData = $day->map(fn ($o) => [
+            'id'             => $o->id,
+            'order_number'   => $o->order_number,
+            'customer_name'  => $o->customer_name,
+            'currency_code'  => $o->currency_code,
+            'total_amount'   => round($o->total_amount, 2),
+            'amount_paid'    => round($o->amount_paid, 2),
+            'balance'        => round($o->balance, 2),
+            'status'         => $o->status,
+            'payment_status' => $o->payment_status,
+            'counts_as_sale' => $o->counts_as_sale,
+            'eod_note'       => $orderNotes[strval($o->id)] ?? null,
+        ])->values();
 
         return response()->json([
             'report' => [
@@ -2383,10 +2400,14 @@ class PosController extends Controller
                 'acknowledged_at' => $row->acknowledged_at,
                 'acknowledged_by' => $row->acknowledged_by,
                 'comments'        => $comments,
-                'order_count'    => $ordersData->count(),
-                'total_sales'    => round($totalSales, 2),
-                'total_paid'     => round($totalPaid, 2),
-                'total_balance'  => round($totalBalance, 2),
+                'order_count'    => $sales->count(),
+                'total_sales'    => round((float) $salesMoney['kes_total'], 2),
+                'total_paid'     => round((float) $paidMoney['kes_total'], 2),
+                'total_balance'  => round((float) $balanceMoney['kes_total'], 2),
+                'sales_by_currency'   => $salesMoney['by_currency'],
+                'paid_by_currency'    => $paidMoney['by_currency'],
+                'balance_by_currency' => $balanceMoney['by_currency'],
+                'money_basis'         => 'KES at the reporting rate',
                 'orders'         => $ordersData,
             ],
         ]);

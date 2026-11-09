@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,11 +69,18 @@ fun StatusBadge(status: String?, tone: StatusTone? = null, modifier: Modifier = 
     )
 }
 
+/**
+ * True on what a customer reads (the receipt, the order page): money shows
+ * as "KES 4,500" rather than "KES 4,500.00" (Money.customerFormatted).
+ */
+val LocalCustomerMoney = staticCompositionLocalOf { false }
+
 /** Money exactly as the server sent it; never computed here. */
 @Composable
 fun MoneyText(money: Money?, emphasis: Boolean = false, modifier: Modifier = Modifier) {
+    val customer = LocalCustomerMoney.current
     Text(
-        text = money?.formatted() ?: "—",
+        text = money?.let { if (customer) it.customerFormatted() else it.formatted() } ?: "—",
         style = if (emphasis) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
         color = if (money?.isNegative == true) Palette.danger else MaterialTheme.hub.text,
         modifier = modifier,

@@ -25,7 +25,6 @@ struct UserEodSheet: View {
 
     private var day: String { fixedDate ?? HubDates.dayString(date) }
     private var existing: JSONValue? { summary?.value?["existing_report"].flatMap { $0.isNull ? nil : $0 } }
-    private var currency: String { session.outlet?.currencyCode ?? "KES" }
 
     var body: some View {
         PosSheetFrame("End of Day report", subtitle: outletName) {
@@ -41,21 +40,23 @@ struct UserEodSheet: View {
                 LoadableView(summary.state, retry: { summary.load() }) { s in
                     TileGrid(minWidth: 140) {
                         StatTile("Orders", value: s["order_count"]?.string ?? "0")
-                        StatTile("Sales", value: Money(json: s["total_sales"] ?? .null, currency: currency)?.formatted() ?? "—")
-                        StatTile("Paid", value: Money(json: s["total_paid"] ?? .null, currency: currency)?.formatted() ?? "—")
-                        StatTile("Balance", value: Money(json: s["total_balance"] ?? .null, currency: currency)?.formatted() ?? "—", tone: (Money(json: s["total_balance"] ?? .null)?.isZero ?? true) ? nil : .warning)
+                        StatTile("Sales", value: Money(json: s["total_sales"] ?? .null, currency: "KES")?.formatted() ?? "—")
+                        StatTile("Paid", value: Money(json: s["total_paid"] ?? .null, currency: "KES")?.formatted() ?? "—")
+                        StatTile("Balance", value: Money(json: s["total_balance"] ?? .null, currency: "KES")?.formatted() ?? "—", tone: (Money(json: s["total_balance"] ?? .null)?.isZero ?? true) ? nil : .warning)
                     }
-                    Text("Figures are the Hub's for your orders on this day at this outlet.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                    if let line = eodCurrencyLines(s["sales_by_currency"]) { Text("Sales by currency: \(line)").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
+                    Text("Figures are the Hub's for your sales on this day at this outlet: \(s["money_basis"]?.string ?? "KES at the reporting rate").").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                     ForEach(Array((s["orders"]?.array ?? []).enumerated()), id: \.offset) { _, o in
                         let oid = o["id"]?.string ?? ""
+                        let cur = o["currency_code"]?.string ?? "KES"
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(o["order_number"]?.string ?? "").font(Theme.Font.body)
-                                StatusBadge(o["payment_status"]?.string)
+                                if o["counts_as_sale"]?.bool == false { StatusBadge("cart · not a sale", tone: .neutral) } else { StatusBadge(o["payment_status"]?.string) }
                                 Spacer()
-                                MoneyText(Money(json: o["total_amount"] ?? .null, currency: currency))
+                                MoneyText(Money(json: o["total_amount"] ?? .null, currency: cur))
                             }
-                            Text("\(o["customer_name"]?.string ?? "Walk-in") · paid \(Money(json: o["amount_paid"] ?? .null, currency: currency)?.formatted() ?? "—") · balance \(Money(json: o["balance"] ?? .null, currency: currency)?.formatted() ?? "—")")
+                            Text("\(o["customer_name"]?.string ?? "Walk-in") · paid \(Money(json: o["amount_paid"] ?? .null, currency: cur)?.formatted() ?? "—") · balance \(Money(json: o["balance"] ?? .null, currency: cur)?.formatted() ?? "—")")
                                 .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                             if let items = o["items"]?.array, !items.isEmpty {
                                 Text(items.map { "\($0["quantity"]?.int ?? 0)× \($0["product_name"]?.string ?? "")" }.joined(separator: ", ")).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
@@ -140,13 +141,13 @@ struct UserEodSheet: View {
     private func printReport() {
         guard let s = summary?.value else { return }
         func esc(_ t: String) -> String { t.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;") }
-        func m(_ v: JSONValue?) -> String { v.flatMap { Money(json: $0, currency: currency) }?.formatted() ?? "—" }
+        func m(_ v: JSONValue?, _ cur: String = "KES") -> String { v.flatMap { Money(json: $0, currency: cur) }?.formatted() ?? "—" }
         var h = "<html><body style='font-family:-apple-system,Helvetica;font-size:12px'><h2>End of Day report</h2>"
         h += "<div>\(esc(outletName)) · \(esc(day)) · \(esc(s["user_name"]?.string ?? ""))</div>"
         h += "<p>Orders \(s["order_count"]?.int ?? 0) · Sales \(m(s["total_sales"])) · Paid \(m(s["total_paid"])) · Balance \(m(s["total_balance"]))</p><table width='100%' border='0'>"
         for o in s["orders"]?.array ?? [] {
             let note = notes[o["id"]?.string ?? ""] ?? ""
-            h += "<tr><td>\(esc(o["order_number"]?.string ?? ""))</td><td>\(esc(o["customer_name"]?.string ?? ""))</td><td align='right'>\(m(o["total_amount"]))</td><td>\(esc(o["payment_status"]?.string ?? ""))</td></tr>"
+            h += "<tr><td>\(esc(o["order_number"]?.string ?? ""))</td><td>\(esc(o["customer_name"]?.string ?? ""))</td><td align='right'>\(m(o["total_amount"], o["currency_code"]?.string ?? "KES"))</td><td>\(esc(o["payment_status"]?.string ?? ""))</td></tr>"
             if !note.isEmpty { h += "<tr><td colspan='4'><i>\(esc(note))</i></td></tr>" }
         }
         h += "</table><h3>How the day went</h3><p>\(esc(sentiments))</p></body></html>"
