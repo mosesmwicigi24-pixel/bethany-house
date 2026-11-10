@@ -13,11 +13,38 @@ enum ProfileFeature {
 struct ProfileView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var sessions: Resource<[Record]>?
-    @State private var devices: Resource<[Record]>?
+    @State private var devices: Resource<[ProfileDevice]>?
     @State private var showPassword = false
+    @State private var showEdit = false
+    @State private var renaming: ProfileDevice?
+    /// The console's profile tabs, less 2FA/passkeys/PIN (their own slice): see docs/MIGRATION_PROGRESS.md.
+    enum Tab: Hashable { case profile, employment, activity }
+    @State private var tab: Tab = .profile
 
     var body: some View {
         Page("My profile") {
+            Tabs(selection: $tab, items: [(.profile, "Profile & security"), (.employment, "My employment"), (.activity, "My activity")]).frame(maxWidth: 520)
+            switch tab {
+            case .employment: MyEmploymentPanel()
+            case .activity: MyActivityPanel()
+            case .profile: profileTab
+            }
+        }
+        .task {
+            let c = env.session.client
+            if sessions == nil {
+                sessions = Resource { try (await c.get("/v1/admin/profile/sessions").json?["data"]?.decode([Record].self)) ?? [] }
+                devices = Resource { ProfileDevice.rows(try await c.get("/v1/admin/profile/devices").json ?? .null) }
+                sessions?.load(); devices?.load()
+            }
+        }
+        .sheet(isPresented: $showPassword) { ChangePasswordView() }
+        .sheet(isPresented: $showEdit) { EditProfileSheet() }
+        .sheet(item: $renaming) { d in RenameDeviceSheet(device: d) { devices?.load() } }
+    }
+
+    @ViewBuilder
+    private var profileTab: some View {
             if let me = env.session.me {
                 SectionCard {
                     HStack(spacing: Theme.Space.l) {
@@ -34,6 +61,7 @@ struct ProfileView: View {
                         DetailRow("Session limits", "Idle \(policy.idleMinutes) min (\(policy.onIdle == .pinLock ? "PIN lock" : "sign out")), \(policy.absoluteMinutes / 60) h absolute")
                     }
                     if let exp = env.session.tokenExpiresAt { DetailRow("This sign-in renews until") { DateText(exp) } }
+                    Button("Edit details & preferences…") { showEdit = true }.font(Theme.Font.secondary)
                 }
 
                 SectionCard("Sign-in safety") {
@@ -78,11 +106,17 @@ struct ProfileView: View {
                                 HStack {
                                     Image(systemName: "iphone").foregroundStyle(Theme.textTertiary)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(d.string("name") ?? d.string("label") ?? "Device").font(Theme.Font.body)
-                                        Text(d.string("last_seen") ?? d.string("agent") ?? "").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                                        Text(d.name ?? "Not named").font(Theme.Font.body).italic(d.name == nil)
+                                        Text([d.label, d.lastSeen.map { "last seen \($0)" }, d.nameSource == "admin" ? d.namedBy.map { "named by \($0)" } : nil].compactMap { $0 }.joined(separator: " · "))
+                                            .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                                     }
                                     Spacer()
-                                    if d.string("id") == env.session.device.id { StatusBadge("this device", tone: .success) }
+                                    if d.isCurrent { StatusBadge("this device", tone: .success) }
+                                    if d.canRename { Button(d.name == nil ? "Name it" : "Rename") { renaming = d }.font(Theme.Font.secondary) }
+                                    if d.canRemove {
+                                        ConfirmButton("Remove", message: "Remove \(d.label)? Its sessions end, and the next sign-in on it is treated as a new device.", destructive: true, action: { await remove(d) }) { Text("Remove") }
+                                            .font(Theme.Font.secondary)
+                                    }
                                 }
                                 .padding(.vertical, 4)
                             }
@@ -90,16 +124,10 @@ struct ProfileView: View {
                     }
                 }
             }
-        }
-        .task {
-            let c = env.session.client
-            if sessions == nil {
-                sessions = Resource { try (await c.get("/v1/admin/profile/sessions").json?["data"]?.decode([Record].self)) ?? [] }
-                devices = Resource { let j = try await c.get("/v1/admin/profile/devices").json; return (j?["data"] ?? j)?.decode([Record].self) ?? [] }
-                sessions?.load(); devices?.load()
-            }
-        }
-        .sheet(isPresented: $showPassword) { ChangePasswordView() }
+    }
+
+    private func remove(_ d: ProfileDevice) async {
+        do { let r = try await env.session.client.delete("/v1/admin/profile/devices/\(d.id)"); toastResult(env, r, fallback: "Device removed"); devices?.load() } catch { env.toasts.error(error) }
     }
 
     private func revoke(_ id: String) async {
