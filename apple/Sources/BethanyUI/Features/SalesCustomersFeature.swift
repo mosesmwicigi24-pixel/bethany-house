@@ -263,6 +263,7 @@ struct CustomerDetailView: View {
                     }
                     if env.session.can("customers.insights"), let orders { ordersSection(orders) }
                     if let n = c.string("notes"), !n.isEmpty { SectionCard("Notes") { Text(n).font(Theme.Font.body).textSelection(.enabled) } }
+                    RecordHistorySection(type: "customer", id: c.int("id"))
                 }
             }
         }

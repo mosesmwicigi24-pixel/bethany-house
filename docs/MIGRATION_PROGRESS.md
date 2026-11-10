@@ -307,3 +307,66 @@ Break start/end is already native (`MeFeatureClock.swift:339`). Not gaps (declar
 - Live on the scratch Hub: both counts answered `{"count":1}`; a PNG
   upload answered "Avatar uploaded." (stored as webp).
 - Console endpoints with no Apple caller after this branch: 27.
+
+### Checkpoint 2026-11-10 11:15 UTC — #556–#560 merged; remaining gaps classified
+
+All of #556 (profile), #557 (messages), #558 (sign-in safety), #559 (badges,
+photo) and #560 (Laravel: `two_factor_secret_temp` hidden, owner approved)
+are on `main`, each green on the combined code before merging.
+
+23 literal gaps remain (`tools/parity`), classified by whether a console
+*page* calls the endpoint (not just an `api/*.ts` helper):
+
+| Kind | Endpoints |
+|---|---|
+| Not applicable to native | `push/subscribe`, `push/subscribe-expo`, `push/unsubscribe`, `push/unsubscribe-expo`, `push/vapid-public-key` (browser/Expo; the apps use `push/subscribe-device`) |
+| Console helper no page calls | `orders/{id}/invoice`, `pos/register/history`, `time-clock/my-entries`, `me/timesheet/fixes/{id}`, `inventory/stock-levels/by-product/{id}`, `updates/{id}/readers` |
+| Blocked on the owner | `database/wipe` (destructive), `currencies-management/{id}/rates` (FX, CLAUDE.md §6) |
+| **Slice 9** — catalogue & purchasing | `grn/{id}/pdf`, `grn/{id}/print` (GoodsReceiptDetailPage), `products/{id}/images/{imageId}/primary` and `proposals/preview` (ProductFormPage), `suppliers/{id}/purchase-orders` (ProcurementReportPage) |
+| **Slice 10** — dashboards & lookups | `reports/dashboard/kpis` (DashboardPage), `reports/customers/analytics` (CustomersReportPage), `activity-logs/record/{type}/{id}` (AuditParts), `intelligence/entity-previews` (EntityChipWithPreview), `users/role/{role}` (ClerkPinsPanel) |
+
+### Slices 9–10 — the last page-level gaps (branch `apple/stock-purchasing-parity`)
+
+Checked one by one against the console's *pages*; six of the eleven
+candidates turned out not to be gaps:
+
+- `grn/{id}/pdf` and `grn/{id}/print`: `PurchaseOrderController::printGRN`
+  and `grnPDF` both return `DocumentPdfController::grn`, the same PDF the
+  apps already open at `pdf/grn/{id}`; and GoodsReceiptDetailPage calls
+  neither (only the audit log).
+- `products/{id}/images/{imageId}/primary`: native already
+  (`ProductFormTabs.swift` builds the path relatively, `images/\(iid)/primary`).
+- `proposals/preview`: `previewChange` is declared; no page calls it.
+- `suppliers/{id}/purchase-orders`: `suppliersApi.purchaseOrders` is never
+  called; ProcurementReportPage uses `reportsApi.purchaseOrders`.
+- `reports/dashboard/kpis`: DashboardPage fetches it but renders nothing
+  from it (the revenue row is `salesSummary`).
+- `intelligence/entity-previews`: the console fetches on hover; the server
+  already sends `entity_previews` with every message (list and realtime),
+  which the apps show inline. Same outcome.
+
+Built:
+- **Customers report › Overview**: "Who they are" (Active and VIP customers,
+  segments) and spend brackets from `reports/customers/analytics?period=<days>`,
+  the period counted as the console counts it.
+  `BethanyKit/CustomerAnalytics.swift`, `CustomerAnalyticsTests` (3).
+- **History** (super admin; order, customer, product): every change to the
+  record, twenty at a time, with the field-level old → new values parsed from
+  `properties` (a JSON string). `BethanyKit/RecordHistory.swift`,
+  `RecordHistoryTests` (2).
+- **Clerk PINs** tab on Attendance for the super admin and outlet managers:
+  the manager's outlet's clerks (`users/role/pos_clerk`), "Clear PIN"
+  (`users/{id}/terminal-pin/reset`). `BethanyKit/ClerkPins.swift`,
+  `ClerkPinsTests` (2).
+- Live on the scratch Hub: analytics answered
+  `{"period_days":30,"stats":{…},"segments":{"Repeat":1},"spend_brackets":{"10k-50k":1}}`;
+  order 5's history showed "payment_status partial → pending"; clearing
+  Evans's PIN answered "PIN cleared. The clerk sets a new one from their
+  profile."
+
+Literal gaps left: 20 — every one now classified as not applicable to native,
+a console helper no page calls, a gap closed by another route (above), or
+blocked on the owner (`database/wipe`, `currencies-management/{id}/rates`).
+**No page-level console feature remains without an Apple equivalent**, by
+this cross-reference and the page checks above. Verification on a Mac/iPad
+remains to be done.
