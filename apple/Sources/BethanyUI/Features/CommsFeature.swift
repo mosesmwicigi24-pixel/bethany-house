@@ -109,6 +109,11 @@ final class CommsStore {
 
     init(env: AppEnvironment) { self.env = env }
 
+    /// What waits on me (GET channels/attention); refreshed with the list.
+    private(set) var attention = ChannelAttention.empty
+    /// Threads I hid this session, offered back with "Restore" (console recentlyDismissed).
+    private(set) var recentlyHidden: [ChatChannel] = []
+
     var selected: ChatChannel? { channels.first { $0.id == selectedId } }
     var spaces: [ChatChannel] { channels.filter { !$0.isDM && !$0.isContext } }
     var dms: [ChatChannel] { channels.filter(\.isDM) }
@@ -120,6 +125,7 @@ final class CommsStore {
             let j = try await env.session.client.json("/v1/admin/channels")
             channels = (j["channels"]?.array ?? []).map(ChatChannel.init(json:)).sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
             state = .loaded(channels)
+            await loadAttention()
             await watchAll()
         } catch let e as APIError { state = .failed(e, previous: channels.isEmpty ? nil : channels) }
         catch { state = .failed(APIError.transport(error.localizedDescription), previous: channels.isEmpty ? nil : channels) }
@@ -150,6 +156,41 @@ final class CommsStore {
             "last_message": .object(["id": .number(Double(m.id)), "body": .string(m.body), "user_name": .string(m.userName), "created_at": .string(m.json["created_at"]?.string ?? "")]),
         ])
         channels.sort { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
+        // Someone else's message may now wait on me: refresh notices and "Handled".
+        if !mine { Task { await loadAttention() } }
+    }
+
+    func loadAttention() async {
+        if let j = try? await env.session.client.json("/v1/admin/channels/attention") { attention = ChannelAttention(json: j) }
+    }
+
+    /// "Handled": nothing here needs my reply (it also reads the thread).
+    func acknowledge(_ id: Int) async {
+        do { _ = try await env.session.client.post("/v1/admin/channels/\(id)/acknowledge"); markRead(id); await loadAttention() }
+        catch { env.toasts.error(error) }
+    }
+
+    /// Hides the floating notice only; the message stays unread and waiting.
+    func dismissNotice(_ id: Int, messageId: Int?) async {
+        let body: JSONValue = messageId.map { .object(["message_id": .number(Double($0))]) } ?? .object([:])
+        do { _ = try await env.session.client.post("/v1/admin/channels/\(id)/notice-dismiss", json: body); await loadAttention() }
+        catch { env.toasts.error(error) }
+    }
+
+    /// An order or production thread hidden from my list until its next message.
+    func hide(_ ch: ChatChannel) async throws {
+        _ = try await env.session.client.post("/v1/admin/channels/\(ch.id)/dismiss")
+        remove(ch.id)
+        recentlyHidden.removeAll { $0.id == ch.id }
+        recentlyHidden.insert(ch, at: 0)
+    }
+
+    func restore(_ id: Int) async {
+        do {
+            _ = try await env.session.client.post("/v1/admin/channels/\(id)/undismiss")
+            recentlyHidden.removeAll { $0.id == id }
+            await load()
+        } catch { env.toasts.error(error) }
     }
 
     func markRead(_ id: Int) {
@@ -265,9 +306,21 @@ struct ChannelListView: View {
             } else {
                 LoadableView(store.state, retry: { Task { await store.load() } }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No conversations yet", message: "Start a space or message a colleague.", symbol: "bubble.left") }) { _ in
                     List(selection: $store.selectedId) {
+                        noticesSection
                         section("Spaces", store.spaces)
                         section("Direct messages", store.dms)
                         section("Order & production threads", store.threads)
+                        if !store.recentlyHidden.isEmpty {
+                            Section("Recently hidden") {
+                                ForEach(store.recentlyHidden) { ch in
+                                    HStack {
+                                        Text(ch.name).font(Theme.Font.secondary).lineLimit(1)
+                                        Spacer()
+                                        Button("Restore") { Task { await store.restore(ch.id) } }.font(Theme.Font.caption)
+                                    }
+                                }
+                            }
+                        }
                     }
                     .listStyle(.sidebar)
                 }
@@ -277,6 +330,36 @@ struct ChannelListView: View {
         .sheet(isPresented: $newDM) { NewDMSheet(store: store) }
         .sheet(isPresented: $quickReplies) { QuickRepliesSheet() }
         .refreshable { await store.load() }
+    }
+
+    /// Floating notices (MessageNotices.tsx): who wrote, what, open it or dismiss the notice.
+    @ViewBuilder
+    private var noticesSection: some View {
+        let items = store.attention.withNotices
+        if !items.isEmpty {
+            Section("Waiting on you") {
+                ForEach(items) { a in
+                    if let n = a.notice {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(n.from.isEmpty ? a.name : n.from).font(Theme.Font.secondary).bold().lineLimit(1)
+                                if n.mentionsMe { StatusBadge("mentions you", tone: .info) }
+                                if n.count > 1 { Text("+\(n.count - 1) more").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
+                                Spacer()
+                            }
+                            Text(n.body).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                            HStack {
+                                Button("Open") { open(a.channelId) }
+                                Button("Dismiss") { Task { await store.dismissNotice(a.channelId, messageId: n.messageId) } }
+                                    .help("Hides this notice. The message stays unread and still waits on you.")
+                            }
+                            .font(Theme.Font.caption).buttonStyle(.borderless)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
