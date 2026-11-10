@@ -219,3 +219,24 @@ Also in slice 5: break start/end on the clock (`POST time-clock/break/start|end`
 console `ClockPage.tsx`). Not gaps (declared, no page calls them):
 `time-clock/my-entries`, `me/timesheet/fixes/{id}` DELETE. Real but small:
 `people/requests/count` (the sidebar's requests badge).
+
+### Slice 7 — Messages: attention, notices, Handled, hide/restore, Assist (branch `apple/messages-parity`)
+
+- `BethanyKit/ChannelAttention.swift`: `ChannelAttention` (GET
+  `channels/attention`: what waits on me, floating notices, levels) and
+  `ChannelAssist` (the four actions' request bodies and answers).
+- Messages list: "Waiting on you" notices at the top (open, or dismiss the
+  notice — `notice-dismiss`, which leaves the message unread and waiting),
+  and "Recently hidden" with Restore (`undismiss`) for order/production
+  threads hidden this session (`dismiss` now goes through the store).
+- Thread: "Handled" (`acknowledge`) when the thread waits on my reply;
+  "Assist" sheet (summarise, translate my draft, draft to the team or —
+  on an order thread — the customer, suggest replies; English/Kiswahili);
+  the answer is put into the message box, never sent by itself.
+- Live on the scratch Hub with two users: a DM to the admin showed
+  pending 1 with a notice; `notice-dismiss` removed the notice but left
+  unread 1 / pending 1; `acknowledge` cleared both; `assist` answered 503
+  "Assist is not set up on this server yet…" (no model key), which the
+  sheet shows as the server words it.
+- `ChannelAttentionTests` (5) pass on Linux.
+- Owner approved the authentication slice (6) on 2026-11-10: next.
