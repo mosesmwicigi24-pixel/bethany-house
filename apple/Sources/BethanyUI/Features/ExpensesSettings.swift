@@ -312,13 +312,13 @@ struct ExpenseAnalyticsView: View {
                 }
                 SectionCard("By category") {
                     BarsChart(points: chartPoints(json["by_category"], label: "name", y: "total"))
-                    DataTable(columns: [TableColumn("Category", "name"), TableColumn("Code", "code"), TableColumn("Count", "count", .int), TableColumn("Total", "total", .money, fixedCurrency: "KES")], rows: jrows(json["by_category"]))
+                    DataTable(columns: [DataColumn("Category", "name"), DataColumn("Code", "code"), DataColumn("Count", "count", .int), DataColumn("Total", "total", .money, fixedCurrency: "KES")], rows: jrows(json["by_category"]))
                 }
                 SectionCard("Monthly trend (last 12 months, all statuses that count as spend)") {
                     LinesChart(points: chartPoints(json["monthly_trend"], label: "month", y: "total", series: "Spend"))
                 }
                 SectionCard("By payment method") {
-                    DataTable(columns: [TableColumn("Method", "payment_method", .status), TableColumn("Count", "count", .int), TableColumn("Total", "total", .money, fixedCurrency: "KES")], rows: jrows(json["by_payment_method"]))
+                    DataTable(columns: [DataColumn("Method", "payment_method", .status), DataColumn("Count", "count", .int), DataColumn("Total", "total", .money, fixedCurrency: "KES")], rows: jrows(json["by_payment_method"]))
                 }
                 HStack { ShareTextButton(label: "Share summary", text: shareText(json)); Spacer() }.font(Theme.Font.secondary)
             }

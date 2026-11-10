@@ -217,13 +217,13 @@ struct PosSaleView: View {
     private func load() async {
         guard let outlet = session.outlet else { return }
         if products == nil { makeProducts() }
-        session.checkoutConfig = session.checkoutConfig ?? (try? await session.api.checkoutConfig())
+        if session.checkoutConfig == nil { session.checkoutConfig = try? await session.api.checkoutConfig() }
         await session.loadBillingLists()
         await loadCurrencyLists()
         // An unpaid pending order from this session is resumed, never duplicated (PosPage.tsx auto-resume).
-        if session.cart.isEmpty, session.pendingOrderId == nil, let open = try? await session.api.openPendingOrder(outletId: outlet.id), let order = open?["order"] {
+        if session.cart.isEmpty, session.pendingOrderId == nil, let open = try? await session.api.openPendingOrder(outletId: outlet.id), let order = open["order"] {
             session.restore(sale: PosSale(json: order))
-            env.toasts.show("Resumed unpaid order \(open?["order_number"]?.string ?? "")", tone: .info)
+            env.toasts.show("Resumed unpaid order \(open["order_number"]?.string ?? "")", tone: .info)
         }
     }
 
