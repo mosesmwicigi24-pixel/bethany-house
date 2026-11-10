@@ -236,7 +236,7 @@ public final class SessionStore: SessionAuth {
     }
 
     /// Seconds until the next renewal attempt. Exposed for tests.
-    public static func renewalDelay(expiresAt: Date?, now: Date) -> TimeInterval {
+    nonisolated public static func renewalDelay(expiresAt: Date?, now: Date) -> TimeInterval {
         guard let expiresAt else { return 6 * 3600 }
         let remaining = expiresAt.timeIntervalSince(now)
         if remaining <= 0 { return 60 }
