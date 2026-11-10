@@ -80,9 +80,11 @@ struct MoreList: View {
                 Section(group.label) {
                     ForEach(group.items) { item in
                         NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) }
+                            .badge(item.route == .peopleRequests ? env.peopleRequests : item.route == .notifications ? env.unreadNotifications : 0)
                     }
                 }
             }
+            .task { await env.refreshCounts() }
             Section {
                 ForEach(NavCatalogue.userMenu) { item in NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) } }
                 Button(role: .destructive) { Task { await env.session.signOut(); await env.sessionDidChange() } } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
@@ -107,8 +109,16 @@ struct PadShell: View {
                     Section(group.label) {
                         ForEach(group.items) { item in
                             NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) }
+                                .badge(item.route == .peopleRequests ? env.peopleRequests : item.route == .notifications ? env.unreadNotifications : 0)
                         }
                     }
+                }
+            }
+            .task {
+                // Every minute while the iPad sidebar is up, as the console's sidebar does.
+                while !Task.isCancelled {
+                    await env.refreshCounts()
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
                 }
             }
             .navigationTitle("Hub")

@@ -79,6 +79,19 @@ public final class AppEnvironment {
     }
 
     public var unreadNotifications = 0
+    /// People requests waiting on this manager (leave, swaps, advances, timesheet fixes) — the sidebar badge.
+    public var peopleRequests = 0
+
+    /// The sidebar's counts, as the console's Sidebar and Topbar fetch them every minute:
+    /// GET notifications/unread-count and, for holders of attendance.view_team, GET people/requests/count.
+    /// Background requests: they do not count as activity for the idle lock.
+    public func refreshCounts() async {
+        let c = session.client
+        if let n = try? await c.get("/v1/admin/notifications/unread-count", background: true).json?["count"]?.int { unreadNotifications = n }
+        if session.can("attendance.view_team") {
+            if let n = try? await c.get("/v1/admin/people/requests/count", background: true).json?["count"]?.int { peopleRequests = n }
+        } else { peopleRequests = 0 }
+    }
 
     private func handleNotificationPushed(_ event: RealtimeClient.Event) {
         guard event.name == ".notification.pushed" || event.name == "notification.pushed" else { return }

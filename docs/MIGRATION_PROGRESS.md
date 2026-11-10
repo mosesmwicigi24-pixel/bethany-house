@@ -292,3 +292,18 @@ Break start/end is already native (`MeFeatureClock.swift:339`). Not gaps (declar
   response serialising the user) carries the pending secret, encrypted
   with the app key (seen: 228 characters, `eyJpdiI6…`). Proposed fix: add
   it to `$hidden`. Needs authorization.
+
+### Slice 8 — sidebar counts and profile photo (branch `apple/counts-avatar`, stacked on #558)
+
+- `AppEnvironment.refreshCounts()`: `GET notifications/unread-count` and,
+  for `attendance.view_team`, `GET people/requests/count`, as background
+  requests (no idle-lock activity), every minute while the Mac or iPad
+  sidebar is up — the console's Sidebar/Topbar cadence. Badges on
+  Notifications and People › Requests (Mac sidebar, iPad sidebar, phone
+  "More" list). Before this the notification badge started at 0 and only
+  counted realtime pushes.
+- Profile: "Change photo" → `POST profile/avatar` (multipart `avatar`;
+  jpeg/png/webp; 2 MB checked before sending, the server's limit).
+- Live on the scratch Hub: both counts answered `{"count":1}`; a PNG
+  upload answered "Avatar uploaded." (stored as webp).
+- Console endpoints with no Apple caller after this branch: 27.

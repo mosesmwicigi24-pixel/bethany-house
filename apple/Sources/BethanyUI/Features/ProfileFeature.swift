@@ -1,5 +1,6 @@
 import SwiftUI
 import BethanyKit
+import UniformTypeIdentifiers
 
 /// Profile & security (/settings/profile): the person, their sessions and
 /// named devices, password, and sign-in safety (2FA status, recovery codes).
@@ -61,7 +62,21 @@ struct ProfileView: View {
                         DetailRow("Session limits", "Idle \(policy.idleMinutes) min (\(policy.onIdle == .pinLock ? "PIN lock" : "sign out")), \(policy.absoluteMinutes / 60) h absolute")
                     }
                     if let exp = env.session.tokenExpiresAt { DetailRow("This sign-in renews until") { DateText(exp) } }
-                    Button("Edit details & preferences…") { showEdit = true }.font(Theme.Font.secondary)
+                    HStack {
+                        Button("Edit details & preferences…") { showEdit = true }
+                        // POST profile/avatar (multipart `avatar`): jpeg, png or webp, up to 2 MB — the server's rule.
+                        SalesFilePickButton(label: "Change photo", types: [.jpeg, .png, .webP]) { files in
+                            guard let f = files.first else { return }
+                            guard f.data.count <= 2 * 1024 * 1024 else { env.toasts.show("The photo must be 2 MB or smaller.", tone: .warning); return }
+                            Task {
+                                do {
+                                    let r = try await env.session.client.send(.init(.post, "/v1/admin/profile/avatar", body: .multipart([f.part(named: "avatar")])))
+                                    toastResult(env, r, fallback: "Photo updated"); await env.session.refreshMe()
+                                } catch { env.toasts.error(error) }
+                            }
+                        }
+                    }
+                    .font(Theme.Font.secondary)
                 }
 
                 SectionCard("Sign-in safety") {
