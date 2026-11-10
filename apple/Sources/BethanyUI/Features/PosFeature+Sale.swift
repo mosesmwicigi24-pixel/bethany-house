@@ -38,7 +38,7 @@ struct PosSaleView: View {
                 HStack(spacing: 0) {
                     catalogue
                     Divider()
-                    CartPane(session: session, onCharge: { Task { await charge() } }, onSave: { Task { await saveOrder() } }, onCustomer: { sheet = .customer }, pricing: pricing)
+                    CartPane(session: session, onCharge: { Task { await charge() } }, onSave: { Task { await saveOrder() } }, onCustomer: { sheet = .customer }, pricing: pricing, onPick: { p in pick(p) })
                         .frame(width: 400)
                 }
             }
@@ -64,7 +64,7 @@ struct PosSaleView: View {
         .sheet(item: $variantPicker) { p in VariantSheet(product: p) { v, mto in session.add(product: p, variant: v, production: mto); variantPicker = nil } }
         .sheet(isPresented: $showCart) {
             NavigationStack {
-                CartPane(session: session, onCharge: { Task { await charge() } }, onSave: { Task { await saveOrder() } }, onCustomer: { sheet = .customer }, pricing: pricing)
+                CartPane(session: session, onCharge: { Task { await charge() } }, onSave: { Task { await saveOrder() } }, onCustomer: { sheet = .customer }, pricing: pricing, onPick: { p in pick(p) })
                     .navigationTitle("Cart")
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showCart = false } } }
             }
@@ -130,13 +130,16 @@ struct PosSaleView: View {
         .buttonStyle(.plain)
     }
 
+    /// Tapping a product, from the grid or a suggestion chip: the same path either way.
+    private func pick(_ p: PosProduct) {
+        if p.variants.count > 1 || p.isProducible { variantPicker = p }
+        else if let v = p.defaultVariant, v.sellable { session.add(product: p, variant: v, production: false) }
+    }
+
     private func grid(_ list: [PosProduct]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: compact ? 150 : 170), spacing: Theme.Space.m)], spacing: Theme.Space.m) {
             ForEach(list) { p in
-                ProductTile(product: p, disabled: session.ownerWatchesOnly) {
-                    if p.variants.count > 1 || p.isProducible { variantPicker = p }
-                    else if let v = p.defaultVariant, v.sellable { session.add(product: p, variant: v, production: false) }
-                }
+                ProductTile(product: p, disabled: session.ownerWatchesOnly) { pick(p) }
             }
         }
         .padding(Theme.Space.l)
@@ -350,6 +353,8 @@ struct CartPane: View {
     let onSave: () -> Void
     let onCustomer: () -> Void
     let pricing: Bool
+    /// Hands a product to the till's own tap path (variant picker or straight in).
+    var onPick: (PosProduct) -> Void = { _ in }
     @State private var editing: CartLine?
 
     var body: some View {
@@ -403,6 +408,7 @@ struct CartPane: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
+            if !session.ownerWatchesOnly { SuggestionChips(session: session, onPick: onPick) }
             Divider()
             totals
         }
@@ -525,5 +531,64 @@ struct LineEditorSheet: View {
             Button("Save") { save(line); dismiss() }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
                 .disabled(line.isProduction && line.measurementFields.contains { $0.required && (line.measurementValues[$0.name] ?? "").trimmingCharacters(in: .whitespaces).isEmpty })
         }
+    }
+}
+
+// MARK: - "Usually bought together" (PosPage.tsx suggestion chips; GET pos/suggestions)
+
+/// Passive attach prompts from basket history, under the cart. A chip finds
+/// the product through the normal search (outlet stock, prices in the sale's
+/// currency) and adds it the way a tap on its tile would; if the product
+/// cannot be found here, the chip does nothing rather than guess.
+struct SuggestionChips: View {
+    let session: PosSession
+    let onPick: (PosProduct) -> Void
+    @State private var rows: [TillSuggestion] = []
+    @State private var adding: Int?
+
+    var body: some View {
+        let ids = TillSuggestion.cartProductIds(session.cart.map(\.productId))
+        Group {
+            if !session.cart.isEmpty, !rows.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Usually bought together:").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(rows) { s in chip(s) }
+                        }
+                    }
+                }
+                .padding(.horizontal, Theme.Space.m).padding(.vertical, Theme.Space.s)
+            }
+        }
+        .task(id: ids) {
+            guard !ids.isEmpty else { rows = []; return }
+            try? await Task.sleep(nanoseconds: 500_000_000)   // the console waits half a second for the cart to settle
+            if Task.isCancelled { return }
+            let r = (try? await session.api.suggestions(productIds: ids)) ?? .null
+            rows = TillSuggestion.rows(r, excluding: TillSuggestion.cartProductIds(session.cart.map(\.productId)))
+        }
+    }
+
+    private func chip(_ s: TillSuggestion) -> some View {
+        Button { Task { await add(s) } } label: {
+            Text(adding == s.productId ? "…" : s.label).font(Theme.Font.caption).lineLimit(1)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(Theme.Palette.brand.opacity(0.08), in: Capsule())
+                .foregroundStyle(Theme.Palette.brand)
+        }
+        .buttonStyle(.plain)
+        .disabled(adding != nil)
+        .help("Bought alongside \(s.anchorName) in \(Int(s.attachRatePct.rounded()))% of its baskets")
+    }
+
+    private func add(_ s: TillSuggestion) async {
+        guard let outlet = session.outlet, adding == nil else { return }
+        adding = s.productId
+        defer { adding = nil }
+        // Advisory: a failed lookup never interrupts the sale.
+        guard let found = try? await session.api.searchProducts(s.searchTerm, outletId: outlet.id, currency: session.pricingCurrency),
+              let p = found.first(where: { $0.id == s.productId }) else { return }
+        onPick(p)
     }
 }

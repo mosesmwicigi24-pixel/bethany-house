@@ -14,10 +14,12 @@ def lits(dirs, exts, interp):
             for f in fs:
                 if not f.endswith(exts): continue
                 t = open(os.path.join(dp, f), errors='ignore').read()
+                # Blank interpolations first, so quotes inside one (\(run["id"]?.int ?? 0))
+                # do not end the string literal early.
+                t = re.sub(interp, '\x01', t)
                 for m in re.finditer(r'["`]/?v1/admin/([^"`\n]+)["`]', t):
                     s = m.group(1).split('?')[0]
-                    s = re.sub(interp, '\x00', s)
-                    rx = re.escape(s).replace('\x00', '[^/]+')
+                    rx = re.escape(s).replace('\x01', '[^/]+')
                     pats.add(rx)
     return [re.compile('^' + p + '$') for p in pats]
 P = {

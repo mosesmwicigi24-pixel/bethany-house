@@ -124,3 +124,98 @@ Open items carried over:
 
 Next: slice 2 (order money parity with #546/#547) after this slice is
 reviewed.
+
+### 2026-11-10 (continued) — #554 merged; slice 2
+
+Owner's mandate received (§19): continue to complete, verified parity on
+macOS and iPadOS, Laravel unchanged, a Laravel dependency is raised for
+authorization rather than changed.
+
+- #554 merged (99056fd) on the owner's approval, all checks green.
+- **Slice 2 — order money parity with #546/#547** (branch
+  `apple/order-money-parity`):
+  - `BethanyKit/OrderBilling.swift`: when the order page offers "Bill in"
+    (an international order with a country, a real choice of the
+    customer's own sale currency or USD, not closed, `orders.edit`, and
+    after payment has started only the super admin), and who may delete a
+    payment (super admin, not already deleted). Mirrors
+    `BillCurrencyControl` / `DeletePaymentModal` in OrderDetailPage.tsx.
+  - Order page: "Bill in" menu in Totals → `BillCurrencySheet`
+    (`POST orders/{id}/bill-currency`, reason required once payment has
+    started); "Delete (owner)…" on each live payment → `DeletePaymentSheet`
+    (`POST orders/{id}/payments/{p}/remove`, reason ≥ 5); deleted payments
+    hidden behind "Show deleted (n)", shown dimmed with date and reason and
+    with no actions.
+  - Contract checked live on the scratch Hub: removal answers
+    `step_up_required` until confirmed, then voids the payment, stamps
+    `removed_at`/`removed_reason` and returns the order to `pending`
+    (USD 250 balance); `update-currency {country_code: ZM}` then
+    `bill-currency {currency_code: USD}` answers "Billed in USD now."
+  - `OrderBillingTests` (7) pass on Linux; fixtures are those responses.
+  - `orders/{id}/invoice` dropped from the gap list: the console helper
+    POSTs to a GET-only route and no page calls it.
+- Matrix regenerated: 69 console endpoints with no Apple caller (was 71);
+  50 controllers Implemented but Unverified, 37 Partially Implemented.
+- **Slice 3 — till hand-over and suggestions** (same branch, PR #555):
+  - `BethanyKit/TillHandover.swift`: `OrderDispatch` (a paid, open till
+    sale awaits dispatch; `orders.authorize_dispatch` releases it) and
+    `TillSuggestion` (rows of `pos/suggestions`, the cart's id key, and the
+    query as indexed keys `product_ids[0]=…`, since the client's query is a
+    dictionary; checked on the scratch Hub that Laravel reads them as the
+    same array).
+  - Order page: "Awaiting dispatch authorization" banner with "Confirm
+    dispatch" for holders of the key, the console's notice for everyone
+    else, and "Dispatched … on <time>" afterwards.
+  - Till: "Usually bought together" chips under the cart, after a half
+    second's pause like the console; a chip finds the product through the
+    normal search (outlet stock, sale-currency prices) and adds it by the
+    same path as a tap on its tile (variant picker when needed).
+  - Live on the scratch Hub: five Cope+Stole baskets made Stole a
+    suggestion for Cope at 100 %; dispatch released order 17
+    (`confirmed` → `completed`, `dispatched_at` set) and a second call was
+    refused ("already dispatched").
+  - `TillHandoverTests` (6) pass; 29 kit tests pass on Linux in total.
+  - `pos/register/history` is a console helper no page calls; not a gap.
+- Matrix regenerated: 67 console endpoints with no Apple caller.
+- **Slice 4 — payroll People & pay and Commissions** (same branch, PR #555):
+  the console's payroll has six tabs; the apps had four.
+  - `BethanyKit/PayrollPeople.swift`: `PayPerson` (salary, the deductions
+    switch and a scheduled change, advances and commission owed, last pay),
+    `CommissionRow` / `CommissionsPage` (status labels and details as the
+    console prints them, the server's totals and `can_*` flags), and
+    calendar-date text with no time-zone shift.
+  - Payroll screen: "People & pay" (search; ⋯ menu: add/stop government
+    deductions → `POST payroll/people/{user}/deductions` from a date with a
+    reason, step-up on the server; record commission; salary and file go to
+    the employee file) and "Commissions" (filter, the three totals, PAYE on
+    commission switch for approvers, record, approve, void with a reason).
+  - Live on the scratch Hub: a super admin's commission is recorded and
+    approved at once (KES 1,500 owed); deductions for Evans from 1 Dec 2026
+    show as "Start 1 Dec 2026" beside "No deductions · contract".
+  - `PayrollPeopleTests` (8) pass on Linux.
+- Parity tool fix (interpolations with quotes inside) — see the matrix
+  notes. Console endpoints with no Apple caller: 45. Remaining real gaps
+  found while checking: break start/end on the clock.
+- **PR #555 CI (a9a31fa): green.** 58 BethanyKit tests on macOS; HubMac and
+  HubMobile `** BUILD SUCCEEDED **`. Awaiting the owner's merge approval.
+
+### Next checkpoint — slice 5 (planned, not started in code)
+
+Profile page parity. The console's ProfilePage has 7 tabs; the apps' ProfileView
+(152 lines) has sessions, devices and password only. Verified by reading
+`react-admin/src/pages/profile/ProfilePage.tsx` and `api/profile.ts`:
+
+| Console tab | Endpoints | Apple today |
+|---|---|---|
+| Profile | `GET/PUT profile`, `POST profile/avatar` | check |
+| My employment (`MyFileTab`) | `GET/PUT me/file`, `GET me/file/sensitive`, `me/file/documents/{doc}` (signed) | missing |
+| Password | `POST profile/password` | present |
+| 2FA Security | `auth/2fa/enable|confirm|disable|recovery-codes`, `profile/passkeys*`, `profile/terminal-pin` | missing — **authentication: separate slice 6, owner review** |
+| Sessions | `profile/sessions*`, `profile/devices` + `PUT/DELETE profile/devices/{id}` | rename/remove missing |
+| Preferences | check | check |
+| My Activity | `GET profile/activity` | missing |
+
+Also in slice 5: break start/end on the clock (`POST time-clock/break/start|end`,
+console `ClockPage.tsx`). Not gaps (declared, no page calls them):
+`time-clock/my-entries`, `me/timesheet/fixes/{id}` DELETE. Real but small:
+`people/requests/count` (the sidebar's requests badge).

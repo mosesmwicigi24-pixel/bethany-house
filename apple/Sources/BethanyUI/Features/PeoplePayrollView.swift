@@ -7,17 +7,20 @@ import BethanyKit
 /// rate rows are behind step-up on the server.
 struct PayrollView: View {
     @Environment(AppEnvironment.self) private var env
-    enum Tab: Hashable { case runs, advances, returns, rates }
+    enum Tab: Hashable { case runs, people, commissions, advances, returns, rates }
     @State private var tab: Tab = .runs
     @State private var year = Day.thisYear()
     @State private var version = 0
     @State private var openRun: IDRef?
 
     var body: some View {
-        Page("Payroll", subtitle: "Runs, advances, statutory returns and rate tables") {
-            Tabs(selection: $tab, items: [(.runs, "Runs"), (.advances, "Advances & loans"), (.returns, "Returns"), (.rates, "Statutory rates")])
+        Page("Payroll", subtitle: "Runs, people & pay, commissions, advances, statutory returns and rate tables") {
+            // The console's six tabs, in its order (PayrollPage.tsx).
+            Tabs(selection: $tab, items: [(.runs, "Runs"), (.people, "People & pay"), (.commissions, "Commissions"), (.advances, "Advances & loans"), (.returns, "Returns"), (.rates, "Statutory rates")])
             switch tab {
             case .runs: runs
+            case .people: PayrollPeoplePanel()
+            case .commissions: CommissionsPanel()
             case .advances: AdvancesPanel()
             case .returns: ReturnsPanel()
             case .rates: RatesPanel()

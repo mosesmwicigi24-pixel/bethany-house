@@ -16,10 +16,12 @@ struct OrderDetailView: View {
     @State private var showAudit = false
     @State private var showRevisions = false
     @State private var paymentLink: String?
+    @State private var showDeletedPayments = false
 
     enum OrderSheet: Identifiable {
         case status, payment, refund, void, deposit, shippingFee, currency, attachCustomer, note, createShipment
         case production(Record), verifyMpesa(Record), verifyPaystack(Record), reverse(Record?), revise(Record)
+        case deletePayment(Record), billCurrency(String)
         var id: String {
             switch self {
             case .status: return "status"
@@ -37,6 +39,8 @@ struct OrderDetailView: View {
             case .verifyPaystack(let r): return "paystack-\(r.id)"
             case .reverse(let r): return "reverse-\(r?.id ?? "all")"
             case .revise(let r): return "revise-\(r.id)"
+            case .deletePayment(let r): return "delete-\(r.id)"
+            case .billCurrency(let c): return "bill-\(c)"
             }
         }
     }
@@ -47,6 +51,7 @@ struct OrderDetailView: View {
                 LoadableView(resource.state, retry: { resource.load() }) { order in
                     header(order)
                     actions(order)
+                    dispatchBanner(order)
                     if let link = paymentLink { paymentLinkBanner(link) }
                     OrderItemsSection(order: order, reload: reload, onProduction: { sheet = .production($0) })
                     HStack(alignment: .top, spacing: Theme.Space.l) {
@@ -58,6 +63,7 @@ struct OrderDetailView: View {
                                 DetailRow("Balance due by", order.string("balance_due_date"))
                             }
                             if order["is_international"]?.bool == true { StatusBadge("international", tone: .info) }
+                            BillCurrencyControl(order: order) { sheet = .billCurrency($0) }
                             if let inv = order["invoice_document"], let n = inv["number"]?.string { DetailRow("Invoice", n) }
                             if let q = order.string("quotation_number") { DetailRow("From quotation", q) }
                         }
@@ -117,6 +123,8 @@ struct OrderDetailView: View {
         case .verifyPaystack(let p): VerifyPaystackSheet(order: order, payment: p, onDone: done, onCancel: close)
         case .reverse(let p): ReversePaymentSheet(order: order, payment: p, onDone: done, onCancel: close)
         case .revise(let p): RevisePaymentSheet(order: order, payment: p, onDone: done, onCancel: close)
+        case .deletePayment(let p): DeletePaymentSheet(order: order, payment: p, onDone: done, onCancel: close)
+        case .billCurrency(let c): BillCurrencySheet(order: order, currency: c, onDone: done, onCancel: close)
         }
     }
 
@@ -157,6 +165,41 @@ struct OrderDetailView: View {
             }
             if let chat = Sales.chatURL(phone: o.string("customer_phone"), orderNumber: o.string("order_number")) {
                 Link(destination: chat) { Label("Open chat in Neema", systemImage: "bubble.left") }.font(Theme.Font.secondary)
+            }
+        }
+    }
+
+    // MARK: Dispatch (hand-over) — POST pos/sales/{id}/dispatch (OrderDetailPage.tsx)
+
+    @ViewBuilder
+    private func dispatchBanner(_ o: Record) -> some View {
+        if OrderDispatch.isAwaiting(o.json) {
+            let may = env.session.can(OrderDispatch.permission)
+            SectionCard {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Awaiting dispatch authorization").font(Theme.Font.sectionTitle)
+                        Text("An authorized person must check the goods against this receipt before hand-over." + (may ? "" : " You are not authorized to release goods — please get it confirmed."))
+                            .font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer()
+                    if may {
+                        AsyncButton(action: {
+                            let r = try await env.session.client.post("/v1/admin/pos/sales/\(orderId)/dispatch")
+                            env.toasts.show(r.json?["message"]?.string ?? "Dispatch authorized")
+                            reload()
+                        }) { Text("Confirm dispatch") }
+                        .buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                    }
+                }
+            }
+        } else if OrderDispatch.isDispatched(o.json) {
+            SectionCard {
+                HStack(spacing: Theme.Space.s) {
+                    Label("Dispatched", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.Palette.success).font(Theme.Font.sectionTitle)
+                    Text("Goods released for hand-over" + (o.date("dispatched_at").map { " on \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "") + ".")
+                        .font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
+                }
             }
         }
     }
@@ -276,7 +319,9 @@ struct OrderDetailView: View {
     // MARK: Payments
 
     private func payments(_ o: Record) -> some View {
-        let list = (o["payments"]?.array ?? []).map(Record.init(json:))
+        // The owner's deleted payments stay on record but off the list until asked for (console "Show deleted").
+        let list = OrderBilling.visiblePayments(o.json, showDeleted: showDeletedPayments).map(Record.init(json:))
+        let deleted = OrderBilling.deletedCount(o.json)
         let s = env.session
         let canReverse = s.permissions.canAny(["payments.void", "payments.request_void"])
         return SectionCard("Payments") {
@@ -284,7 +329,11 @@ struct OrderDetailView: View {
                 Text("No payment recorded yet.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
             }
             ForEach(list) { p in paymentRow(p, order: o, canReverse: canReverse) }
-            if canReverse, list.contains(where: { $0.status == "paid" }) {
+            if deleted > 0 {
+                Button(showDeletedPayments ? "Hide deleted payments" : "Show deleted (\(deleted))") { showDeletedPayments.toggle() }
+                    .font(Theme.Font.caption).buttonStyle(.plain).foregroundStyle(Theme.textSecondary)
+            }
+            if canReverse, list.contains(where: { $0.status == "paid" && !OrderBilling.isRemoved($0.json) }) {
                 Button("Reverse every settled payment…", role: .destructive) { sheet = .reverse(nil) }.font(Theme.Font.secondary)
             }
         }
@@ -296,6 +345,7 @@ struct OrderDetailView: View {
         let method = p.string("payment_method") ?? ""
         let verification = p["provider_response"]?["mpesa_verification"]
         let reference = p.string("provider_reference").map { " · " + $0 } ?? ""
+        let removed = OrderBilling.isRemoved(p.json)
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -306,6 +356,10 @@ struct OrderDetailView: View {
                         if p["received_after_cancel_at"]?.isNull == false { StatusBadge("paid after cancel", tone: .warning) }
                     }
                     Text(method.humanized.uppercased() + reference).font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
+                    if removed {
+                        Text("Deleted \(p.date("removed_at")?.formatted(.dateTime.day().month(.abbreviated)) ?? ""): \(p.string("removed_reason") ?? "")")
+                            .font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger)
+                    }
                     HStack(spacing: 6) {
                         DateText(p.date("paid_at") ?? p.date("created_at"))
                         if p["tax_inclusive"]?.bool == false, let t = p.money("tax_amount_collected") { Text("tax collected \(t.customerFormatted())").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
@@ -326,6 +380,7 @@ struct OrderDetailView: View {
                     }
                 }
             }
+            if !removed {
             FlowRow {
                 if s.can("payments.upload_proof"), p["requires_approval"]?.bool == true, p.status != "refunded", p.string("approval_status") != "approved" {
                     ProofUploadButton(paymentId: p.id, onDone: reload)
@@ -342,10 +397,15 @@ struct OrderDetailView: View {
                 if s.permissions.isSuperAdmin, !["voided", "failed", "cancelled"].contains(p.status ?? "") {
                     Button("Correct details…") { sheet = .revise(p) }
                 }
+                if OrderBilling.mayDelete(p.json, permissions: s.permissions) {
+                    Button("Delete (owner)…", role: .destructive) { sheet = .deletePayment(p) }
+                }
             }
             .font(Theme.Font.secondary)
+            }
             Divider()
         }
+        .opacity(removed ? 0.6 : 1)
     }
 
     // MARK: Notes, history, production
