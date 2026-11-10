@@ -53,6 +53,10 @@ Reports).
   (`PeoplePayrollView.swift`), purchase returns approve/reject/complete
   (`ProcurementReceipts.swift`, `ApprovalsPanels.swift`), payments
   approve/reject (`ApprovalsPanels.swift`, this branch).
+- **Console helpers no page calls** (declared in `react-admin/src/api`, so the
+  cross-reference counts them, but there is no console feature to match):
+  `orders/{id}/invoice` (`ordersApi.generateInvoice`, which also POSTs to a
+  GET-only route) and `pos/register/history` (`posApi.registerHistory`).
 - **Not applicable to native, by design:** `push/subscribe`,
   `push/subscribe-expo`, `push/unsubscribe`, `push/unsubscribe-expo`,
   `push/vapid-public-key` are the browser and retired Expo transports; the
@@ -67,7 +71,7 @@ Reports).
 |---|---|---|---|
 | 1 | Payment proofs on Approvals | `payments/pending-approval`, `{id}/approve`, `{id}/reject`, `{id}/proof` | Done in #554. Implemented but Unverified (compiles; not run). |
 | 2 | Order money parity with #546/#547 | `orders/{id}/bill-currency`, `orders/{id}/payments/{paymentId}/remove` | **This branch.** `orders/{id}/invoice` is not a gap: the console's `generateInvoice` helper POSTs to a GET-only route and no page calls it; invoices come from `pdf/orders/{id}/invoice`, which the apps use. |
-| 3 | Till | `pos/register/history`, `pos/sales/{id}/dispatch`, `pos/suggestions` | |
+| 3 | Till | `pos/sales/{id}/dispatch`, `pos/suggestions` | **This branch.** `pos/register/history` is not a gap: `posApi.registerHistory` is declared but no console page calls it. |
 | 4 | Payroll | `payroll/commissions*`, `payroll/people`, `payroll/people/{user}/deductions`, `payroll/runs/{id}/pay` | #532, #533 |
 | 5 | People self-service and leave | `leave/requests/{id}/approve|decline`, `time-clock/break/*`, `time-clock/my-entries`, `me/file*`, `me/timesheet/fixes/{id}`, `pay-periods/{id}/unlock`, `people/requests/count` | |
 | 6 | Account security | `auth/2fa/enable|confirm|disable|recovery-codes`, `profile/passkeys*`, `profile/devices/{id}`, `profile/avatar`, `profile/terminal-pin`, `profile/activity` | Authentication: consequential, needs approval of the plan |
@@ -140,8 +144,8 @@ further dependency say so in the gaps column.
 | HUB-052 | people | PeopleOverviewController | `backend/app/Http/Controllers/Api/PeopleOverviewController.php` | 1+0 of 1 console-called (1 routes) | MeFeatureToday.swift, PeopleFeature.swift | Implemented but Unverified | Implemented but Unverified | route xref 2026-11-10; no Xcode build | — |
 | HUB-053 | me, people | PeopleRequestsController | `backend/app/Http/Controllers/Api/PeopleRequestsController.php` | 4+0 of 6 console-called (6 routes) | MeFeatureTimesheetPay.swift, PeopleFeature.swift | Partially Implemented | Partially Implemented | route xref 2026-11-10; no Xcode build | DELETE me/timesheet/fixes/{id}; GET people/requests/count |
 | HUB-054 | permissions | PermissionController | `backend/app/Http/Controllers/Api/PermissionController.php` | 2+0 of 2 console-called (5 routes) | SetupRolesUsersView.swift | Implemented but Unverified | Implemented but Unverified | route xref 2026-11-10; no Xcode build | 3 route(s) the console does not call |
-| HUB-055 | orders, pos | PosController | `backend/app/Http/Controllers/Api/PosController.php` | 31+0 of 34 console-called (34 routes) | SalesCustomersFeature.swift, SalesOrderSheets.swift | Partially Implemented | Partially Implemented | route xref 2026-11-10; no Xcode build | GET pos/register/history; POST pos/sales/{id}/dispatch; GET pos/suggestions |
-| HUB-056 | pos | PosTillApprovalController | `backend/app/Http/Controllers/Api/PosTillApprovalController.php` | 3+0 of 3 console-called (3 routes) | — | Implemented but Unverified | Implemented but Unverified | route xref 2026-11-10; no Xcode build | — |
+| HUB-055 | orders, pos | PosController | `backend/app/Http/Controllers/Api/PosController.php` | 33+0 of 34 console-called (34 routes) | SalesCustomersFeature.swift, SalesOrderDetailFeature.swift, SalesOrderSheets.swift | Partially Implemented | Partially Implemented | route xref 2026-11-10; no Xcode build | GET pos/register/history |
+| HUB-056 | pos | PosTillApprovalController | `backend/app/Http/Controllers/Api/PosTillApprovalController.php` | 3+0 of 3 console-called (3 routes) | SalesOrderDetailFeature.swift | Implemented but Unverified | Implemented but Unverified | route xref 2026-11-10; no Xcode build | — |
 | HUB-057 | products | ProductController | `backend/app/Http/Controllers/Api/ProductController.php` | 17+1 of 19 console-called (19 routes) | CatalogFeature.swift, MarketingFeature.swift, ModuleSupport.swift, ProductForm.swift … | Partially Implemented | Partially Implemented | route xref 2026-11-10; no Xcode build | PUT products/{id}/images/{imageId}/primary; runtime-built path, action not hand-checked: publish |
 | HUB-058 | reviews | ProductReviewController | `backend/app/Http/Controllers/Api/ProductReviewController.php` | 0+0 of 0 console-called (4 routes) | — | Under Investigation | Under Investigation | route xref 2026-11-10; no Xcode build | 4 route(s) the console does not call |
 | HUB-059 | product-serials | ProductSerialController | `backend/app/Http/Controllers/Api/ProductSerialController.php` | 3+0 of 3 console-called (3 routes) | InventoryMaterials.swift | Implemented but Unverified | Implemented but Unverified | route xref 2026-11-10; no Xcode build | — |

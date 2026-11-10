@@ -51,6 +51,7 @@ struct OrderDetailView: View {
                 LoadableView(resource.state, retry: { resource.load() }) { order in
                     header(order)
                     actions(order)
+                    dispatchBanner(order)
                     if let link = paymentLink { paymentLinkBanner(link) }
                     OrderItemsSection(order: order, reload: reload, onProduction: { sheet = .production($0) })
                     HStack(alignment: .top, spacing: Theme.Space.l) {
@@ -164,6 +165,41 @@ struct OrderDetailView: View {
             }
             if let chat = Sales.chatURL(phone: o.string("customer_phone"), orderNumber: o.string("order_number")) {
                 Link(destination: chat) { Label("Open chat in Neema", systemImage: "bubble.left") }.font(Theme.Font.secondary)
+            }
+        }
+    }
+
+    // MARK: Dispatch (hand-over) — POST pos/sales/{id}/dispatch (OrderDetailPage.tsx)
+
+    @ViewBuilder
+    private func dispatchBanner(_ o: Record) -> some View {
+        if OrderDispatch.isAwaiting(o.json) {
+            let may = env.session.can(OrderDispatch.permission)
+            SectionCard {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Awaiting dispatch authorization").font(Theme.Font.sectionTitle)
+                        Text("An authorized person must check the goods against this receipt before hand-over." + (may ? "" : " You are not authorized to release goods — please get it confirmed."))
+                            .font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer()
+                    if may {
+                        AsyncButton(action: {
+                            let r = try await env.session.client.post("/v1/admin/pos/sales/\(orderId)/dispatch")
+                            env.toasts.show(r.json?["message"]?.string ?? "Dispatch authorized")
+                            reload()
+                        }) { Text("Confirm dispatch") }
+                        .buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                    }
+                }
+            }
+        } else if OrderDispatch.isDispatched(o.json) {
+            SectionCard {
+                HStack(spacing: Theme.Space.s) {
+                    Label("Dispatched", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.Palette.success).font(Theme.Font.sectionTitle)
+                    Text("Goods released for hand-over" + (o.date("dispatched_at").map { " on \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "") + ".")
+                        .font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
+                }
             }
         }
     }

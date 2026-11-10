@@ -156,3 +156,24 @@ authorization rather than changed.
     POSTs to a GET-only route and no page calls it.
 - Matrix regenerated: 69 console endpoints with no Apple caller (was 71);
   50 controllers Implemented but Unverified, 37 Partially Implemented.
+- **Slice 3 — till hand-over and suggestions** (same branch, PR #555):
+  - `BethanyKit/TillHandover.swift`: `OrderDispatch` (a paid, open till
+    sale awaits dispatch; `orders.authorize_dispatch` releases it) and
+    `TillSuggestion` (rows of `pos/suggestions`, the cart's id key, and the
+    query as indexed keys `product_ids[0]=…`, since the client's query is a
+    dictionary; checked on the scratch Hub that Laravel reads them as the
+    same array).
+  - Order page: "Awaiting dispatch authorization" banner with "Confirm
+    dispatch" for holders of the key, the console's notice for everyone
+    else, and "Dispatched … on <time>" afterwards.
+  - Till: "Usually bought together" chips under the cart, after a half
+    second's pause like the console; a chip finds the product through the
+    normal search (outlet stock, sale-currency prices) and adds it by the
+    same path as a tap on its tile (variant picker when needed).
+  - Live on the scratch Hub: five Cope+Stole baskets made Stole a
+    suggestion for Cope at 100 %; dispatch released order 17
+    (`confirmed` → `completed`, `dispatched_at` set) and a second call was
+    refused ("already dispatched").
+  - `TillHandoverTests` (6) pass; 29 kit tests pass on Linux in total.
+  - `pos/register/history` is a console helper no page calls; not a gap.
+- Matrix regenerated: 67 console endpoints with no Apple caller.
