@@ -38,7 +38,7 @@ Reports).
 
 ## Hand-checked notes on the generated rows
 
-- **2026-11-10 status:** every remaining literal gap is classified in  ("Slices 9–10" and the 11:15 checkpoint): not applicable to native, a console helper no page calls, closed by another route, or blocked on the owner. Rows marked "Partially Implemented" below are so only by those classified endpoints or by runtime-built paths, not by a missing page feature.
+- **2026-11-10 status:** every remaining literal gap is classified in `docs/MIGRATION_PROGRESS.md` ("Slices 9–10" and the 11:15 checkpoint): not applicable to native, a console helper no page calls, closed by another route, or blocked on the owner. Rows marked "Partially Implemented" below are so only by those classified endpoints or by runtime-built paths, not by a missing page feature.
 
 - **Tool fix 2026-11-10:** `xref_runtime.py` now blanks interpolations before
   reading string literals; before, quotes inside one (`\(run["id"]?.int ?? 0)`)
