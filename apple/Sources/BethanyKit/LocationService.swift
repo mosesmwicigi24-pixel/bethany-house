@@ -122,7 +122,7 @@ public final class LocationService: NSObject, CLLocationManagerDelegate {
             // "Always" upgrade the person has already refused never calls back.
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(45))
-                await self?.timeOutAuthWaiters()
+                self?.timeOutAuthWaiters()
             }
         }
     }
@@ -168,7 +168,7 @@ public final class LocationService: NSObject, CLLocationManagerDelegate {
             fixWaiters.append(c)
             Task { [weak self] in
                 try? await Task.sleep(for: timeout)
-                await self?.timeOutFixWaiters()
+                self?.timeOutFixWaiters()
             }
         }
         return waited

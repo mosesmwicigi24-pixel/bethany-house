@@ -39,7 +39,11 @@ public struct DeviceIdentity: Sendable {
         #if os(macOS)
         return .macos
         #else
-        return UIDevice.current.userInterfaceIdiom == .pad ? .ipados : .ios
+        // "iPad13,4" on a device, SIMULATOR_MODEL_IDENTIFIER in the simulator.
+        // Read without UIDevice, which is main-actor only, so `current` stays callable anywhere.
+        // The iPad app on an Apple-silicon Mac reports "arm64"; UIDevice called that a pad.
+        if ProcessInfo.processInfo.isiOSAppOnMac { return .ipados }
+        return machineIdentifier().hasPrefix("iPad") ? .ipados : .ios
         #endif
     }
 
@@ -53,8 +57,18 @@ public struct DeviceIdentity: Sendable {
         #if os(macOS)
         return "Mac"
         #else
-        return UIDevice.current.model
+        return machineIdentifier().hasPrefix("iPad") ? "iPad" : "iPhone"
         #endif
+    }
+
+    /// The hardware identifier ("iPad13,4"); in the simulator, the simulated device's.
+    static func machineIdentifier() -> String {
+        if let sim = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"], !sim.isEmpty { return sim }
+        var size = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        var buf = [CChar](repeating: 0, count: max(size, 1))
+        sysctlbyname("hw.machine", &buf, &size, nil, 0)
+        return String(cString: buf)
     }
 
     private static func appVersion() -> String {

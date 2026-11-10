@@ -145,13 +145,16 @@ public enum HubJSON {
 public enum HubDates {
     public static let nairobi = TimeZone(identifier: "Africa/Nairobi")!
 
-    public static let iso8601: ISO8601DateFormatter = {
+    // Formatters are thread-safe on every OS this package supports (Apple:
+    // "thread safe" since macOS 10.9 / iOS 7) and are configured once here and
+    // never mutated afterwards, so sharing them across actors is safe.
+    nonisolated(unsafe) public static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    private static let isoNoFraction: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let isoNoFraction: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f

@@ -27,7 +27,7 @@ public struct ConsoleBridgeView: View {
 
     private var tokenProvider: @Sendable () async -> String? {
         let s = env.session
-        return { await s.bearerToken() }
+        return { @Sendable in await s.bearerToken() }
     }
 }
 
