@@ -17,15 +17,13 @@ public struct ConsoleBridgeView: View {
     public init(route: Route) { self.route = route }
 
     public var body: some View {
-        ConsoleWebView(url: env.consoleURL(for: route), token: tokenProvider, device: env.session.device, onNavigate: { r in env.navigator.go(r) })
+        ConsoleWebView(url: env.consoleURL(for: route), token: Self.tokenProvider(env.session), device: env.session.device, onNavigate: { r in env.navigator.go(r) })
             .overlay(alignment: .bottomTrailing) {
                 Text("Console page").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                     .padding(6).background(.thinMaterial, in: Capsule()).padding(8)
                     .help("This page is shown from the Hub console until its native screen ships.")
             }
     }
-
-    private var tokenProvider: @Sendable () async -> String? { Self.tokenProvider(env.session) }
 
     /// Built outside the view's main-actor isolation, so the closure carries none:
     /// SessionStore is main-actor isolated (hence Sendable) and bearerToken() is nonisolated.
