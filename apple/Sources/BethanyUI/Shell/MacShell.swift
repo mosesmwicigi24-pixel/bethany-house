@@ -81,11 +81,19 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) { SidebarFooter() }
+        .task {
+            // Every minute while the sidebar is up, as the console does.
+            while !Task.isCancelled {
+                await env.refreshCounts()
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+        }
     }
 
     private func badge(for route: Route) -> Int {
         switch route {
         case .notifications: return env.unreadNotifications
+        case .peopleRequests: return env.peopleRequests
         default: return 0
         }
     }
