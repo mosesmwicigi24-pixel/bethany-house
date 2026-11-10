@@ -77,6 +77,7 @@ struct OrderDetailView: View {
                     history(order)
                     if showRevisions { SalesRevisionsSection(orderId: orderId, order: order, onRevise: { sheet = .revise($0) }) }
                     if showAudit { SalesAuditLogSection(path: "/v1/admin/orders/\(orderId)/audit-log") }
+                    RecordHistorySection(type: "order", id: orderId)
                 }
             }
         }
