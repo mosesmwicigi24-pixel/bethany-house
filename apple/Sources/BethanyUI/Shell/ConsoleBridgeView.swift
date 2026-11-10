@@ -25,9 +25,12 @@ public struct ConsoleBridgeView: View {
             }
     }
 
-    private var tokenProvider: @Sendable () async -> String? {
-        let s = env.session
-        return { @Sendable in await s.bearerToken() }
+    private var tokenProvider: @Sendable () async -> String? { Self.tokenProvider(env.session) }
+
+    /// Built outside the view's main-actor isolation, so the closure carries none:
+    /// SessionStore is main-actor isolated (hence Sendable) and bearerToken() is nonisolated.
+    nonisolated private static func tokenProvider(_ session: SessionStore) -> @Sendable () async -> String? {
+        { await session.bearerToken() }
     }
 }
 
