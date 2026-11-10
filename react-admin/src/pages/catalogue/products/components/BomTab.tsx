@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { bomApi, materialsSearchApi } from "@/api/bom";
-import type { Bom, BomItem, Material } from "@/api/bom";
+import type { Bom, BomItem, BomMaterial, BomCostSource, Material } from "@/api/bom";
+import { rawMaterialsApi } from "@/api/rawMaterials";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Field, useFieldAriaProps, FieldInput, FieldSelect, FieldTextarea } from "@/components/setup/FormComponents";
@@ -157,10 +158,82 @@ interface LineItemRowProps {
     onRemove: (key: string) => void;
     /** products.view_cost — the API sends no costs without it. */
     showCost: boolean;
+    /** inventory.adjust — may set a material's cost from here. */
+    canSetCost: boolean;
+    /** A material's cost was set: every line using it picks it up. */
+    onMaterialCost: (materialId: number, cost: number, source: BomCostSource | null) => void;
 }
 
-function LineItemRow({ item, index, onChange, onRemove, showCost }: LineItemRowProps) {
+/** "last bought 3 Oct · PO-0123" / "set by Moses, 10 Nov" — where the cost came from. */
+export function costSourceText(src: BomCostSource | null | undefined): string | null {
+    if (!src) return null;
+    const when = src.at ? new Date(src.at.replace(" ", "T")).toLocaleDateString("en-KE", { day: "numeric", month: "short" }) : null;
+    if (src.kind === "purchase") return ["last bought", when, src.ref].filter(Boolean).join(" · ").replace("bought ·", "bought");
+    if (src.kind === "manual") return `set${src.by ? ` by ${src.by}` : ""}${when ? `, ${when}` : ""}`;
+    return null;
+}
+
+/**
+ * A material with no cost on record (never bought on a PO, never set) is
+ * costed here, on the material itself (owner, 2026-11-10) — the one cost BOM
+ * costing, stock value and production reports all read. It is a recorded
+ * supplier-cost change (audited; a super admin's applies at once), never a
+ * second price kept in the BOM. Receiving the material on a PO later
+ * replaces it with what was actually paid.
+ */
+function SetMaterialCost({ material, unit, onSet }: {
+    material: BomMaterial; unit: string; onSet: (cost: number, source: BomCostSource | null) => void;
+}) {
+    const toast = useToastStore();
+    const [open, setOpen] = useState(false);
+    const [value, setValue] = useState("");
+    const save = useMutation({
+        mutationFn: (cost: number) => rawMaterialsApi.update(material.id, { unit_cost: cost }),
+        onSuccess: (res, cost) => {
+            const waiting = res.proposal && res.proposal.status !== "applied";
+            if (waiting) {
+                toast.success(res.message);
+            } else {
+                toast.success(`${material.name}: KES ${cost.toLocaleString()} per ${material.unit_of_measure} saved on the material.`);
+                onSet(cost, { kind: "manual", at: new Date().toISOString(), ref: null, by: "you" });
+            }
+            setOpen(false);
+            setValue("");
+        },
+        onError: (e: ApiError) => toast.error(e.message),
+    });
+    const n = Number(value);
+    const ok = value.trim() !== "" && Number.isFinite(n) && n > 0;
+
+    if (!open) {
+        return (
+            <button type="button" onClick={() => setOpen(true)}
+                className="text-xs font-semibold text-warning-dark hover:underline whitespace-nowrap">
+                No cost · set
+            </button>
+        );
+    }
+    return (
+        <div className="flex items-center justify-end gap-1">
+            <span className="text-2xs text-surface-400">KES</span>
+            <input autoFocus type="number" min="0" step="0.01" inputMode="decimal" value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" && ok) { e.preventDefault(); save.mutate(n); }
+                    if (e.key === "Escape") setOpen(false);
+                }}
+                aria-label={`Cost of ${material.name} per ${unit}`}
+                className="input text-sm py-1 w-24 text-right" placeholder={`per ${unit}`} />
+            <button type="button" disabled={!ok || save.isPending} onClick={() => save.mutate(n)}
+                className="btn-primary btn-sm px-2 disabled:opacity-40">{save.isPending ? "…" : "Save"}</button>
+        </div>
+    );
+}
+
+function LineItemRow({ item, index, onRemove, onChange, showCost, canSetCost, onMaterialCost }: LineItemRowProps) {
     const lineCost = (item.quantity ?? 0) * (item.material?.cost_per_unit ?? 0);
+    const hasCost = (item.material?.cost_per_unit ?? 0) > 0;
+    const source = costSourceText(item.material?.cost_source);
 
     return (
         <tr className="border-b border-surface-50 hover:bg-surface-50/30 transition-colors group">
@@ -229,19 +302,34 @@ function LineItemRow({ item, index, onChange, onRemove, showCost }: LineItemRowP
 
             {/* Line cost */}
             {showCost && (
-            <td className="px-3 py-2.5 w-32 text-right">
-                <p className="text-sm font-medium text-surface-800">
-                    KES{" "}
-                    {lineCost.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                    })}
-                </p>
-                <p className="text-2xs text-surface-400">
-                    @{" "}
-                    {Number(item.material?.cost_per_unit ?? 0).toLocaleString()}
-                    /{item.unit_of_measure}
-                </p>
+            <td className="px-3 py-2.5 w-40 text-right align-middle">
+                {hasCost || !item.material ? (
+                    <>
+                        <p className="text-sm font-medium text-surface-800">
+                            KES{" "}
+                            {lineCost.toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                            })}
+                        </p>
+                        <p className="text-2xs text-surface-400">
+                            @{" "}
+                            {Number(item.material?.cost_per_unit ?? 0).toLocaleString()}
+                            /{item.unit_of_measure}
+                        </p>
+                        {source && <p className="text-2xs text-surface-400 truncate" title={source}>{source}</p>}
+                    </>
+                ) : canSetCost ? (
+                    <SetMaterialCost
+                        material={item.material}
+                        unit={item.unit_of_measure}
+                        onSet={(cost, src) => onMaterialCost(item.material!.id, cost, src)}
+                    />
+                ) : (
+                    <p className="text-xs font-semibold text-warning-dark" title="Receive it on a purchase order, or ask someone who manages materials to set its cost">
+                        No cost on record
+                    </p>
+                )}
             </td>
             )}
 
@@ -487,6 +575,16 @@ export default function BomTab({ productId, variants }: BomTabProps) {
         [],
     );
 
+    const setMaterialCost = useCallback((materialId: number, cost: number, source: BomCostSource | null) => {
+        setLineItems((prev) => prev.map((item) =>
+            item.material && item.material.id === materialId
+                ? { ...item, material: { ...item.material, cost_per_unit: cost, cost_source: source } }
+                : item));
+        // The saved BOMs and the material lists read the new cost on their next load.
+        qc.invalidateQueries({ queryKey: ["bom"] });
+        qc.invalidateQueries({ queryKey: ["raw-materials"] });
+    }, [qc]);
+
     const removeItem = useCallback((key: string) => {
         setLineItems((prev) => prev.filter((item) => item._key !== key));
     }, []);
@@ -550,6 +648,8 @@ export default function BomTab({ productId, variants }: BomTabProps) {
         0,
     );
     const itemCount = lineItems.length;
+    // Lines with no cost on record — the total leaves them out, and says so.
+    const uncosted = lineItems.filter((i) => i.material && (i.material.cost_per_unit ?? 0) <= 0).length;
 
     // ── Render ────────────────────────────────────────────────────────────────
 
@@ -737,6 +837,8 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         onChange={updateItem}
                                         onRemove={removeItem}
                                         showCost={canSeeCost}
+                                        canSetCost={can("inventory.adjust")}
+                                        onMaterialCost={setMaterialCost}
                                     />
                                 ))
                             )}
@@ -766,6 +868,11 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         <p className="text-2xs text-surface-400">
                                             per unit
                                         </p>
+                                        {uncosted > 0 && (
+                                            <p className="text-2xs font-semibold text-warning-dark">
+                                                + {uncosted} material{uncosted !== 1 ? "s" : ""} without a cost
+                                            </p>
+                                        )}
                                     </td>
                                     )}
                                     <td colSpan={2} />
@@ -902,6 +1009,11 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         {Number(
                                             bom.total_cost,
                                         ).toLocaleString()}
+                                        {(bom.uncosted_count ?? 0) > 0 && (
+                                            <span className="text-warning-dark font-semibold">
+                                                {" "}+ {bom.uncosted_count} without a cost
+                                            </span>
+                                        )}
                                         </>}
                                     </span>
                                 </div>
@@ -1011,10 +1123,16 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                         {item.unit_of_measure}
                                     </td>
                                     {canSeeCost && (<>
+                                    {(item.material?.cost_per_unit ?? 0) > 0 || !item.material ? (<>
                                     <td className="px-3 py-2.5 text-right text-sm text-surface-600 tabular-nums">
                                         {Number(
                                             item.material?.cost_per_unit ?? 0,
                                         ).toLocaleString()}
+                                        {costSourceText(item.material?.cost_source) && (
+                                            <p className="text-2xs text-surface-400 whitespace-nowrap">
+                                                {costSourceText(item.material?.cost_source)}
+                                            </p>
+                                        )}
                                     </td>
                                     <td className="px-3 py-2.5 text-right text-sm font-semibold text-surface-900 tabular-nums">
                                         {(
@@ -1025,6 +1143,21 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                             maximumFractionDigits: 2,
                                         })}
                                     </td>
+                                    </>) : (
+                                    <td colSpan={2} className="px-3 py-2.5 text-right">
+                                        {can("inventory.adjust") ? (
+                                            <SetMaterialCost
+                                                material={item.material}
+                                                unit={item.unit_of_measure}
+                                                onSet={() => qc.invalidateQueries({ queryKey: ["bom"] })}
+                                            />
+                                        ) : (
+                                            <p className="text-xs font-semibold text-warning-dark" title="Receive it on a purchase order, or ask someone who manages materials to set its cost">
+                                                No cost on record
+                                            </p>
+                                        )}
+                                    </td>
+                                    )}
                                     </>)}
                                 </tr>
                             ))}
@@ -1057,6 +1190,11 @@ export default function BomTab({ productId, variants }: BomTabProps) {
                                     <p className="text-2xs text-surface-400">
                                         material cost / unit
                                     </p>
+                                    {(viewingBom.uncosted_count ?? 0) > 0 && (
+                                        <p className="text-2xs font-semibold text-warning-dark">
+                                            + {viewingBom.uncosted_count} material{viewingBom.uncosted_count !== 1 ? "s" : ""} without a cost
+                                        </p>
+                                    )}
                                 </td>
                                 )}
                             </tr>
