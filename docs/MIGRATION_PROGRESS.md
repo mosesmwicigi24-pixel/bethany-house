@@ -196,3 +196,26 @@ authorization rather than changed.
 - Parity tool fix (interpolations with quotes inside) — see the matrix
   notes. Console endpoints with no Apple caller: 45. Remaining real gaps
   found while checking: break start/end on the clock.
+- **PR #555 CI (a9a31fa): green.** 58 BethanyKit tests on macOS; HubMac and
+  HubMobile `** BUILD SUCCEEDED **`. Awaiting the owner's merge approval.
+
+### Next checkpoint — slice 5 (planned, not started in code)
+
+Profile page parity. The console's ProfilePage has 7 tabs; the apps' ProfileView
+(152 lines) has sessions, devices and password only. Verified by reading
+`react-admin/src/pages/profile/ProfilePage.tsx` and `api/profile.ts`:
+
+| Console tab | Endpoints | Apple today |
+|---|---|---|
+| Profile | `GET/PUT profile`, `POST profile/avatar` | check |
+| My employment (`MyFileTab`) | `GET/PUT me/file`, `GET me/file/sensitive`, `me/file/documents/{doc}` (signed) | missing |
+| Password | `POST profile/password` | present |
+| 2FA Security | `auth/2fa/enable|confirm|disable|recovery-codes`, `profile/passkeys*`, `profile/terminal-pin` | missing — **authentication: separate slice 6, owner review** |
+| Sessions | `profile/sessions*`, `profile/devices` + `PUT/DELETE profile/devices/{id}` | rename/remove missing |
+| Preferences | check | check |
+| My Activity | `GET profile/activity` | missing |
+
+Also in slice 5: break start/end on the clock (`POST time-clock/break/start|end`,
+console `ClockPage.tsx`). Not gaps (declared, no page calls them):
+`time-clock/my-entries`, `me/timesheet/fixes/{id}` DELETE. Real but small:
+`people/requests/count` (the sidebar's requests badge).
