@@ -139,6 +139,7 @@ struct ProductFormView: View {
                 default: contentTab
                 }
                 if let e = error, e.errors.isEmpty { Text(e.message).font(Theme.Font.secondary).foregroundStyle(Theme.Palette.danger) }
+                if isEditing { RecordHistorySection(type: "product", id: id) }
             }
         }
         .task { await bootstrap() }
