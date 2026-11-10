@@ -177,3 +177,22 @@ authorization rather than changed.
   - `TillHandoverTests` (6) pass; 29 kit tests pass on Linux in total.
   - `pos/register/history` is a console helper no page calls; not a gap.
 - Matrix regenerated: 67 console endpoints with no Apple caller.
+- **Slice 4 — payroll People & pay and Commissions** (same branch, PR #555):
+  the console's payroll has six tabs; the apps had four.
+  - `BethanyKit/PayrollPeople.swift`: `PayPerson` (salary, the deductions
+    switch and a scheduled change, advances and commission owed, last pay),
+    `CommissionRow` / `CommissionsPage` (status labels and details as the
+    console prints them, the server's totals and `can_*` flags), and
+    calendar-date text with no time-zone shift.
+  - Payroll screen: "People & pay" (search; ⋯ menu: add/stop government
+    deductions → `POST payroll/people/{user}/deductions` from a date with a
+    reason, step-up on the server; record commission; salary and file go to
+    the employee file) and "Commissions" (filter, the three totals, PAYE on
+    commission switch for approvers, record, approve, void with a reason).
+  - Live on the scratch Hub: a super admin's commission is recorded and
+    approved at once (KES 1,500 owed); deductions for Evans from 1 Dec 2026
+    show as "Start 1 Dec 2026" beside "No deductions · contract".
+  - `PayrollPeopleTests` (8) pass on Linux.
+- Parity tool fix (interpolations with quotes inside) — see the matrix
+  notes. Console endpoints with no Apple caller: 45. Remaining real gaps
+  found while checking: break start/end on the clock.
