@@ -80,6 +80,7 @@ enum HubConfig {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var env: AppEnvironment?
 
@@ -106,12 +107,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         NSLog("APNs registration failed: \(error.localizedDescription)")
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .badge]
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let payload = PushPayload(userInfo: response.notification.request.content.userInfo)
-        if let route = payload.route { await MainActor.run { env?.navigator.go(route) } }
+        if let route = payload.route { await MainActor.run { self.env?.navigator.go(route) } }
     }
 }

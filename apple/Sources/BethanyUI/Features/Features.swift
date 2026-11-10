@@ -134,7 +134,7 @@ public struct DocumentButton: View {
     }
 }
 
-extension URL: Identifiable { public var id: String { absoluteString } }
+extension URL: @retroactive Identifiable { public var id: String { absoluteString } }
 
 #if os(iOS)
 public struct ShareSheet: UIViewControllerRepresentable {

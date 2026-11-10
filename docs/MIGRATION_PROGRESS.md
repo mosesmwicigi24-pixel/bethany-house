@@ -370,3 +370,22 @@ blocked on the owner (`database/wipe`, `currencies-management/{id}/rates`).
 **No page-level console feature remains without an Apple equivalent**, by
 this cross-reference and the page checks above. Verification on a Mac/iPad
 remains to be done.
+### Swift 6 warnings (branch `apple/swift6-warnings`)
+
+The "225 warnings" were 16 distinct warnings repeated across the CI run's
+builds (#561's log, `sort -u`). Every one is fixed at its cause, not hidden:
+
+- `DeviceIdentity`: platform and model read from `sysctl hw.machine` (or the
+  simulator's `SIMULATOR_MODEL_IDENTIFIER`; `isiOSAppOnMac` counts as iPad),
+  not from `UIDevice`, which is main-actor only — so `current` stays callable
+  from any context, as it is.
+- App delegates (Mac and iPhone/iPad): `@MainActor`; the two notification
+  callbacks are `nonisolated` and hop to the main actor carrying only the
+  `Sendable` route.
+- `ConsoleBridgeView`: the token closure is explicitly `@Sendable`.
+- `URL: Identifiable` marked `@retroactive`.
+- `HubDates.iso8601` / `isoNoFraction`: `nonisolated(unsafe)` with the reason
+  (formatters are thread-safe and never mutated after setup).
+- `LocationService`: two `await`s on synchronous main-actor calls removed.
+
+Verification is the Apple CI build's warning count on this branch.
