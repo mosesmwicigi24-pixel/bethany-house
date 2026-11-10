@@ -327,7 +327,7 @@ are on `main`, each green on the combined code before merging.
 
 ### Slices 9–10 — the last page-level gaps (branch `apple/stock-purchasing-parity`)
 
-Checked one by one against the console's *pages*; five of the eleven
+Checked one by one against the console's *pages*; six of the eleven
 candidates turned out not to be gaps:
 
 - `grn/{id}/pdf` and `grn/{id}/print`: `PurchaseOrderController::printGRN`
