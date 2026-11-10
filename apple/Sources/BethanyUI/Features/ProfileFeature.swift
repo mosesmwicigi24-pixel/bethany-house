@@ -73,9 +73,9 @@ struct ProfileView: View {
                     }
                     DetailRow("Terminal PIN") { StatusBadge(me.terminalPinSet ? "set" : "not set", tone: me.terminalPinSet ? .success : .neutral) }
                     Button("Change password…") { showPassword = true }
-                    Text("Two-step setup, passkeys and the terminal PIN are managed from Setup › Profile in the console until their native screens ship; passkeys registered there already work for step-up here.")
-                        .font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                 }
+                // Two-step sign-in, recovery codes, passkeys and the PIN (owner-approved slice 6).
+                SignInSafetySection(twoFactorOn: me.twoFactorEnabled, pinSet: me.terminalPinSet)
 
                 if let sessions {
                     SectionCard("Sessions") {

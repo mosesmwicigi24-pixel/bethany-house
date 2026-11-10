@@ -262,3 +262,33 @@ Break start/end is already native (`MeFeatureClock.swift:339`). Not gaps (declar
   sheet shows as the server words it.
 - `ChannelAttentionTests` (5) pass on Linux.
 - Owner approved the authentication slice (6) on 2026-11-10: next.
+
+### Slice 6 — sign-in safety (owner approved 2026-11-10; branch `apple/auth-parity`, stacked on #556)
+
+- `BethanyKit/SecurityModels.swift` (builds everywhere): `TwoFactor`
+  (setup answer, the 6-digit check, recovery codes), `TerminalPinRule`
+  (word for word `TerminalPin::problem`, including the 9→0 wrap),
+  `PasskeyCreationOptions` (the server's options and the credential JSON the
+  console sends), `PasskeyRow`; `Data(base64URL:)` moved here from
+  `PasskeyStepUp.swift` so it can be tested.
+- `BethanyKit/PasskeyRegistration.swift` (Apple only): the platform
+  passkey prompt, then `POST profile/passkeys {name, credential}`.
+- Profile › Profile & security: Two-step sign-in (turn on with a QR code
+  drawn on the device and the key; confirm a code; recovery codes shown
+  once; new recovery codes; turn off with the password), Passkeys (list,
+  add, remove) and Terminal PIN (set/change with the password). The note
+  that sent people to the console is gone.
+- Live on the scratch Hub: `2fa/enable` then `2fa/confirm` with a TOTP
+  code computed from the issued key → enabled, 8 recovery codes;
+  `2fa/recovery-codes` after step-up → 8 new codes; `2fa/disable` refused
+  a wrong password (field error) then disabled; `terminal-pin` refused
+  "3456" ("a run of consecutive digits") and saved "2580"; passkey options
+  read (rp, challenge, user handle). A passkey cannot be created from this
+  environment — registration on a real device is unverified.
+- `SecurityModelsTests` (4) pass on Linux.
+- **Finding for the owner (Laravel, not changed):** `User::$hidden` lists
+  `two_factor_secret` and `two_factor_recovery_codes` but not
+  `two_factor_secret_temp`. During a 2FA setup, `GET profile` (and any
+  response serialising the user) carries the pending secret, encrypted
+  with the app key (seen: 228 characters, `eyJpdiI6…`). Proposed fix: add
+  it to `$hidden`. Needs authorization.
