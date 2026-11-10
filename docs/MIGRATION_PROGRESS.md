@@ -194,8 +194,9 @@ authorization rather than changed.
     show as "Start 1 Dec 2026" beside "No deductions · contract".
   - `PayrollPeopleTests` (8) pass on Linux.
 - Parity tool fix (interpolations with quotes inside) — see the matrix
-  notes. Console endpoints with no Apple caller: 45. Remaining real gaps
-  found while checking: break start/end on the clock.
+  notes. Console endpoints with no Apple caller: 45. (Correction: break
+  start/end was first reported as a gap; it is native in
+  `MeFeatureClock.swift:339`. A truncated grep hid it.)
 - **PR #555 CI (a9a31fa): green.** 58 BethanyKit tests on macOS; HubMac and
   HubMobile `** BUILD SUCCEEDED **`. Awaiting the owner's merge approval.
 
@@ -215,11 +216,32 @@ Profile page parity. The console's ProfilePage has 7 tabs; the apps' ProfileView
 | Preferences | check | check |
 | My Activity | `GET profile/activity` | missing |
 
-Also in slice 5: break start/end on the clock (`POST time-clock/break/start|end`,
-console `ClockPage.tsx`). Not gaps (declared, no page calls them):
+Break start/end is already native (`MeFeatureClock.swift:339`). Not gaps (declared, no page calls them):
 `time-clock/my-entries`, `me/timesheet/fixes/{id}` DELETE. Real but small:
 `people/requests/count` (the sidebar's requests badge).
 
+### Slice 5 — profile page and My employment (branch `apple/profile-parity`, stacked on #555)
+
+- `BethanyKit/ProfileModels.swift`: `ProfileDevice` (an admin's name is
+  locked; the device in hand cannot be removed; names 2–60 characters or
+  cleared), `ProfileActivity`, `MyEmployment` (the file keeper's fields,
+  mine to keep, masked identifiers, documents).
+- Profile screen gains tabs: "Profile & security" (now with Edit details &
+  preferences → `PUT profile`, and device rename/remove), "My employment"
+  (`GET/PUT me/file`, identifiers in full after step-up via
+  `GET me/file/sensitive`, documents through signed links) and "My
+  activity" (`GET profile/activity`).
+- Live on the scratch Hub: `PUT profile` saved; `PUT me/file` refused a
+  placeholder emergency phone with a field error, then saved
+  "+254 722 555 931" normalised; `me/file/sensitive` answered
+  `step_up_required`.
+- `ProfileModelsTests` (5) pass on Linux.
+- Left for slice 6 (authentication, owner review): 2FA enable/confirm/
+  disable/recovery codes, passkeys, terminal PIN. Also still open:
+  `profile/avatar` upload, `people/requests/count` badge.
+- Noticed, not changed (Laravel): `GET profile` returns the user model
+  with `two_factor_secret_temp` (null here). A pending 2FA secret should
+  not travel on a profile read; raised for the owner.
 ### Slice 7 — Messages: attention, notices, Handled, hide/restore, Assist (branch `apple/messages-parity`)
 
 - `BethanyKit/ChannelAttention.swift`: `ChannelAttention` (GET

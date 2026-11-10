@@ -38,7 +38,7 @@ for n, (ctl, rs) in enumerate(sorted(by.items()), 1):
 print('| Feature ID | Module | Function (controller) | Laravel source | Backend contract (Swift literal+runtime of console-called) | Existing Swift code | macOS status | iPadOS status | Verification | Outstanding gaps |')
 print('|---|---|---|---|---|---|---|---|---|---|')
 for fid, mod, ctl, src, contract, sw, st, gaps in rows:
-    ver = 'route xref 2026-11-10; no Xcode build' if st != 'Not Started' else '—'
+    ver = 'route xref; both apps compile in CI (apple.yml); not run' if st != 'Not Started' else '—'
     print(f'| {fid} | {mod} | {ctl} | `{src}` | {contract} | {sw} | {st} | {st} | {ver} | {gaps} |')
 c = collections.Counter(r[6] for r in rows)
 print(); print('<!-- totals: ' + json.dumps(c) + ' -->', file=sys.stderr)
