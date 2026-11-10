@@ -104,7 +104,7 @@ Production, without a deep link).
 |---|---|---|
 | BethanyKit logic unit tests | yes, partial | Swift 6.0.3 Linux toolchain; a scratch package links `JSONValue`, `Money`, `Models`, `Permissions`, `Navigation`, `Approvals` and a Linux `APIClient` copy. Files importing CoreLocation, Network, Security, UIKit are not buildable on Linux. |
 | BethanyUI (SwiftUI) | parse only | `swiftc -parse`; SwiftUI type-checking needs Xcode |
-| Xcode build, simulator, device | **not here** | requires macOS + Xcode. CI (`.github/workflows/apple.yml`, macOS runner) builds both apps unsigned and runs the kit tests; no simulator or device run anywhere yet |
+| Xcode build, simulator, device | **not here; builds in CI** | `.github/workflows/apple.yml` (macOS runner) builds HubMac and HubMobile unsigned and runs 37 kit tests: green since 8a58ac5 (2026-11-10). No simulator or device run anywhere yet |
 | Backend feature tests | yes | `php artisan test` against local PostgreSQL |
 | Live contract (local Hub, scratch DB `bh_e2e`) | yes | `php artisan serve --port=8077`; never production |
 | Production | **no access** | read-only checks are written for the owner to run (`docs/NATIVE_APPS_CHECKLIST.md`) |

@@ -87,8 +87,28 @@ Not verified (and not claimed):
   Status: Implemented but Unverified.
 - New CI gate `.github/workflows/apple.yml` (macOS runner): `swift build`,
   `swift test`, and unsigned `xcodebuild` of HubMac and HubMobile. It is the
-  first thing ever to compile the SwiftUI code; its result on this PR is
-  recorded below once it has run. A green build proves compilation only.
+  first thing ever to compile the SwiftUI code. A green build proves
+  compilation only.
+
+First Apple CI results (PR #554, Xcode 16.4 / Swift 6.1.2, macOS 15 runner):
+- Run 1 failed: 14 compile errors in screens written before this PR (none
+  in the new code). They showed the Apple apps had never compiled. Causes:
+  a project `TableColumn` struct shadowing SwiftUI's (every macOS table),
+  `catch { error = … }` assigning to the catch's own constant (sign-in),
+  `await` inside `??` and optional chaining on a non-optional (till load),
+  `.frame(width:minHeight:)` (roster), and two views too large to
+  type-check (GRN detail, Me "team now"). Fixed in c92c426.
+- Run 2: `swift build` passed; `swift test` failed to compile because a
+  pure main-actor function was called from a nonisolated test. Made
+  `SessionStore.renewalDelay` nonisolated (8a58ac5).
+- Run 3 (8a58ac5): **green**. 37 BethanyKit tests pass on macOS; HubMac
+  and HubMobile (generic iOS device, which covers iPadOS) report
+  `** BUILD SUCCEEDED **`, unsigned. 225 compiler warnings remain, not yet
+  triaged.
+
+What this does and does not move: every Apple screen now compiles for
+macOS and iPadOS. None has been launched; statuses stay "Implemented but
+Unverified" until a screen is run and checked against the console.
 - The proof viewer opens the file (macOS) or a share sheet (iPadOS); the
   console previews it in a modal. Recorded as a difference, not a defect.
 
