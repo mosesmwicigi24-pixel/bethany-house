@@ -124,3 +124,35 @@ Open items carried over:
 
 Next: slice 2 (order money parity with #546/#547) after this slice is
 reviewed.
+
+### 2026-11-10 (continued) — #554 merged; slice 2
+
+Owner's mandate received (§19): continue to complete, verified parity on
+macOS and iPadOS, Laravel unchanged, a Laravel dependency is raised for
+authorization rather than changed.
+
+- #554 merged (99056fd) on the owner's approval, all checks green.
+- **Slice 2 — order money parity with #546/#547** (branch
+  `apple/order-money-parity`):
+  - `BethanyKit/OrderBilling.swift`: when the order page offers "Bill in"
+    (an international order with a country, a real choice of the
+    customer's own sale currency or USD, not closed, `orders.edit`, and
+    after payment has started only the super admin), and who may delete a
+    payment (super admin, not already deleted). Mirrors
+    `BillCurrencyControl` / `DeletePaymentModal` in OrderDetailPage.tsx.
+  - Order page: "Bill in" menu in Totals → `BillCurrencySheet`
+    (`POST orders/{id}/bill-currency`, reason required once payment has
+    started); "Delete (owner)…" on each live payment → `DeletePaymentSheet`
+    (`POST orders/{id}/payments/{p}/remove`, reason ≥ 5); deleted payments
+    hidden behind "Show deleted (n)", shown dimmed with date and reason and
+    with no actions.
+  - Contract checked live on the scratch Hub: removal answers
+    `step_up_required` until confirmed, then voids the payment, stamps
+    `removed_at`/`removed_reason` and returns the order to `pending`
+    (USD 250 balance); `update-currency {country_code: ZM}` then
+    `bill-currency {currency_code: USD}` answers "Billed in USD now."
+  - `OrderBillingTests` (7) pass on Linux; fixtures are those responses.
+  - `orders/{id}/invoice` dropped from the gap list: the console helper
+    POSTs to a GET-only route and no page calls it.
+- Matrix regenerated: 69 console endpoints with no Apple caller (was 71);
+  50 controllers Implemented but Unverified, 37 Partially Implemented.

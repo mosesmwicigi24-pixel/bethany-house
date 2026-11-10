@@ -16,10 +16,12 @@ struct OrderDetailView: View {
     @State private var showAudit = false
     @State private var showRevisions = false
     @State private var paymentLink: String?
+    @State private var showDeletedPayments = false
 
     enum OrderSheet: Identifiable {
         case status, payment, refund, void, deposit, shippingFee, currency, attachCustomer, note, createShipment
         case production(Record), verifyMpesa(Record), verifyPaystack(Record), reverse(Record?), revise(Record)
+        case deletePayment(Record), billCurrency(String)
         var id: String {
             switch self {
             case .status: return "status"
@@ -37,6 +39,8 @@ struct OrderDetailView: View {
             case .verifyPaystack(let r): return "paystack-\(r.id)"
             case .reverse(let r): return "reverse-\(r?.id ?? "all")"
             case .revise(let r): return "revise-\(r.id)"
+            case .deletePayment(let r): return "delete-\(r.id)"
+            case .billCurrency(let c): return "bill-\(c)"
             }
         }
     }
@@ -58,6 +62,7 @@ struct OrderDetailView: View {
                                 DetailRow("Balance due by", order.string("balance_due_date"))
                             }
                             if order["is_international"]?.bool == true { StatusBadge("international", tone: .info) }
+                            BillCurrencyControl(order: order) { sheet = .billCurrency($0) }
                             if let inv = order["invoice_document"], let n = inv["number"]?.string { DetailRow("Invoice", n) }
                             if let q = order.string("quotation_number") { DetailRow("From quotation", q) }
                         }
@@ -117,6 +122,8 @@ struct OrderDetailView: View {
         case .verifyPaystack(let p): VerifyPaystackSheet(order: order, payment: p, onDone: done, onCancel: close)
         case .reverse(let p): ReversePaymentSheet(order: order, payment: p, onDone: done, onCancel: close)
         case .revise(let p): RevisePaymentSheet(order: order, payment: p, onDone: done, onCancel: close)
+        case .deletePayment(let p): DeletePaymentSheet(order: order, payment: p, onDone: done, onCancel: close)
+        case .billCurrency(let c): BillCurrencySheet(order: order, currency: c, onDone: done, onCancel: close)
         }
     }
 
@@ -276,7 +283,9 @@ struct OrderDetailView: View {
     // MARK: Payments
 
     private func payments(_ o: Record) -> some View {
-        let list = (o["payments"]?.array ?? []).map(Record.init(json:))
+        // The owner's deleted payments stay on record but off the list until asked for (console "Show deleted").
+        let list = OrderBilling.visiblePayments(o.json, showDeleted: showDeletedPayments).map(Record.init(json:))
+        let deleted = OrderBilling.deletedCount(o.json)
         let s = env.session
         let canReverse = s.permissions.canAny(["payments.void", "payments.request_void"])
         return SectionCard("Payments") {
@@ -284,7 +293,11 @@ struct OrderDetailView: View {
                 Text("No payment recorded yet.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
             }
             ForEach(list) { p in paymentRow(p, order: o, canReverse: canReverse) }
-            if canReverse, list.contains(where: { $0.status == "paid" }) {
+            if deleted > 0 {
+                Button(showDeletedPayments ? "Hide deleted payments" : "Show deleted (\(deleted))") { showDeletedPayments.toggle() }
+                    .font(Theme.Font.caption).buttonStyle(.plain).foregroundStyle(Theme.textSecondary)
+            }
+            if canReverse, list.contains(where: { $0.status == "paid" && !OrderBilling.isRemoved($0.json) }) {
                 Button("Reverse every settled payment…", role: .destructive) { sheet = .reverse(nil) }.font(Theme.Font.secondary)
             }
         }
@@ -296,6 +309,7 @@ struct OrderDetailView: View {
         let method = p.string("payment_method") ?? ""
         let verification = p["provider_response"]?["mpesa_verification"]
         let reference = p.string("provider_reference").map { " · " + $0 } ?? ""
+        let removed = OrderBilling.isRemoved(p.json)
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -306,6 +320,10 @@ struct OrderDetailView: View {
                         if p["received_after_cancel_at"]?.isNull == false { StatusBadge("paid after cancel", tone: .warning) }
                     }
                     Text(method.humanized.uppercased() + reference).font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
+                    if removed {
+                        Text("Deleted \(p.date("removed_at")?.formatted(.dateTime.day().month(.abbreviated)) ?? ""): \(p.string("removed_reason") ?? "")")
+                            .font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger)
+                    }
                     HStack(spacing: 6) {
                         DateText(p.date("paid_at") ?? p.date("created_at"))
                         if p["tax_inclusive"]?.bool == false, let t = p.money("tax_amount_collected") { Text("tax collected \(t.customerFormatted())").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
@@ -326,6 +344,7 @@ struct OrderDetailView: View {
                     }
                 }
             }
+            if !removed {
             FlowRow {
                 if s.can("payments.upload_proof"), p["requires_approval"]?.bool == true, p.status != "refunded", p.string("approval_status") != "approved" {
                     ProofUploadButton(paymentId: p.id, onDone: reload)
@@ -342,10 +361,15 @@ struct OrderDetailView: View {
                 if s.permissions.isSuperAdmin, !["voided", "failed", "cancelled"].contains(p.status ?? "") {
                     Button("Correct details…") { sheet = .revise(p) }
                 }
+                if OrderBilling.mayDelete(p.json, permissions: s.permissions) {
+                    Button("Delete (owner)…", role: .destructive) { sheet = .deletePayment(p) }
+                }
             }
             .font(Theme.Font.secondary)
+            }
             Divider()
         }
+        .opacity(removed ? 0.6 : 1)
     }
 
     // MARK: Notes, history, production
