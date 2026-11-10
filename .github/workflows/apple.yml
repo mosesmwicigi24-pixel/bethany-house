@@ -1,0 +1,65 @@
+name: Apple
+
+# Native apps (macOS and iPadOS): compiles the shared Swift package and both
+# app targets, and runs the BethanyKit unit tests, on a GitHub macOS runner.
+# Until 2026-11-10 nothing compiled the SwiftUI code; this is the first gate
+# that does. Unsigned builds only: no signing identity, no upload, no
+# TestFlight, no artifact. A passing run proves the code compiles and the
+# kit's tests pass, not that a screen behaves; see docs/MIGRATION_PROGRESS.md.
+
+on:
+  pull_request:
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: apple-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash   # -eo pipefail: a failed xcodebuild fails the step
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: xcodebuild -version && swift --version
+
+      - name: Package for macOS (BethanyKit + BethanyUI)
+        run: swift build
+
+      - name: BethanyKit unit tests (macOS host)
+        run: swift test
+
+      - name: Generate the Xcode project
+        run: brew install xcodegen && xcodegen generate && xcodebuild -list -project BethanyHub.xcodeproj
+
+      - name: macOS app (HubMac), unsigned
+        run: >
+          xcodebuild -project BethanyHub.xcodeproj -scheme HubMac
+          -destination 'generic/platform=macOS' -configuration Debug
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+          build
+
+      - name: iPhone and iPad app (HubMobile), unsigned
+        run: >
+          xcodebuild -project BethanyHub.xcodeproj -scheme HubMobile
+          -destination 'generic/platform=iOS' -configuration Debug
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+          build

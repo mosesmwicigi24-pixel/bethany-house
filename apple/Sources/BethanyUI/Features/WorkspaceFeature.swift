@@ -268,22 +268,29 @@ struct ApprovalRequest: Identifiable, Decodable, Sendable, Hashable {
 
 struct ApprovalsView: View {
     @Environment(AppEnvironment.self) private var env
-    enum Tab: String, CaseIterable { case inbox = "To sign", mine = "My submissions" }
-    @State private var tab: Tab = .inbox
+    /// Four tabs, each gated by the key the server checks (ApprovalsTab).
+    @State private var tab: ApprovalsTab?
     @State private var inbox: Resource<[ApprovalRequest]>?
     @State private var mine: Resource<[ApprovalRequest]>?
     @State private var rejecting: ApprovalRequest?
     @State private var reason = ""
 
     var body: some View {
+        let perms = env.session.permissions
+        let current = tab ?? ApprovalsTab.initial(for: perms)
         Page("Approvals", subtitle: "Signatures the thresholds ask of you") {
-            Picker("", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) } }.pickerStyle(.segmented).frame(maxWidth: 360)
-            if let res = tab == .inbox ? inbox : mine {
-                LoadableView(res.state, retry: { res.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState(tab == .inbox ? "Nothing waiting for your signature" : "You have no open submissions", symbol: "checkmark.seal") }) { items in
+            Tabs(selection: Binding(get: { current }, set: { tab = $0 }), items: ApprovalsTab.visible(for: perms).map { ($0, $0.title) }).frame(maxWidth: 620)
+            switch current {
+            case .purchaseReturns: PurchaseReturnApprovalsPanel()
+            case .paymentProofs: PaymentProofApprovalsPanel()
+            case .inbox, .mine:
+            if let res = current == .inbox ? inbox : mine {
+                LoadableView(res.state, retry: { res.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState(current == .inbox ? "Nothing waiting for your signature" : "You have no open submissions", symbol: "checkmark.seal") }) { items in
                     LazyVStack(spacing: Theme.Space.s) {
-                        ForEach(items) { r in approvalRow(r) }
+                        ForEach(items) { r in approvalRow(r, inbox: current == .inbox) }
                     }
                 }
+            }
             }
         }
         .task { await loadAll() }
@@ -298,7 +305,7 @@ struct ApprovalsView: View {
         }
     }
 
-    private func approvalRow(_ r: ApprovalRequest) -> some View {
+    private func approvalRow(_ r: ApprovalRequest, inbox isInbox: Bool) -> some View {
         SectionCard {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -318,7 +325,7 @@ struct ApprovalsView: View {
             HStack {
                 if let route = r.detailRoute { Button("Open") { env.navigator.go(route) } }
                 Spacer()
-                if tab == .inbox {
+                if isInbox {
                     Button("Reject") { reason = ""; rejecting = r }
                     ConfirmButton("Sign", message: "Your signature approves this \(r.event.humanized.lowercased()) at the current band.", action: { await decide(r, sign: true) }) { Text("Sign") }
                         .buttonStyle(.borderedProminent).tint(Theme.Palette.brand)

@@ -120,38 +120,14 @@ struct GRNDetailView: View {
         Page("Goods received note") {
             if let res {
                 LoadableView(res.state, retry: { res.load() }) { g in
-                    let po = g["purchase_order"] ?? .null
-                    SectionCard {
-                        HStack { Text(g.string("grn_number") ?? "GRN").font(Theme.Font.display(20)); if let rev = g.int("revision"), rev > 0 { StatusBadge("rev \(rev)", tone: .accent) } }
-                        if let pid = po["id"]?.int { HStack { Text("Purchase order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(po["po_number"]?.string ?? "PO") { env.navigator.push(.purchaseOrder(id: pid)) } } }
-                        DetailRow("Supplier", po["supplier"]?["name"]?.string)
-                        DetailRow("Received on", g.string("received_date").map { String($0.prefix(10)) })
-                        DetailRow("Received by", Names.person(g["received_by"]))
-                        DetailRow("Outlet", g["outlet"]?["name"]?.string ?? (g["outlet_id"]?.int == nil ? "Warehouse" : nil))
-                        DetailRow("Invoice number", g.string("invoice_number"))
-                        if let n = g.string("notes"), !n.isEmpty { DetailRow("Notes", n) }
-                    }
+                    header(g)
                     HStack(spacing: Theme.Space.s) {
                         DocumentButton("PDF", path: "/v1/admin/pdf/grn/\(grnId)", suggestedName: "\(g.string("grn_number") ?? "grn").pdf")
                         if env.session.me?.isSuperAdmin == true { Button { correcting = true } label: { Label("Correct quantities (owner)", systemImage: "pencil.and.list.clipboard") } }
                     }
                     .buttonStyle(.bordered)
                     SectionCard("Lines") {
-                        ForEach(Array((g["items"]?.array ?? []).enumerated()), id: \.offset) { _, i in
-                            let poi = i["purchase_order_item"] ?? .null
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(poi["product"]?["name"]?.string ?? poi["product"]?["translations"]?[0]?["name"]?.string ?? poi["material"]?["name"]?.string ?? poi["description"]?.string ?? "Line").font(Theme.Font.body)
-                                    Text([i["condition"]?.string, i["notes"]?.string].compactMap { $0 }.joined(separator: " · ")).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text("received \(quantityText(i["quantity_received"]))").font(Theme.Font.secondary).monospacedDigit()
-                                    if (i["quantity_rejected"]?.double ?? 0) > 0 { Text("rejected \(quantityText(i["quantity_rejected"]))").font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger) }
-                                }
-                            }
-                            Divider()
-                        }
+                        ForEach(Array((g["items"]?.array ?? []).enumerated()), id: \.offset) { _, i in lineRow(i) }
                     }
                     RevisionsSection(path: "/v1/admin/grn/\(grnId)/revisions")
                     ModuleAuditLog(path: "/v1/admin/grn/\(grnId)/audit-log")
@@ -161,6 +137,43 @@ struct GRNDetailView: View {
         .task { if res == nil { load() } }
         .refreshable { await res?.reload() }
         .sheet(isPresented: $correcting) { if let g = res?.value { CorrectGRNSheet(grn: g) { res?.load() } } }
+    }
+
+    // Split out of `body` so the compiler can type-check it (Xcode 16 timed out on it whole).
+    private func header(_ g: Record) -> some View {
+        let po: JSONValue = g["purchase_order"] ?? .null
+        let outlet: String? = g["outlet"]?["name"]?.string ?? (g["outlet_id"]?.int == nil ? "Warehouse" : nil)
+        return SectionCard {
+            HStack { Text(g.string("grn_number") ?? "GRN").font(Theme.Font.display(20)); if let rev = g.int("revision"), rev > 0 { StatusBadge("rev \(rev)", tone: .accent) } }
+            if let pid = po["id"]?.int { HStack { Text("Purchase order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(po["po_number"]?.string ?? "PO") { env.navigator.push(.purchaseOrder(id: pid)) } } }
+            DetailRow("Supplier", po["supplier"]?["name"]?.string)
+            DetailRow("Received on", g.string("received_date").map { String($0.prefix(10)) })
+            DetailRow("Received by", Names.person(g["received_by"]))
+            DetailRow("Outlet", outlet)
+            DetailRow("Invoice number", g.string("invoice_number"))
+            if let n = g.string("notes"), !n.isEmpty { DetailRow("Notes", n) }
+        }
+    }
+
+    private func lineRow(_ i: JSONValue) -> some View {
+        let poi: JSONValue = i["purchase_order_item"] ?? .null
+        let name: String = poi["product"]?["name"]?.string ?? poi["product"]?["translations"]?[0]?["name"]?.string ?? poi["material"]?["name"]?.string ?? poi["description"]?.string ?? "Line"
+        let note: String = [i["condition"]?.string, i["notes"]?.string].compactMap { $0 }.joined(separator: " · ")
+        let rejected: Double = i["quantity_rejected"]?.double ?? 0
+        return VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(Theme.Font.body)
+                    Text(note).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("received \(quantityText(i["quantity_received"]))").font(Theme.Font.secondary).monospacedDigit()
+                    if rejected > 0 { Text("rejected \(quantityText(i["quantity_rejected"]))").font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger) }
+                }
+            }
+            Divider()
+        }
     }
 
     private func load() {

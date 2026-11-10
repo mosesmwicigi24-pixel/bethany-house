@@ -73,7 +73,7 @@ func fmtMoney(_ j: JSONValue?, currency: String = "KES") -> String {
 
 // MARK: - Data table
 
-struct TableColumn {
+struct DataColumn {
     enum Kind { case text, int, number(Int), money, pct, date, status }
     let title: String
     let key: String
@@ -114,7 +114,7 @@ struct TableColumn {
 
 /// A breakdown table from JSON rows. Scrolls sideways on narrow screens.
 struct DataTable: View {
-    let columns: [TableColumn]
+    let columns: [DataColumn]
     let rows: [JRow]
     var onTap: ((JRow) -> Void)? = nil
     var emptyText = "Nothing in this period."
@@ -148,7 +148,7 @@ struct DataTable: View {
     }
 
     @ViewBuilder
-    private func cell(_ c: TableColumn, _ row: JRow) -> some View {
+    private func cell(_ c: DataColumn, _ row: JRow) -> some View {
         switch c.kind {
         case .status: StatusBadge(row.str(c.key))
         case .money:
