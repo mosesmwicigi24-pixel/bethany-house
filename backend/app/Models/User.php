@@ -62,6 +62,10 @@ class User extends Authenticatable
         'remember_token',
         'two_factor_secret',
         'two_factor_recovery_codes',
+        // The pending secret of a 2FA setup (encrypted): it is as private as
+        // the confirmed one. Before 2026-11-10 it travelled on GET profile
+        // and any other response serialising the user during a setup.
+        'two_factor_secret_temp',
     ];
 
     /**
