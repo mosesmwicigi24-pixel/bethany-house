@@ -240,13 +240,20 @@ export const productsApi = {
     // straight away — encoding used to happen inside this request, which the
     // browser abandoned long before ffmpeg finished. Poll the product for
     // video_status until it settles.
-    uploadVideo: (id: number, file: File) => {
+    /** `onProgress` gets 0–100 as the file goes up — a clip can be tens of
+     *  megabytes, and a bare spinner for a minute reads as "stuck". */
+    uploadVideo: (id: number, file: File, onProgress?: (pct: number) => void) => {
         const form = new FormData();
         form.append("video", file);
         return post<{ message: string; video_status: string; video_url: string | null }>(
             `/v1/admin/products/${id}/video`,
             form,
-            { headers: { "Content-Type": undefined } },
+            {
+                headers: { "Content-Type": undefined },
+                onUploadProgress: onProgress
+                    ? (e) => { if (e.total) onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100))); }
+                    : undefined,
+            },
         );
     },
 
