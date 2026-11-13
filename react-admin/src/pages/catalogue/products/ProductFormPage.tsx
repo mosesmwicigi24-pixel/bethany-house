@@ -605,6 +605,31 @@ interface VariantGeneratorProps {
 // Colour leads, the rest explains — mirror of the backend
 // ProductVariant::composeName (the server is authoritative on save; this is the
 // live preview). "White Princes Cassock + Black Piping, Buttons and Pleats".
+// The hub keeps only the first few seconds of a clip (backend/config/video.php
+// `max_seconds`); kept in step with it here so the owner is told before upload.
+const VIDEO_MAX_SECONDS = 6;
+
+/** A local clip's length in seconds, read from its metadata; null if the
+ *  browser cannot read it (some .mov files) — the upload still goes ahead. */
+function clipSeconds(file: File): Promise<number | null> {
+    return new Promise((resolve) => {
+        const url = URL.createObjectURL(file);
+        const v = document.createElement("video");
+        let done = false;
+        const finish = (n: number | null) => {
+            if (done) return;
+            done = true;
+            URL.revokeObjectURL(url);
+            resolve(n);
+        };
+        v.preload = "metadata";
+        v.onloadedmetadata = () => finish(Number.isFinite(v.duration) ? v.duration : null);
+        v.onerror = () => finish(null);
+        window.setTimeout(() => finish(null), 4000);
+        v.src = url;
+    });
+}
+
 function joinWithAnd(items: string[]): string {
     if (items.length <= 1) return items[0] ?? "";
     if (items.length === 2) return `${items[0]} and ${items[1]}`;
@@ -2698,6 +2723,10 @@ export default function ProductFormPage() {
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [videoBusy, setVideoBusy] = useState(false);
     const [videoConverting, setVideoConverting] = useState(false);
+    // Upload progress (0–100) while the file goes up; null when idle.
+    const [videoProgress, setVideoProgress] = useState<number | null>(null);
+    const [videoMeta, setVideoMeta] = useState<{ seconds: number; w: number; h: number } | null>(null);
+    const [dragOver, setDragOver] = useState<"images" | "video" | null>(null);
     const [skuManual, setSkuManual] = useState(false);
     const imageRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLInputElement>(null);
@@ -3117,13 +3146,27 @@ export default function ProductFormPage() {
                 toast.error("Save the product first before uploading a video.");
                 return;
             }
+            if (!/\.(mp4|mov|m4v|webm)$/i.test(file.name)) {
+                toast.error("Upload an MP4, MOV, M4V or WebM clip.");
+                return;
+            }
             if (file.size > 100 * 1024 * 1024) {
                 toast.error("Video must be under 100 MB. Trim it to a few seconds, or export at 1080p instead of 4K.");
                 return;
             }
+            // Say up front that a long clip is cut, rather than letting the
+            // owner find out on the storefront.
+            const seconds = await clipSeconds(file);
+            if (seconds !== null && seconds > VIDEO_MAX_SECONDS + 0.5) {
+                toast.info(
+                    `This clip is ${Math.round(seconds)} seconds — only the first ${VIDEO_MAX_SECONDS} are kept. ` +
+                    "Trim it first if the best shot comes later.",
+                );
+            }
             setVideoBusy(true);
+            setVideoProgress(0);
             try {
-                const res = await productsApi.uploadVideo(Number(id), file);
+                const res = await productsApi.uploadVideo(Number(id), file, setVideoProgress);
                 toast.success(res.message);
                 // The Hub answers 202 the moment the file is parked; ffmpeg
                 // runs on the queue. Watch for it to finish rather than
@@ -3138,6 +3181,7 @@ export default function ProductFormPage() {
                 toast.error(e.errors?.video?.[0] ?? e.message ?? "Upload failed.");
             } finally {
                 setVideoBusy(false);
+                setVideoProgress(null);
                 if (videoRef.current) videoRef.current.value = "";
             }
         },
@@ -3702,12 +3746,41 @@ export default function ProductFormPage() {
                                     }
                                 />
                             </div>
-                            <div className="card-body">
+                            <div
+                                className="card-body"
+                                onDragOver={(e) => {
+                                    if (!isEditing || !canEditImagesAndVariants || !e.dataTransfer.types.includes("Files")) return;
+                                    e.preventDefault();
+                                    setDragOver("images");
+                                }}
+                                onDragLeave={() => setDragOver(null)}
+                                onDrop={(e) => {
+                                    if (!isEditing || !canEditImagesAndVariants || !e.dataTransfer.files.length) return;
+                                    e.preventDefault();
+                                    setDragOver(null);
+                                    handleUpload(e.dataTransfer.files);
+                                }}
+                            >
                                 {!isEditing && (
                                     <p className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg mb-3">
                                         Save the product first, then upload
                                         images.
                                     </p>
+                                )}
+                                {isEditing && images.length === 0 && videoUrl && (
+                                    // A clip with no photo: the storefront cards
+                                    // need a still to play over, and the website
+                                    // fills the gap with its own built-in photos
+                                    // (or a placeholder) — none of which live
+                                    // here, so the Hub shows nothing for them.
+                                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2.5 rounded-lg mb-3">
+                                        <p className="font-semibold">This product has a video but no photos in the Hub.</p>
+                                        <p className="mt-0.5">
+                                            Until you upload photos here, the website shows its own built-in photos for it
+                                            (or a placeholder). Photos you upload replace those everywhere, and the video
+                                            plays over the first one.
+                                        </p>
+                                    </div>
                                 )}
                                 {images.length === 0 ? (
                                     <div
@@ -3716,7 +3789,7 @@ export default function ProductFormPage() {
                                             canEditImagesAndVariants &&
                                             imageRef.current?.click()
                                         }
-                                        className="border-2 border-dashed border-surface-200 rounded-xl p-10 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors"
+                                        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors ${dragOver === "images" ? "border-brand-400 bg-brand-50" : "border-surface-200"}`}
                                     >
                                         <svg
                                             className="w-8 h-8 text-surface-500 mx-auto mb-2"
@@ -3732,7 +3805,7 @@ export default function ProductFormPage() {
                                             />
                                         </svg>
                                         <p className="text-sm text-surface-400">
-                                            Click to upload images
+                                            Click or drop photos here
                                         </p>
                                         <p className="text-xs text-surface-500 mt-1">
                                             PNG, JPG, WebP · optimised automatically for fast, high-quality upload
@@ -3847,8 +3920,42 @@ export default function ProductFormPage() {
                                     }
                                 />
                             </div>
-                            <div className="card-body">
-                                {videoConverting ? (
+                            <div
+                                className="card-body"
+                                onDragOver={(e) => {
+                                    if (!isEditing || !canEditImagesAndVariants || videoBusy || videoConverting || !e.dataTransfer.types.includes("Files")) return;
+                                    e.preventDefault();
+                                    setDragOver("video");
+                                }}
+                                onDragLeave={() => setDragOver(null)}
+                                onDrop={(e) => {
+                                    const f = e.dataTransfer.files?.[0];
+                                    if (!f || !isEditing || !canEditImagesAndVariants || videoBusy || videoConverting) return;
+                                    e.preventDefault();
+                                    setDragOver(null);
+                                    handleVideoUpload(f);
+                                }}
+                            >
+                                {videoProgress !== null ? (
+                                    // The file is still going up. A bar with a
+                                    // number says "keep this tab open"; a bare
+                                    // spinner for a minute said "stuck".
+                                    <div className="border border-surface-200 rounded-xl p-5" role="status" aria-live="polite">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <p className="font-medium text-surface-900">
+                                                {videoProgress < 100 ? "Uploading…" : "Upload complete — handing over for conversion…"}
+                                            </p>
+                                            <span className="tabular-nums text-surface-500">{videoProgress}%</span>
+                                        </div>
+                                        <div className="mt-2 h-2 rounded-full bg-surface-100 overflow-hidden">
+                                            <div
+                                                className="h-full bg-brand-500 transition-[width] duration-300"
+                                                style={{ width: `${videoProgress}%` }}
+                                            />
+                                        </div>
+                                        <p className="text-xs text-surface-500 mt-2">Keep this page open until the upload finishes.</p>
+                                    </div>
+                                ) : videoConverting ? (
                                     // The upload is done; ffmpeg is running on the
                                     // queue. Saying so is the difference between
                                     // "wait a moment" and "that didn't work" —
@@ -3866,28 +3973,54 @@ export default function ProductFormPage() {
                                         </div>
                                     </div>
                                 ) : videoUrl ? (
-                                    <div className="flex flex-col sm:flex-row gap-4 items-start">
+                                    <div className="flex flex-col sm:flex-row gap-5 items-start">
+                                        {/* Sized like a product tile, so it reads as
+                                            the clip a shopper sees on the card. */}
                                         <video
                                             key={videoUrl}
                                             src={videoUrl}
                                             controls
                                             muted
                                             loop
+                                            autoPlay
                                             playsInline
                                             preload="metadata"
-                                            className="w-full sm:w-64 rounded-xl bg-surface-100"
+                                            onLoadedMetadata={(e) => {
+                                                const v = e.currentTarget;
+                                                setVideoMeta({ seconds: v.duration, w: v.videoWidth, h: v.videoHeight });
+                                            }}
+                                            className="w-40 sm:w-44 aspect-[4/5] object-cover rounded-xl bg-surface-900 shrink-0"
                                         />
-                                        <div className="text-xs text-surface-500 space-y-1">
-                                            <p>
-                                                Shoppers see this on the product card and as the first slide of the gallery.
-                                            </p>
+                                        <div className="text-sm space-y-3 min-w-0 flex-1">
+                                            <div className="flex flex-wrap gap-1.5">
+                                                <span className="inline-flex items-center gap-1 text-2xs font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">
+                                                    ● Ready — shown wherever the product is published
+                                                </span>
+                                                {videoMeta && Number.isFinite(videoMeta.seconds) && (
+                                                    <span className="text-2xs text-surface-600 bg-surface-100 rounded-full px-2 py-0.5 tabular-nums">
+                                                        {videoMeta.seconds.toFixed(1)} s
+                                                    </span>
+                                                )}
+                                                {videoMeta && videoMeta.w > 0 && (
+                                                    <span className="text-2xs text-surface-600 bg-surface-100 rounded-full px-2 py-0.5 tabular-nums">
+                                                        {videoMeta.w}×{videoMeta.h}
+                                                    </span>
+                                                )}
+                                                <span className="text-2xs text-surface-600 bg-surface-100 rounded-full px-2 py-0.5">
+                                                    Silent loop
+                                                </span>
+                                            </div>
+                                            <ul className="text-xs text-surface-500 space-y-1 list-disc pl-4">
+                                                <li>Plays first in the product page gallery.</li>
+                                                <li>Plays over the main photo when a shopper hovers the product card (or scrolls to it on a phone).</li>
+                                            </ul>
                                             <a
                                                 href={videoUrl}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="text-brand-600 hover:underline break-all"
+                                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
                                             >
-                                                {videoUrl}
+                                                Open the clip in a new tab ↗
                                             </a>
                                         </div>
                                     </div>
@@ -3900,7 +4033,7 @@ export default function ProductFormPage() {
                                             !videoConverting &&
                                             videoRef.current?.click()
                                         }
-                                        className="border-2 border-dashed border-surface-200 rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors"
+                                        className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-brand-300 hover:bg-brand-50 transition-colors ${dragOver === "video" ? "border-brand-400 bg-brand-50" : "border-surface-200"}`}
                                     >
                                         <svg
                                             className="w-8 h-8 text-surface-500 mx-auto mb-2"
@@ -3916,10 +4049,10 @@ export default function ProductFormPage() {
                                             />
                                         </svg>
                                         <p className="text-sm text-surface-400">
-                                            {isEditing ? "Click to upload a video" : "Save the product first, then upload a video"}
+                                            {isEditing ? "Click or drop a video here" : "Save the product first, then upload a video"}
                                         </p>
                                         <p className="text-xs text-surface-500 mt-1">
-                                            MP4, MOV or WebM · under 100 MB · the first 6 seconds are kept, so lead with the shot that sells it · converted to sharp 1080p automatically
+                                            MP4, MOV or WebM · under 100 MB · the first {VIDEO_MAX_SECONDS} seconds are kept, so lead with the shot that sells it · converted to sharp 1080p automatically
                                         </p>
                                     </div>
                                 )}

@@ -9,6 +9,16 @@ export interface BomMaterial {
     material_type: string;
     unit_of_measure: string;
     cost_per_unit: number;
+    /** Where the current cost came from (null: no cost on record). Cost viewers only. */
+    cost_source?: BomCostSource | null;
+}
+
+export interface BomCostSource {
+    /** purchase: a received PO set it · manual: a recorded cost change · unknown: older data */
+    kind: "purchase" | "manual" | "unknown";
+    at: string | null;
+    ref: string | null;
+    by: string | null;
 }
 
 export interface BomItem {
@@ -32,6 +42,8 @@ export interface Bom {
     notes: string | null;
     items: BomItem[];
     total_cost: number;
+    /** Lines whose material has no cost — the total leaves them out. */
+    uncosted_count?: number;
     items_count: number;
     created_at: string;
     updated_at: string;

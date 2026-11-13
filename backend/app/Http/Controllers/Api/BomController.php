@@ -282,9 +282,59 @@ class BomController extends Controller
     // PRIVATE HELPERS
     // =========================================================================
 
+    /**
+     * Where each material's current cost came from (owner, 2026-11-10): the
+     * latest of a received purchase order (LatestCost sets the cost on
+     * receiving) and a recorded cost change (supplier_cost_change, applied).
+     * Read-only — the cost itself is materials.unit_cost, the one number BOM
+     * costing, stock value and production cost reports all use.
+     *
+     * @param  int[]  $materialIds
+     * @return array<int, array{kind:string, at:?string, ref:?string, by:?string}>
+     */
+    private function costSources(array $materialIds): array
+    {
+        if ($materialIds === []) {
+            return [];
+        }
+        $out = [];
+
+        $buys = DB::table('material_transactions as mt')
+            ->join('material_inventory as mi', 'mi.id', '=', 'mt.material_inventory_id')
+            ->leftJoin('purchase_orders as po', function ($j) {
+                $j->on('po.id', '=', 'mt.reference_id')->where('mt.reference_type', '=', 'purchase_order');
+            })
+            ->whereIn('mi.material_id', $materialIds)
+            ->where('mt.transaction_type', 'purchase')
+            ->orderBy('mt.created_at')
+            ->get(['mi.material_id', 'mt.created_at', 'po.po_number']);
+        foreach ($buys as $b) {
+            $out[(int) $b->material_id] = ['kind' => 'purchase', 'at' => (string) $b->created_at, 'ref' => $b->po_number, 'by' => null];
+        }
+
+        $changes = \App\Models\ChangeProposal::with('maker:id,first_name,last_name')
+            ->where('event', 'supplier_cost_change')
+            ->whereIn('subject_id', $materialIds)
+            ->where('status', \App\Models\ChangeProposal::APPLIED)
+            ->orderBy('applied_at')
+            ->get(['id', 'subject_id', 'applied_at', 'maker_id']);
+        foreach ($changes as $c) {
+            $id   = (int) $c->subject_id;
+            $at   = optional($c->applied_at)->toDateTimeString();
+            $prev = $out[$id]['at'] ?? null;
+            if ($prev === null || ($at !== null && $at >= $prev)) {
+                $out[$id] = ['kind' => 'manual', 'at' => $at, 'ref' => "CHG-{$c->id}",
+                    'by' => trim(($c->maker?->first_name ?? '') . ' ' . ($c->maker?->last_name ?? '')) ?: null];
+            }
+        }
+
+        return $out;
+    }
+
     private function formatBom(BillOfMaterial $bom, bool $withStock = false): array
     {
-        $items = $bom->items->map(function ($item) use ($withStock) {
+        $sources = $this->costSources($bom->items->pluck('material_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all());
+        $items = $bom->items->map(function ($item) use ($withStock, $sources) {
             $data = [
                 'id'              => $item->id,
                 'material_id'     => $item->material_id,
@@ -298,6 +348,11 @@ class BomController extends Controller
                     'material_type'   => $item->material->material_type,
                     'unit_of_measure' => $item->material->unit_of_measure,
                     'cost_per_unit'   => (float) ($item->material->unit_cost ?? 0),
+                    // No cost on record (never bought, never set): the line
+                    // costs nothing here, and the total says so.
+                    'cost_source'     => (float) ($item->material->unit_cost ?? 0) > 0
+                        ? ($sources[(int) $item->material_id] ?? ['kind' => 'unknown', 'at' => null, 'ref' => null, 'by' => null])
+                        : null,
                 ] : null,
                 'line_cost' => (float) $item->quantity * (float) ($item->material?->unit_cost ?? 0),
             ];
@@ -327,6 +382,8 @@ class BomController extends Controller
             'notes'              => $bom->notes,
             'items'              => $items->values(),
             'total_cost'         => $totalCost,
+            // Lines whose material has no cost: the total leaves them out.
+            'uncosted_count'     => $items->filter(fn ($i) => $i['material'] && (float) $i['material']['cost_per_unit'] <= 0)->count(),
             'items_count'        => $items->count(),
             'created_at'         => $bom->created_at,
             'updated_at'         => $bom->updated_at,
