@@ -34,7 +34,8 @@ class PeopleStarterContent extends Command
         {--apply : Write. Without it nothing is written.}
         {--actor= : Required with --apply: the author (user id or email).}
         {--recognise= : Optional: the colleague recognised in the first recognition (user id or email).}
-        {--recognise-for= : With --recognise: why, in the owner\'s words.}';
+        {--recognise-for= : With --recognise: why, in the owner\'s words.}
+        {--except=* : Staff accounts to leave out (user id or email), e.g. a shared login.}';
 
     protected $description = 'Load the first handbook, training, updates, to-dos, signing requests and checklist items (dry run unless --apply)';
 
@@ -50,7 +51,17 @@ class PeopleStarterContent extends Command
             if (!$actor) { $this->error('--apply needs --actor=<user id or email> of an existing user.'); return self::FAILURE; }
         }
         $staff = User::where('status', 'active')->where('user_type', 'staff')->orderBy('id')->get();
-        $this->line(($this->apply ? 'APPLY' : 'DRY RUN') . " — active staff: {$staff->count()}");
+        // A shared login (owner, 2026-11-14: the "Super Admin" staff@ account) gets no
+        // to-dos or signing requests: nobody in particular would ever do or sign them.
+        $except = collect((array) $this->option('except'))->flatMap(fn ($v) => explode(',', (string) $v))->map(fn ($v) => trim($v))->filter();
+        $unknown = 0;
+        foreach ($except as $ref) {
+            $u = $this->findUser($ref);
+            if (!$u) { $unknown++; continue; }
+            $staff = $staff->reject(fn (User $p) => $p->id === $u->id)->values();
+        }
+        if ($unknown) { $this->error("--except: {$unknown} account(s) not found; nothing was run."); return self::FAILURE; }
+        $this->line(($this->apply ? 'APPLY' : 'DRY RUN') . " — active staff: {$staff->count()}" . ($except->isNotEmpty() ? " (after leaving out {$except->count()})" : ''));
 
         $run = function () use ($actor, $staff) {
             $articles = $this->articles($actor);
