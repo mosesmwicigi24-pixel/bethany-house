@@ -206,6 +206,12 @@ class SupplierPaymentsTest extends TestCase
 
         $this->pay($po, 100, ['reference' => ''])->assertStatus(422)->assertJsonValidationErrors('reference');
         $this->pay($po, 100, ['method' => 'cash', 'reference' => ''])->assertCreated();
+        // I&M Bank (owner, 2026-11-14): its own method, and like any bank it
+        // must name the transaction; an unknown method is refused.
+        $this->pay($po, 100, ['method' => 'im_bank', 'reference' => ''])->assertStatus(422)->assertJsonValidationErrors('reference');
+        $this->pay($po, 100, ['method' => 'im_bank', 'reference' => 'IM-778812'])->assertCreated()
+            ->assertJsonPath('payment.method', 'im_bank');
+        $this->pay($po, 100, ['method' => 'equity_bank', 'reference' => 'X1'])->assertStatus(422)->assertJsonValidationErrors('method');
         $this->pay($po, 100, ['paid_at' => now()->addDay()->toIso8601String()])->assertStatus(422)->assertJsonValidationErrors('paid_at');
         $this->pay($po, 0)->assertStatus(422);
 

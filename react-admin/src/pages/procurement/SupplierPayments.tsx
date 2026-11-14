@@ -16,11 +16,21 @@ import { useToastStore } from "@/store/toast.store";
 const money = (n: number | string | null | undefined, currency = "KES") =>
     `${currency} ${Number(n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Mirrors SupplierPayment::METHODS. The three the business pays suppliers
+// with come first; "Bank transfer" is any bank other than I&M.
 const METHODS: Array<[string, string]> = [
-    ["bank_transfer", "Bank transfer"], ["mpesa", "M-PESA"], ["cheque", "Cheque"],
-    ["cash", "Cash"], ["card", "Card"], ["other", "Other"],
+    ["mpesa", "M-PESA"], ["cash", "Cash"], ["im_bank", "I&M Bank"],
+    ["bank_transfer", "Bank transfer (other bank)"], ["cheque", "Cheque"],
+    ["card", "Card"], ["other", "Other"],
 ];
-const NEEDS_REFERENCE = ["bank_transfer", "mpesa", "cheque", "card"];
+const NEEDS_REFERENCE = ["im_bank", "bank_transfer", "mpesa", "cheque", "card"];
+const REFERENCE_HINT: Record<string, string> = {
+    mpesa: "M-PESA code, e.g. SKA1B2C3D4",
+    im_bank: "I&M transaction reference",
+    bank_transfer: "Bank and transaction reference",
+    cheque: "Cheque number",
+    card: "Card slip or authorisation number",
+};
 
 const STATUS: Record<PayableSummary["status"], [string, string]> = {
     unpaid: ["Unpaid", "text-amber-600"],
@@ -160,7 +170,9 @@ function RecordPaymentModal({ poId, summary, onClose, onSaved }: {
 }) {
     const toast = useToastStore();
     const [amount, setAmount] = useState(String(summary.balance));
-    const [method, setMethod] = useState("bank_transfer");
+    // No preselected method: the owner says how it was paid, so a payment is
+    // never filed under a default nobody chose.
+    const [method, setMethod] = useState("");
     const [reference, setReference] = useState("");
     const [paidOn, setPaidOn] = useState(new Date().toLocaleDateString("en-CA"));
     const [notes, setNotes] = useState("");
@@ -171,7 +183,7 @@ function RecordPaymentModal({ poId, summary, onClose, onSaved }: {
     const value = Number(amount);
     const over = value > summary.balance + 0.0001;
     const needsRef = NEEDS_REFERENCE.includes(method) && !reference.trim();
-    const invalid = !(value > 0) || over || needsRef;
+    const invalid = !(value > 0) || over || !method || needsRef;
 
     const save = async () => {
         setSaving(true);
@@ -208,12 +220,13 @@ function RecordPaymentModal({ poId, summary, onClose, onSaved }: {
                 <label className="block text-xs font-medium text-surface-600">
                     Method
                     <select value={method} onChange={(e) => setMethod(e.target.value)} className="input w-full mt-1">
+                        <option value="" disabled>Choose how you paid…</option>
                         {METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                 </label>
                 <label className="block text-xs font-medium text-surface-600">
                     Reference{NEEDS_REFERENCE.includes(method) ? "" : " (optional)"}
-                    <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Bank, M-PESA or cheque number" className="input w-full mt-1" />
+                    <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder={REFERENCE_HINT[method] ?? "Receipt or note"} className="input w-full mt-1" />
                 </label>
                 <label className="block text-xs font-medium text-surface-600">
                     Paid on
