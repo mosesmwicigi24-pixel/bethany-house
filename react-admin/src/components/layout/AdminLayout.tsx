@@ -106,6 +106,7 @@ const SEGMENT_LABELS: Record<string, string> = {
     pos: "Point of Sale",
     new: "New",
     todos: "To-dos",
+    me: "My Workday",
 }
 
 const REPORT_PAGE_LABELS: Record<string, string> = {

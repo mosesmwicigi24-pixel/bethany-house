@@ -63,11 +63,11 @@ export const NAV: NavGroup[] = [
         ],
     },
 
-    // ── Me (People C1) ────────────────────────────────────────────────────────
+    // ── My Workday (People C1; renamed from "Me", owner 2026-11-14) ───────────
     // Every staff member's own things. All ungated: each API is the person's
     // own record (time clock, roster, leave, timesheet, payslips, advances).
     {
-        label: "Me",
+        label: "My Workday",
         items: [
             { label: "Today", href: "/me", icon: "clock" },
             { label: "Updates", href: "/updates", icon: "notifications" },

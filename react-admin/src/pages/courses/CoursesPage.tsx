@@ -139,7 +139,7 @@ function EditModal({ c, onClose }: { c: CourseSummary | null; onClose: () => voi
                     <label className="block">Pass mark %<input type="number" min={1} max={100} className="input w-full" value={d.pass_mark ?? 80} onChange={e => setD({ ...d, pass_mark: Number(e.target.value) })} /></label>
                 </div>
                 <div className="flex flex-wrap gap-4 text-xs">
-                    <label className="inline-flex items-center gap-2"><input type="checkbox" checked={!!d.required} onChange={e => setD({ ...d, required: e.target.checked })} />Required (waits on the Me page until passed)</label>
+                    <label className="inline-flex items-center gap-2"><input type="checkbox" checked={!!d.required} onChange={e => setD({ ...d, required: e.target.checked })} />Required (waits on Today until passed)</label>
                     <label className="inline-flex items-center gap-2"><input type="checkbox" checked={!!d.publish} onChange={e => setD({ ...d, publish: e.target.checked })} />Published</label>
                 </div>
                 <div className="space-y-2">
