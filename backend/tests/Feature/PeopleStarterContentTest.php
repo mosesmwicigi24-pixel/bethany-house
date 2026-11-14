@@ -126,6 +126,21 @@ class PeopleStarterContentTest extends TestCase
         $this->assertSame($counts, [Article::count(), Course::count(), Post::count(), Todo::count(), SigningRequest::count(), FormTemplate::count(), count($opening->fresh()->items)]);
     }
 
+    public function test_a_shared_login_can_be_left_out(): void
+    {
+        $owner = $this->staff();
+        $shared = $this->staff(null, ['email' => 'staff@bethanyhouse.co.ke']);
+
+        $this->artisan('people:starter-content', ['--apply' => true, '--actor' => (string) $owner->id, '--except' => ['staff@bethanyhouse.co.ke']])->assertExitCode(0);
+
+        $this->assertSame(0, Todo::where('user_id', $shared->id)->count());
+        $this->assertSame(0, SigningRequest::where('user_id', $shared->id)->count());
+        $this->assertGreaterThan(0, Todo::where('user_id', $owner->id)->count());
+
+        // An --except that names nobody stops the run rather than quietly including them.
+        $this->artisan('people:starter-content', ['--except' => ['nobody@example.com']])->assertExitCode(1);
+    }
+
     public function test_a_recognition_is_only_given_to_a_named_person_for_a_stated_reason(): void
     {
         $owner = $this->staff();
