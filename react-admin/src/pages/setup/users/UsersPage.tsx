@@ -182,6 +182,12 @@ export default function UsersPage() {
         defaultSortBy: "created_at",
         defaultPerPage: 15,
     });
+    // Staff and website customers are different people (owner, 2026-11-14:
+    // "users are not supposed to be in the customers list and vice versa").
+    // The list asked for every account, so website sign-ups appeared among the
+    // staff. Staff is the default; customers have their own tab, kept only so
+    // one who joins the team can be promoted.
+    const [who, setWho] = useState<"staff" | "customers">("staff");
 
     // Modal states - each modal has its own open flag, completely separate
     const [createOpen, setCreateOpen] = useState(false);
@@ -199,8 +205,8 @@ export default function UsersPage() {
 
     // Data
     const { data, isLoading } = useQuery({
-        queryKey: ["admin-users", table.state],
-        queryFn: () => usersApi.list(table.toParams()),
+        queryKey: ["admin-users", table.state, who],
+        queryFn: () => usersApi.list({ ...table.toParams(), ...(who === "staff" ? { exclude_type: "customer" } : { user_type: "customer" }) }),
     });
     const { data: rolesData } = useQuery({
         queryKey: ["roles"],
@@ -406,6 +412,28 @@ export default function UsersPage() {
                     </button>
                 )}
             </div>
+
+            {/* Who: staff (default) or website customers */}
+            <div className="flex gap-1.5" role="tablist" aria-label="Which accounts">
+                {([["staff", "Staff"], ["customers", "Website customers"]] as const).map(([k, label]) => (
+                    <button
+                        key={k}
+                        type="button"
+                        role="tab"
+                        aria-selected={who === k}
+                        onClick={() => { setWho(k); table.setPage(1); }}
+                        className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${who === k ? "bg-brand-500 text-white" : "bg-surface-100 text-surface-600 hover:bg-surface-200"}`}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+            {who === "customers" && (
+                <p className="text-xs text-surface-500">
+                    People who signed up on the website or ordered through chat. They are not staff; their orders and
+                    details live under Customers. Promote one only if they are joining the team.
+                </p>
+            )}
 
             {/* Search - state lives in table hook, never touches form state */}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
