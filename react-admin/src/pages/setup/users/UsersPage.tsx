@@ -476,9 +476,16 @@ export default function UsersPage() {
                                         <div>
                                             <p className="text-sm font-medium text-surface-900">
                                                 {fullName(user)}
+                                                {user.user_type === "system" && (
+                                                    <span className="ml-1.5 rounded bg-surface-100 px-1.5 py-0.5 align-middle text-2xs font-medium text-surface-500" title="An owner or system account: not on the staff list, payroll or rosters">
+                                                        System
+                                                    </span>
+                                                )}
                                             </p>
                                             <p className="text-xs text-surface-400">
                                                 {user.email}
+                                                {/* The id the hub's tools ask for (owner, 2026-11-14: no page showed it). */}
+                                                <span className="ml-1.5 font-mono text-surface-300" title="User ID">#{user.id}</span>
                                             </p>
                                             {user.phone && (
                                                 <p className="text-xs text-surface-400">
