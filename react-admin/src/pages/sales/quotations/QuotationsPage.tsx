@@ -662,7 +662,7 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                         </FieldSelect>
                     </Field>
                     <Field label="Valid until" error={errors.valid_until?.[0]}>
-                        <FieldInput type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+                        <FieldInput type="date" className="w-full min-w-0 appearance-none" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
                     </Field>
                     <Field label="Served by" error={errors.served_by?.[0]}>
                         <FieldInput value={servedBy} onChange={(e) => setServedBy(e.target.value)} placeholder="Staff member" />
@@ -680,25 +680,29 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
 
                 {/* Line items */}
                 <div className="card overflow-hidden">
-                    <div className="table-wrapper rounded-none border-0">
-                    <table className="table">
-                        <thead>
-                            <tr>
-                                <th className="w-8 text-right">#</th>
-                                <th>Description</th>
-                                <th className="w-28 text-right">Qty</th>
-                                <th className="w-40 text-right">Unit price ({currency})</th>
-                                <th className="w-40 text-right">Line total ({currency})</th>
-                                <th className="w-10"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {rows.length === 0 ? (
-                                <tr><td colSpan={6} className="py-8 text-center text-sm text-surface-500">Tick products above to add them, or “+ Add line” to type one.</td></tr>
-                            ) : rows.map((r, idx) => (
-                                <tr key={r.key}>
-                                    <td className="text-right text-xs tabular-nums text-surface-400">{idx + 1}</td>
-                                    <td className="relative">
+                    {/* One grid for every screen (owner, 2026-11-14: unreadable on a phone).
+                        Desktop: # · description · qty · unit price · line total · ✕.
+                        Phone: a card — # and the full description across the top,
+                        then labelled Qty · Unit price · Line total. */}
+                    <div className="hidden md:grid-cols-[2rem_minmax(0,1fr)_6rem_9.5rem_9rem_2.5rem] gap-3 border-b border-line bg-surface-50 px-4 py-2.5 text-2xs font-semibold uppercase tracking-wide text-surface-500 md:grid">
+                        <div className="text-right">#</div>
+                        <div>Description</div>
+                        <div className="text-right">Qty</div>
+                        <div className="text-right">Unit price ({currency})</div>
+                        <div className="text-right">Line total ({currency})</div>
+                        <div />
+                    </div>
+                    {rows.length === 0 ? (
+                        <div className="py-8 text-center text-sm text-surface-500">Tick products above to add them, or “+ Add line” to type one.</div>
+                    ) : rows.map((r, idx) => (
+                        <div key={r.key} className="grid grid-cols-6 gap-x-2 gap-y-2.5 border-b border-line px-3 py-3 md:grid-cols-[2rem_minmax(0,1fr)_6rem_9.5rem_9rem_2.5rem] md:items-start md:gap-x-3 md:px-4">
+                            <div className="col-span-5 flex items-center text-2xs font-semibold uppercase tracking-wide text-surface-400 md:col-span-1 md:h-10 md:justify-end md:text-xs md:normal-case md:tracking-normal md:tabular-nums">
+                                <span className="md:hidden">Line&nbsp;</span>{idx + 1}
+                            </div>
+                            <div className="col-span-1 flex justify-end md:order-last md:col-span-1">
+                                <button type="button" className="btn-ghost btn-sm h-8 text-danger md:h-10" onClick={() => removeRow(r.key)} aria-label={`Remove ${r.product_name || "this line"}`}>✕</button>
+                            </div>
+                            <div className="relative col-span-6 min-w-0 md:col-span-1">
                                         <input
                                             className="input"
                                             value={r.product_name}
@@ -723,13 +727,15 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                                                 ))}
                                             </div>
                                         )}
-                                    </td>
-                                    <td>
-                                        <input className="input text-right px-2 tabular-nums" type="number" min="1" value={r.quantity} aria-label={`Quantity of ${r.product_name || "this line"}`}
-                                            onChange={(e) => updateRow(r.key, "quantity", e.target.value)} />
-                                    </td>
-                                    <td>
-                                        {pricingKeys.includes(r.key) ? (
+                            </div>
+                            <div className="col-span-2 md:col-span-1">
+                                <span className="mb-1 block text-2xs font-semibold uppercase tracking-wide text-surface-500 md:hidden">Qty</span>
+                                <input className="input text-right px-2 tabular-nums" type="number" inputMode="numeric" min="1" value={r.quantity} aria-label={`Quantity of ${r.product_name || "this line"}`}
+                                    onChange={(e) => updateRow(r.key, "quantity", e.target.value)} />
+                            </div>
+                            <div className="col-span-2 md:col-span-1">
+                                <span className="mb-1 block text-2xs font-semibold uppercase tracking-wide text-surface-500 md:hidden">Unit price</span>
+                                {pricingKeys.includes(r.key) ? (
                                             <div className="flex h-10 items-center justify-end gap-2 text-xs text-surface-500"><Spinner size="xs" /> {currency} price…</div>
                                         ) : (
                                         <input
@@ -745,18 +751,15 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                                         {priceError(r, idx) && (
                                             <p className="mt-1 text-2xs text-danger text-left">{priceError(r, idx)}</p>
                                         )}
-                                    </td>
-                                    <td className="text-right tabular-nums">{money(num(r.quantity) * whole(num(r.unit_price)), currency)}</td>
-                                    <td>
-                                        <button type="button" className="btn-ghost btn-sm text-danger" onClick={() => removeRow(r.key)}>✕</button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    </div>
+                            </div>
+                            <div className="col-span-2 text-right md:col-span-1">
+                                <span className="mb-1 block text-2xs font-semibold uppercase tracking-wide text-surface-500 md:hidden">Line total</span>
+                                <div className="flex h-10 items-center justify-end text-sm font-semibold tabular-nums text-surface-900">{money(num(r.quantity) * whole(num(r.unit_price)), currency)}</div>
+                            </div>
+                        </div>
+                    ))}
                     <div className="space-y-2 border-t px-4 py-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                             <button type="button" className="btn-ghost btn-sm" onClick={addAdHoc}>+ Add line</button>
                             <div className="text-sm">
                                 <span className="text-surface-500">Subtotal (excl. tax): </span>
