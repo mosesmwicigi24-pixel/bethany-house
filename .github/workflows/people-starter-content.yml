@@ -1,0 +1,91 @@
+name: People — starter content
+
+# Runs `php artisan people:starter-content` on the VPS (owner, 2026-11-14:
+# fill the first content of the staff pages), reaching the box as
+# history-repair-tills.yml does.
+#
+#   mode = dry-run (default): prints what would be created, as counts.
+#          Writes nothing.
+#   mode = apply: creates the handbook, training, updates, to-dos, signing
+#          requests and checklist items, authored by `actor` (email or id).
+#          Needs `actor` AND `confirm` typed exactly as APPLY.
+#   recognise / recognise_for: optional first recognition — the colleague
+#          (email or id) and why, in the owner's words.
+#
+# Idempotent: a second apply adds nothing. The repository is public, so the
+# command prints counts only — no staff names, phones or emails.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run (writes nothing) or apply'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options: [dry-run, apply]
+      actor:
+        description: 'apply only: the author of the content (email or id)'
+        required: false
+        default: ''
+      confirm:
+        description: 'apply only: type APPLY to write'
+        required: false
+        default: ''
+      recognise:
+        description: 'optional: colleague to recognise (email or id)'
+        required: false
+        default: ''
+      recognise_for:
+        description: 'optional: why (the recognition text)'
+        required: false
+        default: ''
+
+concurrency:
+  group: people-starter-content
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: people:starter-content (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse an apply without an actor and the typed confirmation
+        if: inputs.mode == 'apply' && (inputs.actor == '' || inputs.confirm != 'APPLY')
+        run: |
+          echo "::error::apply needs actor=<user> and confirm=APPLY; nothing was run."
+          exit 1
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Run people:starter-content on the VPS
+        env:
+          MODE: ${{ inputs.mode }}
+          ACTOR: ${{ inputs.actor }}
+          RECOGNISE: ${{ inputs.recognise }}
+          RECOGNISE_FOR: ${{ inputs.recognise_for }}
+        run: |
+          FLAGS=""
+          if [ "$MODE" = "apply" ]; then FLAGS="--apply --actor=$(printf '%q' "$ACTOR")"; fi
+          if [ -n "$RECOGNISE" ] && [ -n "$RECOGNISE_FOR" ]; then
+            FLAGS="$FLAGS --recognise=$(printf '%q' "$RECOGNISE") --recognise-for=$(printf '%q' "$RECOGNISE_FOR")"
+          fi
+          echo "people:starter-content (${MODE})"
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel php artisan people:starter-content $FLAGS 2>&1"
+        timeout-minutes: 15

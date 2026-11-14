@@ -37,13 +37,13 @@ class FormsController extends Controller
         $v = $request->validate(['outlet_id' => 'nullable|integer|exists:outlets,id', 'date' => 'nullable|date']);
         $date = !empty($v['date']) ? Carbon::parse($v['date'])->startOfDay() : today();
         $outletIds = $this->outletsOf($user, $v['outlet_id'] ?? null);
-        $outlets = Outlet::whereIn('id', $outletIds)->orderBy('name')->get(['id', 'name']);
+        $outlets = Outlet::whereIn('id', $outletIds)->orderBy('name')->get(['id', 'name', 'sales_channel']);
         $templates = FormTemplate::where('active', true)->where(fn ($q) => $q->whereNull('outlet_id')->orWhereIn('outlet_id', $outletIds))->orderBy('kind')->orderBy('due_time')->get();
         $subs = FormSubmission::with('user:id,first_name,last_name')->whereIn('outlet_id', $outletIds)->where('for_date', $date->toDateString())->get();
         $rows = [];
         foreach ($outlets as $o) {
             foreach ($templates as $t) {
-                if ($t->outlet_id && $t->outlet_id !== $o->id) continue;
+                if (!$t->appliesTo($o)) continue;
                 if ($t->kind === 'checklist' && !$t->dueOn($date)) continue;
                 $done = $subs->first(fn ($s) => $s->form_template_id === $t->id && $s->outlet_id === $o->id && $s->status !== 'missed');
                 $missed = $subs->first(fn ($s) => $s->form_template_id === $t->id && $s->outlet_id === $o->id && $s->status === 'missed');
@@ -84,7 +84,7 @@ class FormsController extends Controller
         $outletId = (int) $v['outlet_id'];
         abort_unless($t->active, 422, 'This form is no longer in use.');
         abort_unless(in_array($outletId, $this->outletsOf($user), true), 403, 'You are not on that outlet\'s team.');
-        if ($t->outlet_id && $t->outlet_id !== $outletId) abort(422, 'This form belongs to another outlet.');
+        if (!$t->appliesTo(Outlet::findOrFail($outletId))) abort(422, 'This form belongs to another outlet.');
         $date = !empty($v['for_date']) ? Carbon::parse($v['for_date'])->startOfDay() : today();
         abort_if($date->gt(today()), 422, 'That day has not come yet.');
         $answers = json_decode($v['answers'], true);
@@ -179,14 +179,14 @@ class FormsController extends Controller
         $v = $request->validate(['date' => 'nullable|date']);
         $date = !empty($v['date']) ? Carbon::parse($v['date'])->startOfDay() : today();
         $outletIds = $this->outletsOf($user);
-        $outlets = Outlet::whereIn('id', $outletIds)->orderBy('name')->get(['id', 'name']);
+        $outlets = Outlet::whereIn('id', $outletIds)->orderBy('name')->get(['id', 'name', 'sales_channel']);
         $templates = FormTemplate::where('active', true)->where(fn ($q) => $q->whereNull('outlet_id')->orWhereIn('outlet_id', $outletIds))->orderBy('due_time')->get();
         $subs = FormSubmission::with(['user:id,first_name,last_name', 'template'])->whereIn('outlet_id', $outletIds)->where('for_date', $date->toDateString())->get();
         $out = [];
         foreach ($outlets as $o) {
             $checks = [];
             foreach ($templates->where('kind', 'checklist') as $t) {
-                if ($t->outlet_id && $t->outlet_id !== $o->id) continue;
+                if (!$t->appliesTo($o)) continue;
                 if (!$t->dueOn($date)) continue;
                 $s = $subs->first(fn ($x) => $x->form_template_id === $t->id && $x->outlet_id === $o->id);
                 $state = $s ? $s->status : ($t->dueAt($date) && now()->gt($t->dueAt($date)) ? 'overdue' : 'due');
