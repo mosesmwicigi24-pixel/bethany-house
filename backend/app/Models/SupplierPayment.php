@@ -12,10 +12,13 @@ use LogicException;
  */
 class SupplierPayment extends Model
 {
-    public const METHODS = ['bank_transfer', 'mpesa', 'cash', 'cheque', 'card', 'other'];
+    /** 'im_bank' = paid from the business's I&M Bank account (owner,
+     *  2026-11-14), so the bank is on the record rather than in a note;
+     *  'bank_transfer' stays for any other bank. */
+    public const METHODS = ['mpesa', 'cash', 'im_bank', 'bank_transfer', 'cheque', 'card', 'other'];
 
     /** Methods that leave a trail the reference must name. */
-    public const NEEDS_REFERENCE = ['bank_transfer', 'mpesa', 'cheque', 'card'];
+    public const NEEDS_REFERENCE = ['im_bank', 'bank_transfer', 'mpesa', 'cheque', 'card'];
 
     private const VOID_FIELDS = ['voided_at', 'voided_by', 'void_reason', 'updated_at'];
 
