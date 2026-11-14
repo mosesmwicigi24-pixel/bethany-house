@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, post } from "@/api/client";
 import {
@@ -326,6 +326,27 @@ interface ProductHit { id: number; name: string; sku: string; price: number }
 
 function newKey() { return Math.random().toString(36).slice(2); }
 
+/** Catalogue search. `price` is the KES base price — never shown or used as a line price
+ *  directly; a line is priced in the quotation's currency by the server. */
+async function fetchProducts(q: string): Promise<ProductHit[]> {
+    const res = await get<{ data?: unknown[] }>("/v1/admin/products", { params: { search: q, per_page: 15 } });
+    const list = (res.data ?? []) as Array<Record<string, unknown>>;
+    return list.map((p) => {
+        const bp = p.base_price as { regular_price?: number | string; sale_price?: number | string } | undefined;
+        return {
+            id: Number(p.id),
+            name: String(
+                (p.en_translation as { name?: string } | undefined)?.name
+                ?? p.name ?? p.product_name ?? `Product #${p.id}`,
+            ),
+            sku: String(p.sku ?? ""),
+            // Prefer an active sale price, else the list price.
+            price: num(bp?.sale_price ?? bp?.regular_price ?? 0),
+        };
+    });
+}
+
+
 function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quotation | null; revise?: boolean; onClose: () => void; onSaved: () => void }) {
     // Owner revision of an issued quotation (2026-10-16): same form, plus a reason.
     const [reviseReason, setReviseReason] = useState("");
@@ -377,38 +398,10 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
     );
     const [errors, setErrors] = useState<Record<string, string[]>>({});
 
-    const [productQuery, setProductQuery] = useState("");
-    const [hits, setHits] = useState<ProductHit[]>([]);
-    const [searching, setSearching] = useState(false);
     // Per-row product search — each line's description doubles as a catalogue picker.
     const [activeRow, setActiveRow] = useState<string | null>(null);
     const [rowHits, setRowHits] = useState<ProductHit[]>([]);
     const [rowSearching, setRowSearching] = useState(false);
-
-    async function fetchProducts(q: string): Promise<ProductHit[]> {
-        const res = await get<{ data?: unknown[] }>("/v1/admin/products", { params: { search: q, per_page: 15 } });
-        const list = (res.data ?? []) as Array<Record<string, unknown>>;
-        return list.map((p) => {
-            const bp = p.base_price as { regular_price?: number | string; sale_price?: number | string } | undefined;
-            return {
-                id: Number(p.id),
-                name: String(
-                    (p.en_translation as { name?: string } | undefined)?.name
-                    ?? p.name ?? p.product_name ?? `Product #${p.id}`,
-                ),
-                sku: String(p.sku ?? ""),
-                // Prefer an active sale price, else the list price.
-                price: num(bp?.sale_price ?? bp?.regular_price ?? 0),
-            };
-        });
-    }
-
-    async function searchProducts(q: string) {
-        setProductQuery(q);
-        if (q.trim().length < 2) { setHits([]); return; }
-        setSearching(true);
-        try { setHits(await fetchProducts(q)); } catch { setHits([]); } finally { setSearching(false); }
-    }
 
     // Search the catalogue from a specific line's description field.
     async function searchRow(key: string, q: string) {
@@ -418,17 +411,62 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
         try { setRowHits(await fetchProducts(q)); } catch { setRowHits([]); } finally { setRowSearching(false); }
     }
 
-    // Pick a catalogue product into a line — fills product, sku, and price.
-    function pickForRow(key: string, hit: ProductHit) {
-        setRows((r) => r.map((row) => row.key === key
-            ? { ...row, product_id: hit.id, product_name: hit.name, sku: hit.sku, unit_price: String(hit.price || num(row.unit_price) || 0), catalogue_price: hit.price || null }
-            : row));
-        setActiveRow(null); setRowHits([]);
+    // A product enters a line at its price IN THE QUOTATION'S CURRENCY (owner,
+    // 2026-11-14). The search returns the KES base price; picking a product used
+    // to drop that figure straight into the line, so a USD quotation showed
+    // "Golden Communion Tray · USD 22,000" — the shilling price under a dollar
+    // label. The line now waits for the server's answer (the same
+    // /quotations/reprice the currency switch uses: the product's own price in
+    // that currency, else its KES price at the configured rate) and is flagged
+    // when there is none, exactly as a currency change does.
+    const [pricingKeys, setPricingKeys] = useState<string[]>([]);
+    async function priceNewLines(lines: LineRow[], kesPrices: Map<string, number>) {
+        if (lines.length === 0) return;
+        const keys = lines.map((l) => l.key);
+        setPricingKeys((k) => [...k, ...keys]);
+        setRepricing(true);
+        try {
+            const res = await post<{ lines: { key: string; unit_price: number; source: "catalogue" | "converted" | "kept" }[] }>(
+                "/v1/admin/quotations/reprice",
+                { from: "KES", to: currency, lines: lines.map((l) => ({ key: l.key, product_id: l.product_id, unit_price: kesPrices.get(l.key) ?? 0, name: l.product_name || "This line" })) },
+            );
+            const priced = new Map(res.lines.map((l) => [l.key, l]));
+            setRows((rs) => rs.map((r) => {
+                const hit = priced.get(r.key);
+                if (!hit) return r;
+                return { ...r, unit_price: String(hit.unit_price), catalogue_price: hit.source !== "kept" ? hit.unit_price : null };
+            }));
+            const kept = res.lines.filter((l) => l.source === "kept").map((l) => l.key);
+            if (kept.length) {
+                setKeptKeys((k) => [...k, ...kept]);
+                toast.warning(`${kept.length} product${kept.length === 1 ? " has" : "s have"} no ${currency} price on the hub — type the price before sending.`);
+            }
+        } catch (e) {
+            // Never leave a figure we could not price under this currency's label.
+            setRows((rs) => rs.map((r) => (keys.includes(r.key) ? { ...r, unit_price: "0", catalogue_price: null } : r)));
+            setKeptKeys((k) => [...k, ...keys]);
+            toast.error((e as ApiError)?.message ?? `Could not price ${lines.length === 1 ? "that product" : "those products"} in ${currency}. Type the price.`);
+        } finally {
+            setPricingKeys((k) => k.filter((x) => !keys.includes(x)));
+            setRepricing(false);
+        }
     }
 
-    function addProduct(hit: ProductHit) {
-        setRows((r) => [...r, { key: newKey(), product_id: hit.id, product_name: hit.name, sku: hit.sku, quantity: "1", unit_price: String(hit.price || 0), catalogue_price: hit.price || null }]);
-        setProductQuery(""); setHits([]);
+    // Pick a catalogue product into a line — fills product and sku, then the price in this currency.
+    function pickForRow(key: string, hit: ProductHit) {
+        setRows((r) => r.map((row) => row.key === key
+            ? { ...row, product_id: hit.id, product_name: hit.name, sku: hit.sku, unit_price: "", catalogue_price: null }
+            : row));
+        setKeptKeys((k) => k.filter((x) => x !== key));
+        setActiveRow(null); setRowHits([]);
+        void priceNewLines([{ key, product_id: hit.id, product_name: hit.name, sku: hit.sku, quantity: "1", unit_price: "" }], new Map([[key, hit.price]]));
+    }
+
+    // Add several catalogue products in one go (the picker's ticked rows).
+    function addProducts(picked: ProductHit[]) {
+        const fresh = picked.map((h) => ({ key: newKey(), product_id: h.id, product_name: h.name, sku: h.sku, quantity: "1", unit_price: "", catalogue_price: null } as LineRow));
+        setRows((r) => [...r, ...fresh]);
+        void priceNewLines(fresh, new Map(fresh.map((l, i) => [l.key, picked[i].price])));
     }
     // Changing the currency re-prices the lines. Prices are the server's: the
     // shop's own price for that currency when it has one, otherwise converted at
@@ -546,20 +584,46 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
         onError: (e: ApiError) => { setErrors(e.errors ?? {}); toast.error(e.message); },
     });
 
-    const canSave = rows.length > 0 && !save.isPending;
+    const canSave = rows.length > 0 && !save.isPending && pricingKeys.length === 0 && (!revise || reviseReason.trim().length >= 5);
+    const nextRev = (revisionsData?.current_revision ?? 0) + 1;
+    const total = subtotal + whole(num(shipping));
 
     return (
         <Modal
             open
             onClose={onClose}
             size="full"
-            title={revise && editing ? `Revise ${editing.quote_number} (owner) — Rev ${(revisionsData?.current_revision ?? 0) + 1}` : editing ? `Edit Quotation ${editing.quote_number ?? "(draft)"}` : "New Quotation"}
+            title={revise && editing ? `Revise ${editing.quote_number} — Rev ${nextRev}` : editing ? `Edit Quotation ${editing.quote_number ?? "(draft)"}` : "New Quotation"}
             footer={
-                <div className="flex justify-end gap-2">
-                    <button className="btn-secondary" onClick={onClose}>Cancel</button>
-                    <button className="btn-primary" disabled={!canSave} onClick={() => save.mutate()}>
-                        {save.isPending ? <Spinner size="sm" /> : revise ? `Save as Rev ${(revisionsData?.current_revision ?? 0) + 1}` : editing ? "Save changes" : "Create quotation"}
-                    </button>
+                <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end">
+                    {revise ? (
+                        // The reason sits beside the button that needs it (owner, 2026-11-14).
+                        <label className="flex-1 min-w-0">
+                            <span className="block text-xs font-medium text-surface-600 mb-1">Why are you revising it? <span className="text-danger">*</span></span>
+                            <input
+                                className="input"
+                                value={reviseReason}
+                                onChange={(e) => setReviseReason(e.target.value)}
+                                placeholder="e.g. Customer asked for five instead of three"
+                                aria-label="Why are you revising it?"
+                            />
+                        </label>
+                    ) : <div className="flex-1" />}
+                    <div className="flex items-center justify-between gap-2 sm:justify-end sm:gap-3">
+                        <div className="mr-auto text-left leading-tight sm:mr-0 sm:text-right">
+                            <div className="whitespace-nowrap text-2xs uppercase tracking-wide text-surface-500">Total<span className="hidden sm:inline"> (excl. tax)</span></div>
+                            <div className="whitespace-nowrap text-base font-bold tabular-nums sm:text-lg">{money(total, currency)}</div>
+                        </div>
+                        <button className="btn-secondary hidden whitespace-nowrap sm:inline-flex" onClick={onClose}>Cancel</button>
+                        <button
+                            className="btn-primary whitespace-nowrap"
+                            disabled={!canSave}
+                            title={revise && reviseReason.trim().length < 5 ? "Say why you are revising it first" : pricingKeys.length ? "Pricing products…" : undefined}
+                            onClick={() => save.mutate()}
+                        >
+                            {save.isPending ? <Spinner size="sm" /> : revise ? `Save as Rev ${nextRev}` : editing ? "Save changes" : "Create quotation"}
+                        </button>
+                    </div>
                 </div>
             }
         >
@@ -567,16 +631,14 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                 {revise && (
                     <div className="rounded-lg border border-line bg-surface-50 p-3 space-y-2">
                         <p className="text-xs text-surface-600">
-                            The quotation as issued is kept, and the customer's link and PDF show the new revision.
-                            A declined or expired quotation is offered again.
+                            The quotation as issued is kept, and the customer's link and PDF show Rev {nextRev}.
+                            A declined or expired quotation is offered again. Say why at the bottom, beside Save.
                         </p>
-                        <Field label="Why are you revising it? *">
-                            <FieldInput value={reviseReason} onChange={(e) => setReviseReason(e.target.value)} placeholder="e.g. Customer asked for five instead of three" />
-                        </Field>
                         {(revisionsData?.revisions.length ?? 0) > 0 && <RevisionRows rows={revisionsData!.revisions} label="Quotation" />}
                     </div>
                 )}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-surface-500">Customer</h3>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <Field label="Customer first name" error={errors.customer_first_name?.[0]}>
                         <FieldInput value={firstName} onChange={(e) => setFirstName(e.target.value)} />
                     </Field>
@@ -589,46 +651,32 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                     <Field label="Phone" error={errors.customer_phone?.[0]}>
                         <FieldInput value={phone} onChange={(e) => setPhone(e.target.value)} />
                     </Field>
-                    <Field label="Valid until" error={errors.valid_until?.[0]}>
-                        <FieldInput type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
-                    </Field>
-                    <Field label="Currency" error={errors.currency_code?.[0]}>
+                </div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-surface-500">Quotation</h3>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <Field label="Currency — every price below is in it" error={errors.currency_code?.[0]}>
                         <FieldSelect value={currency} disabled={repricing} onChange={(e) => changeCurrency(e.target.value)}>
                             {currencies.map((c) => (
                                 <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
                             ))}
                         </FieldSelect>
                     </Field>
+                    <Field label="Valid until" error={errors.valid_until?.[0]}>
+                        <FieldInput type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+                    </Field>
                     <Field label="Served by" error={errors.served_by?.[0]}>
                         <FieldInput value={servedBy} onChange={(e) => setServedBy(e.target.value)} placeholder="Staff member" />
                     </Field>
                 </div>
 
-                {/* Product picker */}
-                <div className="relative">
-                    <input
-                        className="input"
-                        placeholder="Search a product to add…"
-                        value={productQuery}
-                        onChange={(e) => searchProducts(e.target.value)}
-                    />
-                    {(searching || hits.length > 0) && (
-                        <div className="absolute z-10 mt-1 w-full rounded-md border bg-surface-0 shadow-lg">
-                            {searching && <div className="px-3 py-2 text-sm text-surface-500">Searching…</div>}
-                            {hits.map((h) => (
-                                <button
-                                    key={h.id}
-                                    type="button"
-                                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/40"
-                                    onClick={() => addProduct(h)}
-                                >
-                                    <span>{h.name}</span>
-                                    <span className="text-xs text-surface-500">{h.sku}</span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                {/* Product picker: tick several, add them in one go (as on stock adjustments). */}
+                <ProductMultiPicker
+                    currency={currency}
+                    onTheQuote={new Set(rows.map((r) => r.product_id).filter((x): x is number => x !== null))}
+                    search={fetchProducts}
+                    disabled={repricing}
+                    onAdd={addProducts}
+                />
 
                 {/* Line items */}
                 <div className="card overflow-hidden">
@@ -636,18 +684,20 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                     <table className="table">
                         <thead>
                             <tr>
+                                <th className="w-8 text-right">#</th>
                                 <th>Description</th>
-                                <th className="w-24 text-right">Qty</th>
-                                <th className="w-36 text-right">Unit Price</th>
-                                <th className="w-36 text-right">Line Total</th>
+                                <th className="w-28 text-right">Qty</th>
+                                <th className="w-40 text-right">Unit price ({currency})</th>
+                                <th className="w-40 text-right">Line total ({currency})</th>
                                 <th className="w-10"></th>
                             </tr>
                         </thead>
                         <tbody>
                             {rows.length === 0 ? (
-                                <tr><td colSpan={5} className="py-6 text-center text-sm text-surface-500">Add a line, then search a product or type a description.</td></tr>
+                                <tr><td colSpan={6} className="py-8 text-center text-sm text-surface-500">Tick products above to add them, or “+ Add line” to type one.</td></tr>
                             ) : rows.map((r, idx) => (
                                 <tr key={r.key}>
+                                    <td className="text-right text-xs tabular-nums text-surface-400">{idx + 1}</td>
                                     <td className="relative">
                                         <input
                                             className="input"
@@ -675,15 +725,23 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                                         )}
                                     </td>
                                     <td>
-                                        <input className="input text-right" type="number" min="1" value={r.quantity}
+                                        <input className="input text-right px-2 tabular-nums" type="number" min="1" value={r.quantity} aria-label={`Quantity of ${r.product_name || "this line"}`}
                                             onChange={(e) => updateRow(r.key, "quantity", e.target.value)} />
                                     </td>
                                     <td>
+                                        {pricingKeys.includes(r.key) ? (
+                                            <div className="flex h-10 items-center justify-end gap-2 text-xs text-surface-500"><Spinner size="xs" /> {currency} price…</div>
+                                        ) : (
                                         <input
-                                            className={`input text-right${keptKeys.includes(r.key) ? " border-warning bg-warning-light/40" : ""}`}
+                                            className={`input text-right tabular-nums${keptKeys.includes(r.key) ? " border-warning bg-warning-light/40" : ""}`}
+                                            aria-label={`Unit price of ${r.product_name || "this line"} in ${currency}`}
                                             type="number" min="0" step="0.01" value={r.unit_price}
                                             title={keptKeys.includes(r.key) ? `No ${currency} price on the hub for this line — check the figure before sending.` : undefined}
                                             onChange={(e) => { updateRow(r.key, "unit_price", e.target.value); setKeptKeys((k) => k.filter((x) => x !== r.key)); }} />
+                                        )}
+                                        {keptKeys.includes(r.key) && !pricingKeys.includes(r.key) && (
+                                            <p className="mt-1 text-2xs text-warning-dark text-left">No {currency} price on the hub — type it.</p>
+                                        )}
                                         {priceError(r, idx) && (
                                             <p className="mt-1 text-2xs text-danger text-left">{priceError(r, idx)}</p>
                                         )}
@@ -706,7 +764,7 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                             </div>
                         </div>
                         <div className="flex items-center justify-end gap-3 text-sm">
-                            <label className="text-surface-500">Shipping</label>
+                            <label className="text-surface-500">Shipping ({currency})</label>
                             <input
                                 className="input w-32 text-right"
                                 type="number" min="0" step="0.01"
@@ -716,7 +774,7 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                         </div>
                         <div className="flex items-center justify-end gap-2 border-t pt-2 text-base font-bold">
                             <span>Total (excl. tax)</span>
-                            <span className="tabular-nums">{money(subtotal + whole(num(shipping)), currency)}</span>
+                            <span className="tabular-nums">{money(total, currency)}</span>
                         </div>
                     </div>
                 </div>
@@ -731,5 +789,104 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                 </p>
             </div>
         </Modal>
+    );
+}
+
+// ── Product picker: tick several, add them in one go ───────────────────────
+// Same idea as the stock-adjustment picker (owner, 2026-11-14): search, tick
+// the products, "Add N". Prices are not shown here — each line is priced in
+// the quotation's currency by the server when it is added.
+function ProductMultiPicker({ currency, onTheQuote, search, disabled, onAdd }: {
+    currency: string;
+    onTheQuote: Set<number>;
+    search: (q: string) => Promise<ProductHit[]>;
+    disabled?: boolean;
+    onAdd: (picked: ProductHit[]) => void;
+}) {
+    const [query, setQuery] = useState("");
+    const [open, setOpen] = useState(false);
+    const [hits, setHits] = useState<ProductHit[]>([]);
+    const [busy, setBusy] = useState(false);
+    const [ticked, setTicked] = useState<Map<number, ProductHit>>(new Map());
+    const seq = useRef(0);
+
+    useEffect(() => {
+        const q = query.trim();
+        if (q.length < 2) { setHits([]); return; }
+        const mine = ++seq.current;
+        setBusy(true);
+        const t = window.setTimeout(async () => {
+            try { const r = await search(q); if (mine === seq.current) setHits(r); }
+            catch { if (mine === seq.current) setHits([]); }
+            finally { if (mine === seq.current) setBusy(false); }
+        }, 250);
+        return () => window.clearTimeout(t);
+    }, [query, search]);
+
+    const toggle = (h: ProductHit) => setTicked((m) => {
+        const next = new Map(m);
+        if (next.has(h.id)) next.delete(h.id); else next.set(h.id, h);
+        return next;
+    });
+    const add = () => {
+        if (!ticked.size) return;
+        onAdd([...ticked.values()]);
+        setTicked(new Map()); setQuery(""); setHits([]); setOpen(false);
+    };
+
+    return (
+        <div className="relative">
+            <div className="flex gap-2">
+                <input
+                    className="input flex-1"
+                    placeholder={`Search products to add (priced in ${currency})…`}
+                    value={query}
+                    disabled={disabled}
+                    onFocus={() => setOpen(true)}
+                    onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+                    onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+                    aria-label="Search products to add"
+                />
+                <button type="button" className="btn-primary shrink-0" disabled={!ticked.size || disabled} onClick={add}>
+                    Add{ticked.size ? ` ${ticked.size}` : ""}
+                </button>
+            </div>
+            {open && (query.trim().length >= 2 || ticked.size > 0) && (
+                <>
+                    <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+                    <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-surface-200 bg-white shadow-2xl">
+                        <div className="max-h-72 overflow-y-auto">
+                            {busy && <div className="px-3 py-2 text-sm text-surface-500">Searching…</div>}
+                            {!busy && hits.length === 0 && query.trim().length >= 2 && (
+                                <div className="px-3 py-6 text-center text-sm text-surface-400">No products match “{query.trim()}”. Use “+ Add line” to type one.</div>
+                            )}
+                            {hits.map((h, i) => {
+                                const already = onTheQuote.has(h.id);
+                                const on = ticked.has(h.id);
+                                return (
+                                    <label
+                                        key={h.id}
+                                        className={`flex cursor-pointer items-center gap-3 border-b border-surface-50 px-3 py-2 last:border-0 ${on ? "bg-brand-50" : i % 2 ? "bg-surface-50/60" : "bg-white"} hover:bg-brand-50/70`}
+                                    >
+                                        <input type="checkbox" className="h-4 w-4 shrink-0 accent-brand-500" checked={on} onChange={() => toggle(h)} aria-label={`Add ${h.name}`} />
+                                        <span className={`flex-1 min-w-0 truncate text-sm ${on ? "font-semibold text-brand-800" : "font-medium text-surface-800"}`}>{h.name}</span>
+                                        {already && <span className="shrink-0 rounded bg-surface-100 px-1.5 py-0.5 text-2xs text-surface-500">on the quote</span>}
+                                        <span className="shrink-0 font-mono text-[11px] text-surface-400">{h.sku}</span>
+                                    </label>
+                                );
+                            })}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2">
+                            <span className="text-[11px] text-surface-400">
+                                {ticked.size ? `${ticked.size} ticked: ${[...ticked.values()].map((h) => h.name).slice(0, 3).join(", ")}${ticked.size > 3 ? "…" : ""}` : "Tick products, then Add"}
+                            </span>
+                            <button type="button" className="btn-primary btn-sm" disabled={!ticked.size} onClick={add}>
+                                Add {ticked.size || ""} to the quotation
+                            </button>
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
     );
 }
