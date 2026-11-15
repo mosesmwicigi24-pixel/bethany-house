@@ -266,6 +266,7 @@ export default function CurrenciesPage() {
                             <ActionsMenu
                                 trigger="gear"
                                 label={`${currency.code} settings`}
+                                title={currency.name && currency.name.trim().toUpperCase() !== currency.code ? `${currency.code} · ${currency.name}` : currency.code}
                                 items={[
                                     { label: `Edit ${currency.code}`, icon: "edit", run: () => openEdit(currency) },
                                     ...(canEdit && !currency.is_default ? [{ label: "Set as default", icon: "star" as const, run: () => defaultMutation.mutate(currency.id) }] : []),
