@@ -934,7 +934,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                     </p>
 
                     {/* Header row */}
-                    <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-surface-500 uppercase tracking-wider px-1">
+                    <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-semibold text-surface-500 uppercase tracking-wider px-1">
                         <div className="col-span-3">Product</div>
                         <div className="col-span-2">Variant</div>
                         <div className="col-span-2">Outlet</div>
@@ -944,15 +944,20 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                         <div className="col-span-1" />
                     </div>
 
-                    <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                        {rows.map((row) => {
+                    {/* Desktop: one grid row per entry. Phone (owner, 2026-11-14:
+                        "unreadable"): each entry is a card — product and
+                        variant full width, labelled fields, the ✕ in the corner. */}
+                    <div className="space-y-3 md:space-y-2 max-h-[60vh] md:max-h-96 overflow-y-auto pr-1">
+                        {rows.map((row, rowIdx) => {
                             return (
                                 <div
                                     key={row._key}
-                                    className="grid grid-cols-12 gap-2 items-start"
+                                    className="relative grid grid-cols-2 gap-2 rounded-xl border border-line bg-white p-3 pr-10 md:grid-cols-12 md:items-start md:rounded-none md:border-0 md:bg-transparent md:p-0 md:pr-0"
                                 >
+                                    <p className="col-span-2 text-2xs font-semibold uppercase tracking-wider text-surface-400 md:hidden">Entry {rowIdx + 1}</p>
                                     {/* Product */}
-                                    <div className="col-span-3">
+                                    <div className="col-span-2 md:col-span-3">
+                                        <span className="mb-1 block text-2xs font-semibold uppercase text-surface-500 md:hidden">Product</span>
                                         <ProductSelectField
                                             value={row.product_id}
                                             groups={productGroups}
@@ -964,6 +969,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
 
                                     {/* Variant */}
                                     <div className="col-span-2 relative">
+                                        <span className="mb-1 block text-2xs font-semibold uppercase text-surface-500 md:hidden">Variant</span>
                                         {isVariableProduct(row.product_id) ? (
                                           <>
                                             <select
@@ -1145,6 +1151,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
 
                                     {/* Outlet */}
                                     <div className="col-span-2">
+                                        <span className="mb-1 block text-2xs font-semibold uppercase text-surface-500 md:hidden">Outlet</span>
                                         <select
                                             className="input text-sm py-1.5"
                                             value={row.outlet_id}
@@ -1169,6 +1176,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
 
                                     {/* Qty */}
                                     <div className="col-span-1">
+                                        <span className="mb-1 block text-2xs font-semibold uppercase text-surface-500 md:hidden">Quantity</span>
                                         <input
                                             type="number"
                                             min="0"
@@ -1187,6 +1195,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
 
                                     {/* Reorder point */}
                                     <div className="col-span-1">
+                                        <span className="mb-1 block text-2xs font-semibold uppercase text-surface-500 md:hidden">Reorder at</span>
                                         <input
                                             type="number"
                                             min="0"
@@ -1206,6 +1215,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
 
                                     {/* Notes */}
                                     <div className="col-span-2">
+                                        <span className="mb-1 block text-2xs font-semibold uppercase text-surface-500 md:hidden">Notes</span>
                                         <input
                                             type="text"
                                             className="input text-sm py-1.5"
@@ -1222,14 +1232,14 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
                                     </div>
 
                                     {/* Remove */}
-                                    <div className="col-span-1 flex items-center justify-center">
+                                    <div className="absolute right-2 top-2 md:static md:col-span-1 md:flex md:items-center md:justify-center md:pt-2">
                                         {rows.length > 1 && (
                                             <button
                                                 onClick={() =>
                                                     removeRow(row._key)
                                                 }
-                                                className="text-surface-500 hover:text-danger transition-colors"
-                                                aria-label="Close"
+                                                className="rounded-lg p-1.5 text-surface-500 hover:bg-danger-light/40 hover:text-danger transition-colors"
+                                                aria-label={`Remove entry ${rowIdx + 1}`}
                                             >
                                                 <svg
                                                     className="w-4 h-4"
