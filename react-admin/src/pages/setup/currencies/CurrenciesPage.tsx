@@ -258,59 +258,64 @@ export default function CurrenciesPage() {
                     />
                 ) : (
                     <div className="divide-y divide-line">
-                        {currencies.map((currency) => (
+                        {currencies.map((currency) => {
+                            const customerKes = Number(currency.exchange_rate) > 0 ? 1 / Number(currency.exchange_rate) : null;
+                            const reportKes = currency.reporting_rate_to_kes != null ? Number(currency.reporting_rate_to_kes) : null;
+                            const fmt = (n: number) => n.toLocaleString("en-KE", { maximumFractionDigits: 2 });
+                            return (
                             <div
                                 key={currency.id}
-                                className="flex items-center gap-4 py-3.5 first:pt-0 last:pb-0"
+                                className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:gap-4"
                             >
-                                {/* Symbol pill */}
-                                <div className="w-12 h-12 rounded-xl bg-surface-100 flex items-center justify-center shrink-0">
-                                    <span className="font-display font-bold text-surface-700 text-sm">
-                                        {currency.symbol}
-                                    </span>
-                                </div>
-                                {/* Info */}
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="font-semibold text-sm text-surface-900">
-                                            {currency.code}
+                                <div className="flex min-w-0 flex-1 items-start gap-3">
+                                    {/* Symbol pill */}
+                                    <div className="w-11 h-11 rounded-xl bg-surface-100 flex items-center justify-center shrink-0">
+                                        <span className="font-display font-bold text-surface-700 text-sm">
+                                            {currency.symbol}
                                         </span>
-                                        <span className="text-sm text-surface-500">
-                                            - {currency.name}
-                                        </span>
-                                        {currency.is_default && (
-                                            <DefaultBadge />
-                                        )}
-                                        <StatusBadge
-                                            active={currency.is_active}
-                                        />
                                     </div>
-                                    <p className="text-xs text-surface-400 mt-0.5">
-                                        Customers:{" "}
-                                        {Number(currency.exchange_rate) > 0
-                                            ? (1 / Number(currency.exchange_rate)).toFixed(2)
-                                            : "—"}{" "}
-                                        KES · Reports:{" "}
-                                        {currency.reporting_rate_to_kes != null
-                                            ? Number(currency.reporting_rate_to_kes).toFixed(2) + " KES"
-                                            : "not set"}{" "}
-                                        · {currency.decimal_places} decimals
-                                    </p>
-                                    {currency.reporting_rate_to_kes == null && !currency.is_base && (
-                                        <p className="text-xs text-amber-700 mt-0.5">
-                                            No reporting rate: sales in {currency.code} are left out of every report until one is set.
-                                        </p>
-                                    )}
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span className="font-semibold text-surface-900">{currency.code}</span>
+                                            <span className="text-sm text-surface-500 truncate">{currency.name}</span>
+                                            {currency.is_default && <DefaultBadge />}
+                                            <StatusBadge active={currency.is_active} />
+                                        </div>
+                                        {!currency.is_base && (
+                                            <dl className="mt-2 grid grid-cols-2 gap-2 sm:max-w-md">
+                                                <div className="rounded-lg bg-surface-50 px-2.5 py-1.5">
+                                                    <dt className="text-2xs font-medium uppercase tracking-wide text-surface-500">Customers pay</dt>
+                                                    <dd className="text-sm font-semibold tabular-nums text-surface-900">
+                                                        {customerKes ? `KES ${fmt(customerKes)}` : "—"}
+                                                    </dd>
+                                                    <dd className="text-2xs text-surface-500">
+                                                        for 1 {currency.code} · {currency.priced_from ? `from the ${currency.priced_from} price` : "from KES prices"}
+                                                    </dd>
+                                                </div>
+                                                <div className={`rounded-lg px-2.5 py-1.5 ${reportKes == null ? "bg-amber-50" : "bg-surface-50"}`}>
+                                                    <dt className="text-2xs font-medium uppercase tracking-wide text-surface-500">Books value</dt>
+                                                    <dd className="text-sm font-semibold tabular-nums text-surface-900">
+                                                        {reportKes != null ? `KES ${fmt(reportKes)}` : <span className="text-amber-700">not set</span>}
+                                                    </dd>
+                                                    <dd className="text-2xs text-surface-500">for 1 {currency.code} · reports and P&amp;L</dd>
+                                                </div>
+                                            </dl>
+                                        )}
+                                        {currency.is_base && (
+                                            <p className="mt-1 text-xs text-surface-500">The home currency: every other rate is in shillings.</p>
+                                        )}
+                                        {reportKes == null && !currency.is_base && (
+                                            <p className="text-xs text-amber-700 mt-1.5">
+                                                No reporting rate: sales in {currency.code} are left out of every report until one is set.
+                                            </p>
+                                        )}
+                                    </div>
                                 </div>
-                                {/* Actions */}
-                                <div className="flex items-center gap-1.5 shrink-0">
+                                {/* Actions: their own row on a phone, at the right on a wider screen */}
+                                <div className="flex flex-wrap items-center gap-1.5 pl-14 sm:shrink-0 sm:pl-0">
                                     {canEdit && !currency.is_default && (
                                         <button
-                                            onClick={() =>
-                                                defaultMutation.mutate(
-                                                    currency.id,
-                                                )
-                                            }
+                                            onClick={() => defaultMutation.mutate(currency.id)}
                                             className="btn-ghost btn-sm text-xs"
                                             disabled={defaultMutation.isPending}
                                         >
@@ -318,37 +323,32 @@ export default function CurrenciesPage() {
                                         </button>
                                     )}
                                     {canEdit && <button
-                                        onClick={() =>
-                                            toggleMutation.mutate(currency.id)
-                                        }
+                                        onClick={() => toggleMutation.mutate(currency.id)}
                                         className="btn-ghost btn-sm text-xs"
                                         disabled={toggleMutation.isPending}
                                     >
-                                        {currency.is_active
-                                            ? "Disable"
-                                            : "Enable"}
+                                        {currency.is_active ? "Disable" : "Enable"}
                                     </button>}
                                     <button
                                         onClick={() => openEdit(currency)}
-                                        className="btn-ghost btn-sm"
-                                        aria-label="Edit"
+                                        className="btn-secondary btn-sm text-xs"
+                                        aria-label={`Edit ${currency.code}`}
                                     >
-                                        <EditIcon />
+                                        <EditIcon /> Edit
                                     </button>
                                     {canEdit && !currency.is_default && (
                                         <button
-                                            onClick={() =>
-                                                setDeleting(currency)
-                                            }
+                                            onClick={() => setDeleting(currency)}
                                             className="btn-ghost btn-sm text-danger hover:bg-danger-light"
-                                            aria-label="Delete"
+                                            aria-label={`Delete ${currency.code}`}
                                         >
                                             <TrashIcon />
                                         </button>
                                     )}
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </Section>
@@ -405,7 +405,8 @@ export default function CurrenciesPage() {
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <h4 className="text-2xs font-semibold uppercase tracking-wider text-surface-500">Currency</h4>
+                    <div className="grid grid-cols-2 gap-3">
                         <Field
                             label="Code"
                             error={errors.code?.message}
@@ -441,6 +442,13 @@ export default function CurrenciesPage() {
                                 placeholder="Kenyan Shilling"
                             />
                         </Field>
+                    </div>
+
+                    {/* The two rates, each in its own card with what it means in money. */}
+                    <h4 className="pt-1 text-2xs font-semibold uppercase tracking-wider text-surface-500">Rates</h4>
+                    <div className="space-y-3">
+                        <div className="rounded-xl border border-line bg-surface-50/60 p-3 space-y-3">
+                        <p className="text-sm font-semibold text-surface-900">What customers pay</p>
                         <Field
                             label={`Customer price: KES per 1 ${watch("code") || "unit"}`}
                             error={errors.kes_per_unit?.message}
@@ -483,6 +491,9 @@ export default function CurrenciesPage() {
                                 </Field>
                             );
                         })()}
+                        </div>
+                        <div className="rounded-xl border border-line bg-surface-50/60 p-3 space-y-3">
+                        <p className="text-sm font-semibold text-surface-900">What the books count</p>
                         <Field
                             label={`Reporting rate: KES per 1 ${watch("code") || "unit"}`}
                             error={errors.reporting_rate_to_kes?.message}
@@ -501,7 +512,7 @@ export default function CurrenciesPage() {
                             <Field
                                 label="Reporting rate takes effect"
                                 hint="Leave empty for 'when approved'. Never earlier than now."
-                                className="col-span-2"
+                                className="sm:col-span-2"
                             >
                                 <FieldInput
                                     className="input"
@@ -511,6 +522,11 @@ export default function CurrenciesPage() {
                                 />
                             </Field>
                         )}
+                        </div>
+                    </div>
+
+                    <h4 className="pt-1 text-2xs font-semibold uppercase tracking-wider text-surface-500">Display</h4>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <Field label="Decimal Places">
                             <FieldInput
                                 className="input"
@@ -534,7 +550,7 @@ export default function CurrenciesPage() {
                                 placeholder="."
                             />
                         </Field>
-                        <Field label="Symbol Position" className="col-span-2">
+                        <Field label="Symbol Position" className="sm:col-span-3">
                             <FieldSelect
                                 className="input"
                                 {...register("symbol_position")}
