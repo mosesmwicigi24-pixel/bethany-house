@@ -252,6 +252,12 @@ Route::prefix('v1')->group(function () {
         Route::get('/storefront/shipping/estimate', [\App\Http\Controllers\Api\StorefrontLeadController::class, 'shippingEstimate'])
             ->middleware('throttle:60,1');
 
+        // Buying patterns for the storefront — "frequently bought together"
+        // and best sellers, mined from recognised sales (HUB_CONTRACT §9).
+        // Published-product slugs only: no customer, count or amount.
+        Route::get('/storefront/insights', [\App\Http\Controllers\Api\StorefrontInsightsController::class, 'index'])
+            ->middleware('throttle:60,1');
+
         // Interest ledger — the cross-channel cart (HUB_CONTRACT §7). The
         // storefront upserts every Neema cart here keyed on its BH-XXXX token
         // (the one the WhatsApp handoff message carries); neema-ai reads the

@@ -3286,6 +3286,12 @@ class MetricEngine
      * endpoint hits this on every cart change and must not re-mine baskets
      * each keystroke.
      */
+    public const ATTACH_MIN_ANCHOR_BASKETS = 5;
+    public const ATTACH_MIN_PAIR_BASKETS   = 3;
+    public const ATTACH_MIN_RATE           = 0.10;
+    public const ATTACH_MIN_LIFT           = 1.2;
+    public const ATTACH_MAX_COMPANIONS     = 5;
+
     public function attachRates(int $days = 180): array
     {
         $scopeKey = $this->outletIds !== null
@@ -3303,25 +3309,7 @@ class MetricEngine
     private function computeAttachRates(int $days): array
     {
         $since = CarbonImmutable::now(self::TZ)->subDays($days)->startOfDay();
-        $outletSql = $this->outletIds
-            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
-            : '';
-
-        // One CTE both queries share: a basket line = (order, product) with
-        // that basket's total spend on the product.
-        $linesCte = "
-            lines AS (
-                SELECT o.id AS order_id, oi.product_id,
-                       SUM((oi.total_price) * fx_rate_to_kes(o.reporting_rate_to_kes, o.currency_code)) AS line_value
-                FROM orders o
-                JOIN order_items oi ON oi.order_id = o.id
-                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
-                  AND fx_rate_to_kes(o.reporting_rate_to_kes, o.currency_code) IS NOT NULL
-                  AND oi.product_id IS NOT NULL
-                  AND o.created_at >= ?
-                  {$outletSql}
-                GROUP BY o.id, oi.product_id
-            )";
+        $linesCte = $this->basketLinesCte();
 
         $shape = DB::selectOne("
             WITH {$linesCte}
@@ -3345,51 +3333,13 @@ class MetricEngine
             return ['summary' => $summary, 'anchors' => []];
         }
 
-        // Directional pairs: every (anchor, companion) that co-occurred in
-        // >= 3 baskets, with the anchor seen in >= 5 baskets. attach_rate and
-        // lift are computed in SQL; the keep-thresholds are applied there too
-        // so PHP only shapes what survives.
-        $pairs = DB::select("
-            WITH {$linesCte},
-            prod AS (
-                SELECT product_id, COUNT(*) AS baskets FROM lines GROUP BY product_id
-            ),
-            pairs AS (
-                SELECT a.product_id AS anchor_id, b.product_id AS companion_id,
-                       COUNT(*) AS together, AVG(b.line_value) AS avg_value
-                FROM lines a
-                JOIN lines b ON b.order_id = a.order_id AND b.product_id <> a.product_id
-                GROUP BY a.product_id, b.product_id
-                HAVING COUNT(*) >= 3
-            )
-            SELECT p.anchor_id, p.companion_id, p.together,
-                   pa.baskets AS anchor_baskets,
-                   ROUND(p.avg_value::numeric, 2) AS avg_value,
-                   ROUND((p.together::numeric / pa.baskets), 4) AS attach_rate,
-                   ROUND((p.together::numeric / pa.baskets)
-                       / (pc.baskets::numeric / ?), 2) AS lift,
-                   COALESCE(pta.name, pra.slug, pra.sku) AS anchor_name,
-                   COALESCE(ptc.name, prc.slug, prc.sku) AS companion_name,
-                   prc.sku AS companion_sku
-            FROM pairs p
-            JOIN prod pa ON pa.product_id = p.anchor_id AND pa.baskets >= 5
-            JOIN prod pc ON pc.product_id = p.companion_id
-            JOIN products pra ON pra.id = p.anchor_id
-            JOIN products prc ON prc.id = p.companion_id
-            LEFT JOIN product_translations pta
-                   ON pta.product_id = p.anchor_id AND pta.language_code = 'en'
-            LEFT JOIN product_translations ptc
-                   ON ptc.product_id = p.companion_id AND ptc.language_code = 'en'
-            WHERE (p.together::numeric / pa.baskets) >= 0.10
-              AND (p.together::numeric / pa.baskets) / (pc.baskets::numeric / ?) >= 1.2
-            ORDER BY p.anchor_id, (p.together::numeric / pa.baskets) DESC
-        ", [$since, $totalBaskets, $totalBaskets]);
+        $pairs = $this->mineBasketPairs($since, $totalBaskets);
 
         $anchors = collect($pairs)
             ->groupBy('anchor_id')
             ->map(function ($rows) {
                 $first = $rows->first();
-                $companions = $rows->take(5)->map(function ($r) {
+                $companions = $rows->take(self::ATTACH_MAX_COMPANIONS)->map(function ($r) {
                     $attach = (float) $r->attach_rate;
                     $avg    = (float) $r->avg_value;
                     $missed = (int) $r->anchor_baskets - (int) $r->together;
@@ -3431,6 +3381,190 @@ class MetricEngine
         }
 
         return ['summary' => $summary, 'anchors' => $anchors->all()];
+    }
+
+    /**
+     * The CTE every basket query shares: a basket line = (order, product)
+     * with that basket's total spend on the product, over sales truth in the
+     * engine's outlet scope. Takes one binding: the window start.
+     */
+    private function basketLinesCte(): string
+    {
+        $outletSql = $this->outletIds
+            ? 'AND o.outlet_id IN (' . implode(',', array_map('intval', $this->outletIds)) . ')'
+            : '';
+
+        return "
+            lines AS (
+                SELECT o.id AS order_id, oi.product_id,
+                       SUM((oi.total_price) * fx_rate_to_kes(o.reporting_rate_to_kes, o.currency_code)) AS line_value
+                FROM orders o
+                JOIN order_items oi ON oi.order_id = o.id
+                WHERE o.status NOT IN ('cancelled','voided','refunded') AND (o.status IN ('confirmed','processing','shipped','delivered','completed') OR o.payment_status IN ('paid','partial','deposit'))
+                  AND fx_rate_to_kes(o.reporting_rate_to_kes, o.currency_code) IS NOT NULL
+                  AND oi.product_id IS NOT NULL
+                  AND o.created_at >= ?
+                  {$outletSql}
+                GROUP BY o.id, oi.product_id
+            )";
+    }
+
+    /**
+     * Directional pairs: every (anchor, companion) that co-occurred in
+     * >= ATTACH_MIN_PAIR_BASKETS baskets, with the anchor seen in
+     * >= ATTACH_MIN_ANCHOR_BASKETS. attach_rate and lift are computed in SQL;
+     * the keep-thresholds are applied there too so PHP only shapes what
+     * survives. Rows come back grouped by anchor, strongest attach first.
+     *
+     * The ONE mining pass: the report, the till's suggestions and the
+     * storefront feed all read these rows, so "bought together" means the
+     * same thing wherever it is shown.
+     */
+    private function mineBasketPairs(CarbonImmutable $since, int $totalBaskets): array
+    {
+        $linesCte  = $this->basketLinesCte();
+        $minPair   = self::ATTACH_MIN_PAIR_BASKETS;
+        $minAnchor = self::ATTACH_MIN_ANCHOR_BASKETS;
+        $minRate   = self::ATTACH_MIN_RATE;
+        $minLift   = self::ATTACH_MIN_LIFT;
+
+        return DB::select("
+            WITH {$linesCte},
+            prod AS (
+                SELECT product_id, COUNT(*) AS baskets FROM lines GROUP BY product_id
+            ),
+            pairs AS (
+                SELECT a.product_id AS anchor_id, b.product_id AS companion_id,
+                       COUNT(*) AS together, AVG(b.line_value) AS avg_value
+                FROM lines a
+                JOIN lines b ON b.order_id = a.order_id AND b.product_id <> a.product_id
+                GROUP BY a.product_id, b.product_id
+                HAVING COUNT(*) >= {$minPair}
+            )
+            SELECT p.anchor_id, p.companion_id, p.together,
+                   pa.baskets AS anchor_baskets,
+                   ROUND(p.avg_value::numeric, 2) AS avg_value,
+                   ROUND((p.together::numeric / pa.baskets), 4) AS attach_rate,
+                   ROUND((p.together::numeric / pa.baskets)
+                       / (pc.baskets::numeric / ?), 2) AS lift,
+                   COALESCE(pta.name, pra.slug, pra.sku) AS anchor_name,
+                   COALESCE(ptc.name, prc.slug, prc.sku) AS companion_name,
+                   prc.sku AS companion_sku
+            FROM pairs p
+            JOIN prod pa ON pa.product_id = p.anchor_id AND pa.baskets >= {$minAnchor}
+            JOIN prod pc ON pc.product_id = p.companion_id
+            JOIN products pra ON pra.id = p.anchor_id
+            JOIN products prc ON prc.id = p.companion_id
+            LEFT JOIN product_translations pta
+                   ON pta.product_id = p.anchor_id AND pta.language_code = 'en'
+            LEFT JOIN product_translations ptc
+                   ON ptc.product_id = p.companion_id AND ptc.language_code = 'en'
+            WHERE (p.together::numeric / pa.baskets) >= {$minRate}
+              AND (p.together::numeric / pa.baskets) / (pc.baskets::numeric / ?) >= {$minLift}
+            ORDER BY p.anchor_id, (p.together::numeric / pa.baskets) DESC
+        ", [$since, $totalBaskets, $totalBaskets]);
+    }
+
+    /** How many best-seller slugs the storefront feed carries at most. */
+    public const STOREFRONT_POPULAR_LIMIT = 48;
+
+    /**
+     * The storefront's read of the same basket mining: which PUBLISHED
+     * products are bought together, and which sell in the most baskets.
+     *
+     * Deliberately a different shape from attachRates(), on the same rows:
+     *
+     *  - Slugs only. No names, counts, rates or money leave this method —
+     *    the storefront is public, and all it needs is "show B next to A".
+     *    Order within each list carries the ranking.
+     *  - Every anchor that mineBasketPairs() kept, not the report's top 30
+     *    by missed revenue: a shopper can land on any product page.
+     *  - Published products only, on BOTH sides (Product::published(), the
+     *    rule the public catalogue itself uses), so the feed never names a
+     *    product the storefront cannot show.
+     *  - popular = products ranked by how many baskets they appeared in,
+     *    with the anchor floor (ATTACH_MIN_ANCHOR_BASKETS) as minimum
+     *    support — below that, "best seller" would be noise.
+     *
+     * Sales truth only, like everything here: an unconverted quotation is
+     * pipeline, not a purchase, and never counts. Cached 10 minutes per
+     * (outlet scope, days) in the attachRates() idiom.
+     *
+     * @return array{bought_together: array<string, list<string>>, popular: list<string>, window_days: int, generated_at: string}
+     */
+    public function storefrontAffinity(int $days = 180): array
+    {
+        $scopeKey = $this->outletIds !== null
+            ? implode('-', collect($this->outletIds)->map(fn ($id) => (int) $id)->sort()->values()->all())
+            : 'all';
+
+        return \Illuminate\Support\Facades\Cache::remember(
+            "metrics:storefront_affinity:{$scopeKey}:{$days}",
+            600,
+            fn () => $this->computeStorefrontAffinity($days),
+        );
+    }
+
+    /** The uncached pass behind storefrontAffinity(). */
+    private function computeStorefrontAffinity(int $days): array
+    {
+        $since = CarbonImmutable::now(self::TZ)->subDays($days)->startOfDay();
+        $linesCte = $this->basketLinesCte();
+
+        // Baskets per product, most-bought first (ties: older product first,
+        // so the order is stable between refreshes).
+        $ranked = DB::select("
+            WITH {$linesCte}
+            SELECT product_id, COUNT(*) AS baskets
+            FROM lines
+            GROUP BY product_id
+            HAVING COUNT(*) >= ?
+            ORDER BY COUNT(*) DESC, product_id
+        ", [$since, self::ATTACH_MIN_ANCHOR_BASKETS]);
+
+        $totalBaskets = (int) DB::selectOne(
+            "WITH {$linesCte} SELECT COUNT(DISTINCT order_id) AS n FROM lines",
+            [$since],
+        )->n;
+
+        $pairs = $totalBaskets > 0 ? $this->mineBasketPairs($since, $totalBaskets) : [];
+
+        $ids = collect($ranked)->pluck('product_id')
+            ->merge(collect($pairs)->pluck('anchor_id'))
+            ->merge(collect($pairs)->pluck('companion_id'))
+            ->unique()->values();
+
+        /** @var \Illuminate\Support\Collection<int, string> $slugs published id → slug */
+        $slugs = $ids->isEmpty()
+            ? collect()
+            : \App\Models\Product::published()->whereIn('id', $ids)->pluck('slug', 'id');
+
+        // $pairs arrives grouped by anchor, strongest attach first.
+        $together = [];
+        foreach ($pairs as $r) {
+            $anchor    = $slugs[(int) $r->anchor_id] ?? null;
+            $companion = $slugs[(int) $r->companion_id] ?? null;
+            if ($anchor === null || $companion === null) {
+                continue;
+            }
+            if (count($together[$anchor] ?? []) < self::ATTACH_MAX_COMPANIONS) {
+                $together[$anchor][] = $companion;
+            }
+        }
+
+        $popular = collect($ranked)
+            ->map(fn ($r) => $slugs[(int) $r->product_id] ?? null)
+            ->filter()
+            ->take(self::STOREFRONT_POPULAR_LIMIT)
+            ->values()
+            ->all();
+
+        return [
+            'bought_together' => $together,
+            'popular'         => $popular,
+            'window_days'     => $days,
+            'generated_at'    => CarbonImmutable::now()->toIso8601String(),
+        ];
     }
 
     // ── Stock-out revenue loss ────────────────────────────────────────────────

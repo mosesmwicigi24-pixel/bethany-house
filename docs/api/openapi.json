@@ -54736,6 +54736,35 @@
                 }
             }
         },
+        "/api/v1/storefront/insights": {
+            "get": {
+                "operationId": "get_v1_storefront_insights",
+                "summary": "Index (StorefrontInsights)",
+                "tags": [
+                    "storefront"
+                ],
+                "x-throttle": [
+                    "public-api",
+                    "60,1"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/storefront/interest-carts": {
             "get": {
                 "operationId": "get_v1_storefront_interest_carts",

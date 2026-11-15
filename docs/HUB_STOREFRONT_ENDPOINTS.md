@@ -38,3 +38,37 @@ the one line in `lib/hub.ts`.
 
 Full request/response spec: the storefront repo's `docs/HUB_CONTRACT.md`.
 Pinned by `tests/Feature/StorefrontLeadShippingTest.php` (the §4 acceptance checklist).
+
+## Buying patterns (`GET /storefront/insights`) — HUB_CONTRACT §9
+
+| Endpoint | Method | Handler | Auth |
+|---|---|---|---|
+| `/api/v1/storefront/insights` | GET | `StorefrontInsightsController::index` | public, `throttle:60,1` |
+
+What the storefront may say about real purchases — "frequently bought
+together" and best sellers — without a second definition of either:
+
+```json
+{
+  "data": {
+    "bought_together": { "altar-wine": ["communion-wafers", "communion-cups"] },
+    "popular": ["study-bible", "altar-wine"]
+  },
+  "meta": { "window_days": 180, "generated_at": "2026-11-15T21:17:29+03:00" }
+}
+```
+
+- Mined by `MetricEngine::storefrontAffinity()` from the **same pass** as the
+  till's suggestions and the attach-rate report (`mineBasketPairs()`): recognised
+  sales on every channel (till, web, chat, quotes that became orders), trailing
+  180 days, anchor in ≥ 5 baskets, pair in ≥ 3, lift ≥ 1.2, attach ≥ 10%, top 5
+  companions per product, strongest first.
+- `popular` — products by number of baskets, most first, minimum 5 baskets, at most 48.
+- **Slugs of published products only.** No ids, names, counts, rates or amounts;
+  an unpublished product is never named, on either side of a pair.
+- Unconverted quotations, cancelled, voided and refunded orders never count.
+- Advisory: an empty feed is a normal answer (`bought_together` then arrives as
+  `[]`), and a mining failure is reported and degrades to the empty feed —
+  never a 5xx on a product page. Cached 10 minutes.
+
+Pinned by `tests/Feature/StorefrontInsightsTest.php`.
