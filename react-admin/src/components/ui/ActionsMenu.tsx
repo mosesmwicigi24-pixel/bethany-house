@@ -15,7 +15,9 @@ export interface ActionItem {
  * Positioned fixed so a table's horizontal scroll never clips it; arrow keys
  * move between items and Escape closes it.
  */
-export function ActionsMenu({ items, label }: { items: ActionItem[]; label: string }) {
+/** `trigger="gear"` shows a settings gear instead of ⋯ (owner, 2026-11-15: a
+ *  setup row's settings behind one gear on a phone). */
+export function ActionsMenu({ items, label, trigger = "dots" }: { items: ActionItem[]; label: string; trigger?: "dots" | "gear" }) {
     const [at, setAt] = useState<{ top: number; right: number } | null>(null);
     const btn = useRef<HTMLButtonElement>(null);
     const menu = useRef<HTMLDivElement>(null);
@@ -46,7 +48,7 @@ export function ActionsMenu({ items, label }: { items: ActionItem[]; label: stri
         <>
             <button ref={btn} type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={!!at} aria-label={label}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-surface-500 hover:bg-surface-100 hover:text-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
-                <Icon name="dots" className="w-5 h-5" strokeWidth={2.4} />
+                <Icon name={trigger === "gear" ? "gear" : "dots"} className="w-5 h-5" strokeWidth={trigger === "gear" ? 1.8 : 2.4} />
             </button>
             {at && (
                 <div ref={menu} role="menu" style={{ position: "fixed", top: at.top, right: at.right }}

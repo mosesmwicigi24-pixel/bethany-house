@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ActionsMenu } from "@/components/ui/ActionsMenu";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -265,7 +266,7 @@ export default function CurrenciesPage() {
                             return (
                             <div
                                 key={currency.id}
-                                className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:gap-4"
+                                className="relative flex flex-col gap-3 py-4 pr-10 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:gap-4 sm:pr-0"
                             >
                                 <div className="flex min-w-0 flex-1 items-start gap-3">
                                     {/* Symbol pill */}
@@ -311,8 +312,21 @@ export default function CurrenciesPage() {
                                         )}
                                     </div>
                                 </div>
-                                {/* Actions: their own row on a phone, at the right on a wider screen */}
-                                <div className="flex flex-wrap items-center gap-1.5 pl-14 sm:shrink-0 sm:pl-0">
+                                {/* Phone: every setting behind one gear (owner, 2026-11-15). */}
+                                <div className="absolute right-0 top-0 sm:hidden">
+                                    <ActionsMenu
+                                        trigger="gear"
+                                        label={`${currency.code} settings`}
+                                        items={[
+                                            { label: `Edit ${currency.code}`, icon: "edit", run: () => openEdit(currency) },
+                                            ...(canEdit && !currency.is_default ? [{ label: "Set as default", icon: "star" as const, run: () => defaultMutation.mutate(currency.id) }] : []),
+                                            ...(canEdit ? [{ label: currency.is_active ? "Disable" : "Enable", icon: "power" as const, run: () => toggleMutation.mutate(currency.id) }] : []),
+                                            ...(canEdit && !currency.is_default ? [{ label: "Remove", icon: "trash" as const, tone: "danger" as const, run: () => setDeleting(currency) }] : []),
+                                        ]}
+                                    />
+                                </div>
+                                {/* Wider screens: the buttons, at the right */}
+                                <div className="hidden items-center gap-1.5 sm:flex sm:shrink-0">
                                     {canEdit && !currency.is_default && (
                                         <button
                                             onClick={() => defaultMutation.mutate(currency.id)}
