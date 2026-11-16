@@ -8,7 +8,8 @@ namespace App\Support;
  * off"). Halves round up.
  *
  * Applied where a billed part is decided: a unit price, a line or cart
- * discount, a shipping fee, and VAT added on top of a price. VAT already
+ * discount, a shipping fee, and VAT added on top of a price. A unit price a
+ * person types on an order or quotation line keeps its cents (linePrice). VAT already
  * inside a whole price is the tax authority's figure and keeps its cents;
  * the customer pays the whole price either way.
  *
@@ -54,6 +55,18 @@ final class CustomerMoney
         $text     = number_format($amount, $decimals);
 
         return $currency !== null && $currency !== '' ? "{$currency} {$text}" : $text;
+    }
+
+    /**
+     * A unit price TYPED on an order or quotation line (owner, 2026-11-16:
+     * "Make the unit also receive decimal points"): kept to the cent, in any
+     * currency — USD 44.50 stays 44.50. The exception to whole(): only a price
+     * a person types on a line. Product list prices, conversions, shipping and
+     * discounts stay whole.
+     */
+    public static function linePrice(float $amount): float
+    {
+        return round($amount, 2);
     }
 
     /** whole(), passing NULL through. */

@@ -4645,7 +4645,7 @@ export default function OrderDetailPage() {
                                                             <input
                                                                 type="number"
                                                                 min={item.original_price ?? item.unit_price}
-                                                                step="1"
+                                                                step="0.01" inputMode="decimal"
                                                                 value={priceInput}
                                                                 onChange={e => setPriceInput(e.target.value)}
                                                                 onKeyDown={e => {

@@ -2061,7 +2061,7 @@ class OrderController extends Controller
             return response()->json(['message' => 'Order item not found on this order.'], 404);
         }
 
-        $newPrice      = \App\Support\CustomerMoney::whole((float) $validated['unit_price']);
+        $newPrice      = \App\Support\CustomerMoney::linePrice((float) $validated['unit_price']);
         $currentPrice  = (float)$item->unit_price;
 
         // Upward-only guard: price may not be reduced below the original catalogue price
