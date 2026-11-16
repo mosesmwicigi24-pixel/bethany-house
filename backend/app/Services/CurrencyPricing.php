@@ -266,11 +266,10 @@ class CurrencyPricing
             }
         }
 
-        // What the customer is billed is a whole unit, converted or typed:
-        // R3,230.77 → R3,231, a typed USD 149.99 → USD 150 (owner,
-        // 2026-10-30). The price list itself keeps what was typed.
-        $regular = CustomerMoney::whole($regular);
-        $sale    = CustomerMoney::wholeOrNull($sale);
+        // A price keeps its cents, converted or typed (owner, 2026-11-16:
+        // "no rounding off" — USD 0.10 stays 0.10, R3,230.77 stays).
+        $regular = CustomerMoney::price($regular);
+        $sale    = CustomerMoney::priceOrNull($sale);
 
         return [
             'currency_code'   => $currency,

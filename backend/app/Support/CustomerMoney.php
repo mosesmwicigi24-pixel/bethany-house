@@ -3,13 +3,15 @@
 namespace App\Support;
 
 /**
- * What a customer is billed is a whole unit — KES 1,000, R3,231, USD 150 —
- * never cents (owner, 2026-10-30: "All customer numbers should be rounded
- * off"). Halves round up.
+ * How customer money is rounded.
  *
- * Applied where a billed part is decided: a unit price, a line or cart
- * discount, a shipping fee, and VAT added on top of a price. A unit price a
- * person types on an order or quotation line keeps its cents (linePrice). VAT already
+ * PRICES keep two decimals (owner, 2026-11-16: "No rounding off — 400
+ * plastic cups × USD 0.10 should be USD 40"): a unit price, typed or from the
+ * price list, converted or not, is never rounded to a whole unit. See price().
+ *
+ * FEES stay whole (owner, 2026-10-30: "All customer numbers should be rounded
+ * off"; halves round up): a line or cart discount, a shipping fee, and VAT
+ * added on top of a price. See whole(). VAT already
  * inside a whole price is the tax authority's figure and keeps its cents;
  * the customer pays the whole price either way.
  *
@@ -26,20 +28,13 @@ final class CustomerMoney
     }
 
     /**
-     * A price as it is SAVED on a product (owner, 2026-10-30): any currency
-     * other than the shop's own is kept as a whole unit — USD 149.99 is saved
-     * as 150 — so the price list says exactly what the customer is billed.
-     * The shop's own currency is kept as typed.
+     * A price as it is SAVED on a product: to the cent, in every currency
+     * (owner, 2026-11-16 — USD 0.10 stays 0.10; until then other currencies
+     * were saved whole). `$currency` is kept for the callers' signature.
      */
     public static function listPrice(?float $amount, string $currency): ?float
     {
-        if ($amount === null) {
-            return null;
-        }
-
-        return strtoupper($currency) === \App\Services\CurrencyPricing::baseCode()
-            ? round($amount, 2)
-            : self::whole($amount);
+        return $amount === null ? null : self::price($amount);
     }
 
     /**
@@ -58,15 +53,19 @@ final class CustomerMoney
     }
 
     /**
-     * A unit price TYPED on an order or quotation line (owner, 2026-11-16:
-     * "Make the unit also receive decimal points"): kept to the cent, in any
-     * currency — USD 44.50 stays 44.50. The exception to whole(): only a price
-     * a person types on a line. Product list prices, conversions, shipping and
-     * discounts stay whole.
+     * A unit price, to the cent, in any currency (owner, 2026-11-16): USD
+     * 44.50 stays 44.50 and USD 0.10 stays 0.10 — typed or from the price
+     * list, on an order, a quotation, the till or a conversion.
      */
-    public static function linePrice(float $amount): float
+    public static function price(float $amount): float
     {
         return round($amount, 2);
+    }
+
+    /** price(), passing NULL through. */
+    public static function priceOrNull(?float $amount): ?float
+    {
+        return $amount === null ? null : self::price($amount);
     }
 
     /** whole(), passing NULL through. */

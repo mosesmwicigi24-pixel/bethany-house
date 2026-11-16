@@ -454,7 +454,7 @@ class QuotationController extends Controller
         // A typed unit price keeps its cents (owner, 2026-11-16); discounts
         // are whole (CustomerMoney). The discount limits were checked on the
         // figures as typed.
-        $items = array_map(fn ($i) => ['unit_price' => \App\Support\CustomerMoney::linePrice((float) $i['unit_price']),
+        $items = array_map(fn ($i) => ['unit_price' => \App\Support\CustomerMoney::price((float) $i['unit_price']),
             'discount_amount' => \App\Support\CustomerMoney::whole((float) ($i['discount_amount'] ?? 0))] + $i, $items);
 
         $lines = collect($items)->map(fn ($i) => [

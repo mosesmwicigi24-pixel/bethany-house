@@ -928,8 +928,8 @@ class PosController extends Controller
                     ], 422);
                 }
 
-                // The customer is billed a whole unit (CustomerMoney).
-                $item['unit_price'] = \App\Support\CustomerMoney::whole((float) $item['unit_price']);
+                // A price keeps its cents (CustomerMoney::price).
+                $item['unit_price'] = \App\Support\CustomerMoney::price((float) $item['unit_price']);
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float) ($item['discount_value'] ?? 0);
@@ -3298,8 +3298,8 @@ class PosController extends Controller
                     ], 422);
                 }
 
-                // The customer is billed a whole unit (CustomerMoney).
-                $item['unit_price'] = \App\Support\CustomerMoney::whole((float) $item['unit_price']);
+                // A price keeps its cents (CustomerMoney::price).
+                $item['unit_price'] = \App\Support\CustomerMoney::price((float) $item['unit_price']);
                 $lineBase     = $item['unit_price'] * $item['quantity'];
                 $discType     = $item['discount_type'] ?? 'none';
                 $discVal      = (float)($item['discount_value'] ?? 0);
@@ -3385,7 +3385,7 @@ class PosController extends Controller
                     }
                 }
 
-                $mtoUnitPrice = \App\Support\CustomerMoney::whole($mtoUnitPrice);
+                $mtoUnitPrice = \App\Support\CustomerMoney::price($mtoUnitPrice);
 
                 // A made-to-order line carries no discount column, so a lower
                 // price IS its discount: measured against the catalogue too.
@@ -3758,7 +3758,7 @@ class PosController extends Controller
 
                 // Agent-taken order: the hub's own price for this currency, or
                 // nothing. Refusing beats charging a KES number as USD.
-                $unitPrice       = \App\Support\CustomerMoney::whole((float) $item['unit_price']);
+                $unitPrice       = \App\Support\CustomerMoney::price((float) $item['unit_price']);
                 $catalogueSaving = 0.0;   // a till operator types the price they mean
                 $promotionSaving = 0.0;   // what a running promotion takes off this line
                 if ($hubPrices) {
@@ -3895,7 +3895,7 @@ class PosController extends Controller
                     }
                 }
 
-                $mtoUnitPrice = \App\Support\CustomerMoney::whole($mtoUnitPrice);
+                $mtoUnitPrice = \App\Support\CustomerMoney::price($mtoUnitPrice);
 
                 // A made-to-order line carries no discount column, so a lower
                 // price IS its discount: measured against the catalogue too.

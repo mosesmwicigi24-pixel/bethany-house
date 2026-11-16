@@ -18,7 +18,7 @@ import { discountCapMessage, minUnitPrice, useDiscountCap } from "@/lib/discount
 import type { ApiError } from "@/types";
 import { salesRevisionApi } from "@/api/salesRevisions";
 import { RevisionRows } from "@/components/documents/SalesRevisions";
-import { whole } from "@/lib/customerMoney";
+import { price, whole } from "@/lib/customerMoney";
 
 interface CurrencyOption { code: string; name: string; symbol: string }
 
@@ -533,8 +533,8 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
         setRows((r) => r.filter((row) => row.key !== key));
     }
 
-    // Quoted in whole units (lib/customerMoney), as the server stores them.
-    const subtotal = rows.reduce((sum, r) => sum + num(r.quantity) * whole(num(r.unit_price)), 0);
+    // Prices keep their cents; shipping is whole (lib/customerMoney), as the server stores them.
+    const subtotal = rows.reduce((sum, r) => sum + num(r.quantity) * price(num(r.unit_price)), 0);
 
     // The person's discount limit: a catalogue line may be quoted at most that far under its
     // catalogue price (no ceiling for the super_admin). The server enforces it;
@@ -754,7 +754,7 @@ function QuotationBuilder({ editing, revise, onClose, onSaved }: { editing: Quot
                             </div>
                             <div className="col-span-2 text-right md:col-span-1">
                                 <span className="mb-1 block text-2xs font-semibold uppercase tracking-wide text-surface-500 md:hidden">Line total</span>
-                                <div className="flex h-10 items-center justify-end text-sm font-semibold tabular-nums text-surface-900">{money(num(r.quantity) * whole(num(r.unit_price)), currency)}</div>
+                                <div className="flex h-10 items-center justify-end text-sm font-semibold tabular-nums text-surface-900">{money(num(r.quantity) * price(num(r.unit_price)), currency)}</div>
                             </div>
                         </div>
                     ))}

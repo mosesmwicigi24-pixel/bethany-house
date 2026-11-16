@@ -60,8 +60,8 @@ final class SellingPriceChangeHandler extends ProposalHandler
     public function normalise(array $new, int $subjectId): array
     {
         $out = array_intersect_key($new, $this->fields());
-        // A proposal carries the price as it will be saved: a whole unit in
-        // any currency but the shop's own (CustomerMoney::listPrice).
+        // A proposal carries the price as it will be saved: to the cent
+        // (CustomerMoney::listPrice).
         $currency = (string) (ProductPrice::whereKey($subjectId)->value('currency_code') ?? '');
         if (array_key_exists('regular_price', $out)) {
             if ($out['regular_price'] === null || !is_numeric($out['regular_price']) || (float) $out['regular_price'] < 0) {
