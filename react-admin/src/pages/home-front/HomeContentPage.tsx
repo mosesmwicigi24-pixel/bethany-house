@@ -37,11 +37,14 @@ const SLOTS: Slot[] = [
     { key: "home_promo", placement: "homepage", label: "Promo Strips", hint: "The two mid-page offer bands." },
     { key: "shop_hero", placement: "shop", label: "Shop Page Hero", hint: "The banner across the top of the /shop page." },
     { key: "home_category", placement: "homepage", label: "Category Tiles", hint: "The “Shop by category” cards." },
-    { key: "home_testimonial", placement: "homepage", label: "Testimonials", hint: "The “Loved at the altar” quotes." },
+    { key: "home_testimonial", placement: "homepage", label: "Customer Reviews", hint: "Genuine reviews only — the customer's name, their words exactly as they posted them, and their star rating. The storefront shows the first six, in this order." },
     { key: "home_pillar", placement: "homepage", label: "Why Bethany Pillars", hint: "The four value pillars." },
     { key: "home_newsletter", placement: "homepage", label: "Newsletter", hint: "The “Grace in every detail” sign-up block." },
 ];
 const SLOT_BY_KEY = Object.fromEntries(SLOTS.map((s) => [s.key, s]));
+/* A customer review is a block too: title = the reviewer's name, subtitle =
+   the review, styles.rating = stars, styles.eyebrow = where it was posted. */
+const REVIEW_SLOT = "home_testimonial";
 
 const schema = z.object({
     position: z.string().min(1, "Slot is required"),
@@ -52,6 +55,7 @@ const schema = z.object({
     link_url: z.string().optional(),
     link_text: z.string().optional(),
     theme: z.string().optional(),
+    rating: z.string().optional(),
     is_active: z.boolean(),
 });
 type FormValues = z.infer<typeof schema>;
@@ -65,6 +69,7 @@ const DEFAULTS: FormValues = {
     link_url: "",
     link_text: "",
     theme: "",
+    rating: "",
     is_active: true,
 };
 
@@ -85,13 +90,19 @@ export default function HomeContentPage() {
         queryFn: () => bannersApi.list(),
     });
     const banners = data?.data ?? [];
+    const isReview = watch("position") === REVIEW_SLOT;
     const bySlot = (key: string) =>
         banners.filter((b) => b.position === key).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
     const openCreate = (slot: Slot) => {
         const rows = bySlot(slot.key);
         const nextOrder = (rows.length ? rows[rows.length - 1].sort_order ?? 0 : 0) + 1;
-        reset({ ...DEFAULTS, position: slot.key, sort_order: nextOrder });
+        reset({
+            ...DEFAULTS,
+            position: slot.key,
+            sort_order: nextOrder,
+            ...(slot.key === REVIEW_SLOT ? { eyebrow: "Google review", rating: "5" } : {}),
+        });
         setEditing(null);
         setImageFile(null);
         setImagePreview("");
@@ -100,6 +111,7 @@ export default function HomeContentPage() {
 
     const openEdit = (b: Banner) => {
         const styles = (b.styles ?? {}) as Record<string, string>;
+        const rating = Number((b.styles as Record<string, unknown> | null)?.rating);
         reset({
             position: b.position,
             sort_order: b.sort_order ?? 0,
@@ -109,6 +121,7 @@ export default function HomeContentPage() {
             link_url: b.link_url ?? "",
             link_text: b.link_text ?? "",
             theme: styles.theme ?? "",
+            rating: rating >= 1 && rating <= 5 ? String(rating) : "",
             is_active: b.is_active,
         });
         setEditing(b);
@@ -142,6 +155,7 @@ export default function HomeContentPage() {
                     ...((editing?.styles as Record<string, unknown>) ?? {}),
                     eyebrow: v.eyebrow || undefined,
                     theme: v.theme || undefined,
+                    ...(v.position === REVIEW_SLOT ? { rating: v.rating ? Number(v.rating) : undefined } : {}),
                 },
             };
             const saved = editing
@@ -223,6 +237,9 @@ export default function HomeContentPage() {
                                                         {b.is_active ? <StatusBadge active /> : null}
                                                     </div>
                                                     {b.subtitle ? <div className="text-sm text-surface-500 truncate">{b.subtitle}</div> : null}
+                                                    {slot.key === REVIEW_SLOT && Number(b.styles?.rating) > 0 ? (
+                                                        <div className="text-xs text-surface-500">{"★".repeat(Number(b.styles?.rating))} · {String(b.styles?.eyebrow ?? "")}</div>
+                                                    ) : null}
                                                 </div>
                                                 <button className="btn-ghost btn-sm" onClick={() => openEdit(b)}>Edit</button>
                                                 <button className="btn-ghost btn-sm" onClick={() => setDeleting(b)}>Delete</button>
@@ -256,6 +273,13 @@ export default function HomeContentPage() {
                 }
             >
                 <div className="space-y-4">
+                    {isReview ? (
+                        <p className="text-sm text-surface-500">
+                            Enter a real review exactly as the customer posted it — their spelling, their words.
+                            Never write or tidy one up.
+                        </p>
+                    ) : null}
+                    {isReview ? null : (
                     <Field label="Image" hint="Upload the slide / block image (JPG, PNG or WebP)">
                         <div className="flex items-center gap-3">
                             {imagePreview ? (
@@ -271,6 +295,7 @@ export default function HomeContentPage() {
                             </label>
                         </div>
                     </Field>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4">
                         <Field label="Slot" error={errors.position?.message} required>
@@ -285,6 +310,29 @@ export default function HomeContentPage() {
                         </Field>
                     </div>
 
+                    {isReview ? (
+                        <>
+                            <div className="grid grid-cols-2 gap-4">
+                                <Field label="Customer's name" hint="As it appears on their review">
+                                    <FieldInput className="input" {...register("title")} placeholder="Doreen Dee" />
+                                </Field>
+                                <Field label="Stars">
+                                    <FieldSelect className="input" {...register("rating")}>
+                                        {["5", "4", "3", "2", "1"].map((n) => (
+                                            <option key={n} value={n}>{"★".repeat(Number(n))} ({n})</option>
+                                        ))}
+                                    </FieldSelect>
+                                </Field>
+                            </div>
+                            <Field label="Their review" hint="Word for word, up to 2,000 characters">
+                                <FieldTextarea className="input" rows={5} maxLength={2000} {...register("subtitle")} placeholder="The best shop for communion elements…" />
+                            </Field>
+                            <Field label="Where it was posted" hint="Shown under the name">
+                                <FieldInput className="input" {...register("eyebrow")} placeholder="Google review" />
+                            </Field>
+                        </>
+                    ) : (
+                        <>
                     <Field label="Eyebrow" hint="Small label above the headline (optional)">
                         <FieldInput className="input" {...register("eyebrow")} placeholder="Made to Measure" />
                     </Field>
@@ -294,6 +342,9 @@ export default function HomeContentPage() {
                     <Field label="Sub-text">
                         <FieldTextarea className="input" rows={2} {...register("subtitle")} placeholder="Gowns, cassocks and chasubles measured in Nairobi." />
                     </Field>
+                        </>
+                    )}
+                    {isReview ? null : (
                     <div className="grid grid-cols-2 gap-4">
                         <Field label="Button label">
                             <FieldInput className="input" {...register("link_text")} placeholder="Book a fitting" />
@@ -302,10 +353,13 @@ export default function HomeContentPage() {
                             <FieldInput className="input" {...register("link_url")} placeholder="/shop" />
                         </Field>
                     </div>
+                    )}
                     <div className="grid grid-cols-2 gap-4">
+                        {isReview ? null : (
                         <Field label="Theme" hint="Optional style hint (e.g. dark, ivory, slate)">
                             <FieldInput className="input" {...register("theme")} placeholder="dark" />
                         </Field>
+                        )}
                         <div className="flex items-end">
                             <Toggle
                                 checked={watch("is_active")}

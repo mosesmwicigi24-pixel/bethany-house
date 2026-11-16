@@ -130,4 +130,60 @@ class BannerCmsTest extends TestCase
         $this->assertCount(4, $data['product_feature']);
         $this->assertCount(2, $data['product_chapter']);
     }
+
+    public function test_homepage_reviews_are_the_genuine_ones_not_the_written_quotes(): void
+    {
+        $reviews = $this->getJson('/api/v1/site/content?placement=homepage')
+            ->assertOk()->json('data.home_testimonial');
+
+        // Thirteen Google reviews, in the seeded order, each with a name, the
+        // customer's own words, a star rating and where it was posted.
+        $this->assertCount(13, $reviews);
+        $this->assertSame('Doreen Dee', $reviews[0]['title']);
+        $this->assertStringStartsWith('The best shop for communion elements.', $reviews[0]['subtitle']);
+        $this->assertSame('Judah Thura', $reviews[12]['title']);
+        foreach ($reviews as $r) {
+            $this->assertNotEmpty($r['title']);
+            $this->assertNotEmpty($r['subtitle']);
+            $this->assertContains($r['styles']['rating'], [4, 5]);
+            $this->assertSame('Google review', $r['styles']['eyebrow']);
+        }
+
+        // Word for word: the customer's own spelling survives, and the one
+        // review longer than the old 255-character cap is stored whole.
+        $njeri = collect($reviews)->firstWhere('title', 'Njeri Muturi');
+        $this->assertSame(4, $njeri['styles']['rating']);
+        $this->assertStringContainsString('im very greatful', $njeri['subtitle']);
+        $this->assertStringEndsWith('I will be back!', $njeri['subtitle']);
+        $this->assertGreaterThan(255, mb_strlen($njeri['subtitle']));
+
+        // The quotes written for the website are no longer published…
+        $body = json_encode($reviews);
+        foreach (['Canon Mwangi', 'Pastor Achieng', 'Fr. Kamau'] as $name) {
+            $this->assertStringNotContainsString($name, $body);
+        }
+        // …but were soft-deleted, not destroyed.
+        $this->assertSame(3, Banner::onlyTrashed()->where('position', 'home_testimonial')->count());
+    }
+
+    public function test_a_review_longer_than_255_characters_can_be_saved(): void
+    {
+        $this->admin();
+        $text = rtrim(str_repeat('Served us faithfully for years. ', 20)); // 639 characters
+
+        $id = $this->postJson('/api/v1/admin/marketing/banners', [
+            'title'     => 'A grateful parish',
+            'subtitle'  => $text,
+            'position'  => 'home_testimonial',
+            'placement' => 'homepage',
+            'styles'    => ['rating' => 5, 'eyebrow' => 'Google review'],
+        ])->assertCreated()->json('data.id');
+
+        $this->assertSame($text, Banner::findOrFail($id)->subtitle);
+
+        // Still bounded: a pasted essay is refused, not truncated.
+        $this->postJson('/api/v1/admin/marketing/banners', [
+            'title' => 'Too long', 'subtitle' => str_repeat('x', 2001), 'position' => 'home_testimonial',
+        ])->assertStatus(422);
+    }
 }
