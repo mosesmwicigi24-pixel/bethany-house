@@ -142,7 +142,8 @@ class BannerController extends Controller
     {
         return $request->validate([
             'title'            => 'nullable|string|max:150',
-            'subtitle'         => 'nullable|string|max:255',
+            // text since 2026-11-16: a customer review is quoted whole (slot home_testimonial)
+            'subtitle'         => 'nullable|string|max:2000',
             'image_url'        => 'nullable|string|max:500',
             'mobile_image_url' => 'nullable|string|max:500',
             'link_url'         => 'nullable|string|max:500',

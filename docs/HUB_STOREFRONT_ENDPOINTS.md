@@ -72,3 +72,24 @@ together" and best sellers — without a second definition of either:
   never a 5xx on a product page. Cached 10 minutes.
 
 Pinned by `tests/Feature/StorefrontInsightsTest.php`.
+
+## Customer reviews on the storefront homepage — HUB_CONTRACT §10
+
+No new endpoint: reviews are content blocks (`banners`, slot `home_testimonial`)
+served by the existing `GET /api/v1/site/content?placement=homepage`, and edited
+in admin → Home Front Customization → Home Page → **Customer Reviews**.
+
+| Block field | Meaning |
+|---|---|
+| `title` | the reviewer's public name |
+| `subtitle` | the review, word for word — `text` column, validated to 2,000 characters |
+| `styles.rating` | stars, integer 1–5 |
+| `styles.eyebrow` | where it was posted — "Google review" |
+
+- **Genuine reviews only.** The three quotes written for the website were
+  soft-deleted by `2026_31_07_000003_seed_genuine_customer_reviews`, which seeded
+  thirteen reviews from the shop's Google Business Profile, word for word.
+- The storefront shows the first six by `sort_order` and ignores any block
+  without a name, a text and a valid rating.
+
+Pinned by `tests/Feature/BannerCmsTest.php`.
