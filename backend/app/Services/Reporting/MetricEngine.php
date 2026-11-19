@@ -1993,7 +1993,7 @@ class MetricEngine
                 FROM material_inventory mi WHERE TRUE {$scopeMi} GROUP BY mi.material_id
             ) a ON a.material_id = m.id
             LEFT JOIN (
-                SELECT ma.material_id, SUM(GREATEST(ma.quantity_required - ma.quantity_allocated, 0)) AS shortfall
+                SELECT ma.material_id, SUM(GREATEST(ma.quantity_required - ma.quantity_allocated - ma.quantity_reserved - ma.quantity_to_buy, 0)) AS shortfall
                 FROM material_allocations ma
                 JOIN production_orders p ON p.id = ma.production_order_id
                 WHERE p.status NOT IN ('completed','cancelled','draft')

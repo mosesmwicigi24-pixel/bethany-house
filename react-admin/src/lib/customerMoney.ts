@@ -1,10 +1,17 @@
 /**
- * What a customer is billed is a whole unit — KES 1,000, R3,231, USD 150 —
- * never cents (owner, 2026-10-30). Halves round up. Mirrors
- * App\Support\CustomerMoney on the server, so a figure on screen is the
- * figure the order will carry.
+ * Mirrors App\Support\CustomerMoney on the server, so a figure on screen is
+ * the figure the order will carry.
+ *
+ * FEES are whole — a discount, a shipping fee, VAT added on top (owner,
+ * 2026-10-30). Halves round up.
  */
 export const whole = (amount: number): number => Math.round(amount);
+
+/**
+ * PRICES keep two decimals (owner, 2026-11-16: "no rounding off — 400
+ * plastic cups × USD 0.10 should be USD 40"): typed or from the price list.
+ */
+export const price = (amount: number): number => Math.round(amount * 100) / 100;
 
 /**
  * An amount as a customer reads it: "4,500", not "4,500.00". Cents only when

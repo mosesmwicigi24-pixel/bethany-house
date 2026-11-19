@@ -48,7 +48,7 @@ import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 import { proposeChange, waitsForApproval } from "@/api/proposals";
 import { autoPrice, followers, convertPrice, rateOf, baseOf } from "@/lib/autoPrice";
-import { whole } from "@/lib/customerMoney";
+import { price } from "@/lib/customerMoney";
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -1681,13 +1681,13 @@ function EditVariantModal({
                         // A row can still be typed over by hand afterwards.
                         const regReg  = register(`prices.${i}.regular_price`);
                         const saleReg = register(`prices.${i}.sale_price`);
-                        // Any currency but the shop's own is saved as a whole
-                        // unit (the server rounds it too) — show it on leaving the box.
+                        // A price is saved to the cent in every currency (the
+                        // server rounds it too) — show it on leaving the box.
                         const wholeOnBlur = (field: "regular_price" | "sale_price") => () => {
                             if (isBase) return;
                             const v = getValues(`prices.${i}.${field}` as any) as any;
                             if (v === "" || v == null || Number.isNaN(Number(v))) return;
-                            if (whole(Number(v)) !== Number(v)) setValue(`prices.${i}.${field}` as any, whole(Number(v)) as any, { shouldDirty: true });
+                            if (price(Number(v)) !== Number(v)) setValue(`prices.${i}.${field}` as any, price(Number(v)) as any, { shouldDirty: true });
                         };
                         const cascade = (field: "regular_price" | "sale_price") => () => {
                             const rows = getValues("prices") ?? [];
@@ -2455,7 +2455,7 @@ const PriceRows = React.memo(function PriceRows({
                                 render={({ field: f }) => (
                                     <MoneyInput
                                         name={f.name} inputRef={f.ref}
-                                        onBlur={() => { f.onBlur(); if (!isBase && f.value != null && whole(Number(f.value)) !== Number(f.value)) f.onChange(whole(Number(f.value))); }}
+                                        onBlur={() => { f.onBlur(); if (!isBase && f.value != null && price(Number(f.value)) !== Number(f.value)) f.onChange(price(Number(f.value))); }}
                                         value={f.value}
                                         onValue={(v) => {
                                             f.onChange(v ?? 0);
@@ -2471,7 +2471,7 @@ const PriceRows = React.memo(function PriceRows({
                                     <>
                                         <MoneyInput
                                             name={f.name} inputRef={f.ref} placeholder="-"
-                                            onBlur={() => { f.onBlur(); if (!isBase && f.value != null && whole(Number(f.value)) !== Number(f.value)) f.onChange(whole(Number(f.value))); }}
+                                            onBlur={() => { f.onBlur(); if (!isBase && f.value != null && price(Number(f.value)) !== Number(f.value)) f.onChange(price(Number(f.value))); }}
                                             value={f.value}
                                             onValue={(v) => {
                                                 f.onChange(v);

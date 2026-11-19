@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { get, post } from "@/api/client";
-import { purchaseOrderApi, type PurchaseOrder, type POStatus } from "@/api/procurement";
+import { purchaseOrderApi, supplierApi, type PurchaseOrder, type POStatus } from "@/api/procurement";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
@@ -283,6 +283,47 @@ function ReceiveModal({ po, onClose, onDone }: {
     );
 }
 
+// ── Move a job's material line to another supplier (draft only) ──────────────
+
+function MoveLineModal({ poId, supplierId, line, onClose, onMoved }: {
+    poId: number; supplierId: number; line: any; onClose: () => void; onMoved: (to: { id: number; po_number: string }) => void;
+}) {
+    const toast = useToastStore();
+    const [to, setTo] = useState("");
+    const { data: suppliers, isLoading } = useQuery({ queryKey: ["suppliers-for-move"], queryFn: () => supplierApi.list({ per_page: 200 }) });
+    const move = useMutation({
+        mutationFn: () => post<{ message: string; purchase_order: { id: number; po_number: string } }>(
+            `/v1/admin/purchase-orders/${poId}/items/${line.id}/move`, { supplier_id: Number(to) }),
+        onSuccess: (res) => { toast.success(res.message); onMoved(res.purchase_order); },
+        onError: (e: any) => toast.error(e?.message ?? "Could not move the line."),
+    });
+
+    return (
+        <Modal open title="Move to another supplier" onClose={onClose}>
+            <div className="space-y-4 p-5">
+                <div className="rounded-xl bg-surface-50 px-4 py-3">
+                    <p className="text-sm font-semibold text-surface-900">{line.description}</p>
+                    <p className="mt-0.5 text-xs text-surface-500">{fmtQty(line.quantity, line.item_type)} · Job {line.production_order?.order_number}</p>
+                </div>
+                <label className="block">
+                    <span className="text-2xs font-bold uppercase tracking-wide text-surface-500">New supplier</span>
+                    <select className="input mt-1 w-full text-sm" value={to} onChange={(e) => setTo(e.target.value)} disabled={isLoading}>
+                        <option value="">{isLoading ? "Loading…" : "Choose a supplier"}</option>
+                        {(suppliers?.data ?? []).filter((s) => s.id !== supplierId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                </label>
+                <p className="text-xs text-surface-500">The line joins that supplier's open draft purchase order (one is started if there is none). This is only possible while the order is a draft.</p>
+                <div className="flex gap-2">
+                    <button type="button" onClick={onClose} className="btn-secondary flex-1 text-sm">Cancel</button>
+                    <button type="button" onClick={() => move.mutate()} disabled={!to || move.isPending} className="btn-primary flex-1 text-sm disabled:opacity-50">
+                        {move.isPending ? "Moving…" : "Move line"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrderDetailPage() {
@@ -293,6 +334,9 @@ export default function PurchaseOrderDetailPage() {
     const [tab, setTab] = useState<"details" | "grn" | "history" | "audit">("details");
     const [showReceive, setShowReceive] = useState(false);
     const [showRevise, setShowRevise] = useState(false);
+    // A production job's line may move to another supplier while this is a draft.
+    const [moving, setMoving] = useState<any | null>(null);
+    const canMoveLines = usePermissions().can("procurement.create");
 
     const { data, isLoading, error } = useQuery({
         queryKey: ["purchase-order", id],
@@ -508,9 +552,22 @@ export default function PurchaseOrderDetailPage() {
                                                 const fullyReceived = outstanding <= 0;
                                                 return (
                                                     <tr key={item.id} className={clsx(fullyReceived && "opacity-60")}>
-                                                        <td className="px-3 py-2.5">
+                                                        <td className={clsx("px-3 py-2.5", item.production_order && "min-w-[13rem]")}>
                                                             <p className="font-medium text-surface-800">{item.description}</p>
                                                             {item.product?.sku && <p className="text-2xs text-surface-400 mt-0.5">SKU: {item.product.sku}</p>}
+                                                            {/* The production job this material was requested for. */}
+                                                            {item.production_order && (
+                                                                <p className="mt-0.5 text-2xs">
+                                                                    <Link to={`/production/orders/${item.production_order.id}`} className="font-medium text-brand-600 hover:underline">
+                                                                        Job {item.production_order.order_number}
+                                                                    </Link>
+                                                                    {item.production_order.customer_order?.order_number && <span className="text-surface-500"> · Order {item.production_order.customer_order.order_number}</span>}
+                                                                    {item.production_order.status === "cancelled" && <span className="ml-1 rounded-full bg-danger-light px-1.5 py-0.5 font-semibold text-danger">job cancelled</span>}
+                                                                    {po.status === "draft" && canMoveLines && (
+                                                                        <button type="button" onClick={() => setMoving(item)} className="mt-0.5 block font-medium text-surface-500 underline hover:text-surface-800">Move to another supplier</button>
+                                                                    )}
+                                                                </p>
+                                                            )}
                                                         </td>
                                                         <td className="px-3 py-2.5">
                                                             <span className={clsx("px-2 py-0.5 rounded-full text-2xs font-semibold",
@@ -656,6 +713,10 @@ export default function PurchaseOrderDetailPage() {
 
             {showRevise && (
                 <RevisePurchaseOrderModal po={po} onClose={() => setShowRevise(false)} onSaved={() => { setShowRevise(false); refresh(); }} />
+            )}
+            {moving && po && (
+                <MoveLineModal poId={po.id} supplierId={po.supplier_id} line={moving} onClose={() => setMoving(null)}
+                    onMoved={(to) => { setMoving(null); qc.invalidateQueries({ queryKey: ["purchase-orders"] }); if (to.id !== po.id) navigate(`/procurement/purchase-orders/${to.id}`); else refresh(); }} />
             )}
 
             {/* Receive Modal */}

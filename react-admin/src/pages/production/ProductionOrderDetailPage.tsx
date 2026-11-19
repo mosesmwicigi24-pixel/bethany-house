@@ -13,6 +13,7 @@ import { usersApi } from "@/api/setup";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
+import { MaterialSourcingPanel } from "@/components/production/MaterialSourcing";
 import type { ApiError } from "@/types";
 import { PdfDownloadButton } from "@/hooks/usePdfDownload";
 import { channelApi, type Channel, type ChannelMessage, type LinkedEntity, type EntitySearchResult } from "@/api/channels";
@@ -2655,6 +2656,13 @@ export default function ProductionOrderDetailPage() {
                             onDeleteImage={(batchId, url) => batchImageDeleteMutation.mutate({ batchId, url })}
                             uploadPending={batchImageMutation.isPending}
                         />}
+                        {tab === "materials" && (
+                            <div className="mb-3">
+                                <MaterialSourcingPanel orderId={order.id}
+                                    closed={["completed", "cancelled"].includes(order.status)}
+                                    canEdit={can("production.raise_order") || canManageAssignees} />
+                            </div>
+                        )}
                         {tab === "materials" && (
                             allocations.length === 0 ? (
                                 <div className="text-center py-10 text-surface-500">

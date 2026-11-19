@@ -544,9 +544,16 @@ export const ordersApi = {
         color?: string;
         notes?: string;
         due_date?: string;
+        /** Where each material comes from: store, to buy, or a split. */
+        materials?: { material_id: number; from_store: number; to_buy: number }[];
     }) =>
-        post<{ message: string; production_order_id: number; production_order_number: string }>(
+        post<{ message: string; production_order_id: number; production_order_number: string; materials_status?: string }>(
             `/v1/admin/orders/${orderId}/items/${itemId}/production`, data),
+
+    /** What a line needs from the bill of materials, and what is free in store. No supplier, no price. */
+    productionMaterials: (orderId: number, itemId: number) =>
+        get<{ has_bom: boolean; materials: { material_id: number; name: string; unit: string | null; required: number; free: number }[] }>(
+            `/v1/admin/orders/${orderId}/items/${itemId}/production-materials`),
 
     exportCsv: (params?: OrderFilters) =>
         get<Blob>("/v1/admin/orders/export", {

@@ -350,19 +350,19 @@ class OrderTotalsCharacterizationTest extends TestCase
             'country_code' => 'US',
         ])->assertOk();
 
-        // 999 → 9.99 and 250 → 2.50 at 0.01, each to the nearest whole dollar
-        // (converted prices are whole units, owner 2026-10-30): 10 and 3.
-        // Lines: 3 × 10 = 30 and 2 × 3 = 6. Tax 16% added on top, each line
-        // to a whole dollar: 4.80 → 5 and 0.96 → 1.
+        // 999 → 9.99 and 250 → 2.50 at 0.01, kept to the cent (prices are
+        // never rounded, owner 2026-11-16). Lines: 3 × 9.99 = 29.97 and
+        // 2 × 2.50 = 5.00 → 34.97. Tax 16% added on top is a fee, each line to
+        // a whole dollar: 4.7952 → 5 and 0.80 → 1.
         $fresh = $order->fresh();
-        $this->assertSame(36.0, (float) $fresh->subtotal);
+        $this->assertSame(34.97, (float) $fresh->subtotal);
         $this->assertSame(6.0, (float) $fresh->tax_amount);
         // The converted figures are persisted, not merely totalled, and whole:
         // KES 1,000 → USD 10; KES 250 → USD 2.50 → 3.
         $this->assertSame(10.0, (float) $fresh->discount_amount);
         $this->assertSame(3.0, (float) $fresh->shipping_amount);
-        // 36 − 10 + 6 + 3
-        $this->assertSame(35.0, (float) $fresh->total_amount);
+        // 34.97 − 10 + 6 + 3
+        $this->assertSame(33.97, (float) $fresh->total_amount);
     }
 
     /** An order carrying the awkward cart, already persisted. */

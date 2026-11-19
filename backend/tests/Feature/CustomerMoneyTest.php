@@ -19,9 +19,10 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * Every figure a customer is billed is a whole unit (owner, 2026-10-30):
- * prices, discounts, shipping and VAT added on top. VAT already inside a
- * whole price keeps its cents — the customer pays the whole price either way.
+ * Fees a customer is billed are whole units (owner, 2026-10-30): discounts,
+ * shipping and VAT added on top. VAT already inside a price keeps its cents.
+ * PRICES keep two decimals (owner, 2026-11-16: "No rounding off — 400
+ * plastic cups × 0.1 USD should be 40 USD"); see also PriceDecimalsTest.
  *
  * Every expected figure below is worked by hand in its comment, not by the
  * code under test.
@@ -76,7 +77,7 @@ class CustomerMoneyTest extends TestCase
         $this->assertSame('1,000,000', CustomerMoney::format(1000000.0));
     }
 
-    public function test_a_price_in_any_currency_but_the_shillings_is_saved_whole(): void
+    public function test_a_price_in_every_currency_is_saved_to_the_cent(): void
     {
         $this->currency('ZAR', 0.153846);
         $product = Product::factory()->create(['status' => Product::STATUS_ACTIVE]);
@@ -86,21 +87,21 @@ class CustomerMoneyTest extends TestCase
         ])->fresh();
 
         $usd = $row('USD', 149.99);
-        $this->assertSame('150.00', (string) $usd->regular_price);       // 149.99 → 150
+        $this->assertSame('149.99', (string) $usd->regular_price);       // kept as typed
 
         $zar = $row('ZAR', 3230.77, 3200.50);
-        $this->assertSame('3231.00', (string) $zar->regular_price);      // 3,230.77 → 3,231
-        $this->assertSame('3201.00', (string) $zar->sale_price);         // 3,200.50 → 3,201, halves up
+        $this->assertSame('3230.77', (string) $zar->regular_price);
+        $this->assertSame('3200.50', (string) $zar->sale_price);
 
         $kes = $row('KES', 999.50);
         $this->assertSame('999.50', (string) $kes->regular_price, "the shop's own currency is kept as typed");
 
-        // An edit is rounded too.
-        $usd->update(['regular_price' => 120.40]);
-        $this->assertSame('120.00', (string) $usd->fresh()->regular_price);
+        // An edit keeps its cents, and a third decimal goes to the nearest cent.
+        $usd->update(['regular_price' => 120.405]);
+        $this->assertSame('120.41', (string) $usd->fresh()->regular_price);
     }
 
-    public function test_a_price_saved_with_cents_before_the_rule_is_still_billed_whole(): void
+    public function test_a_price_saved_with_cents_is_billed_with_its_cents(): void
     {
         $product = Product::factory()->create(['status' => Product::STATUS_ACTIVE]);
         // Written past the model, as rows saved before 30 Oct were.
@@ -111,8 +112,8 @@ class CustomerMoneyTest extends TestCase
 
         $priced = CurrencyPricing::catalogue($product->id, null, 'USD');
 
-        $this->assertSame(150.0, $priced['regular_price']);            // 149.99 → 150
-        $this->assertSame(150.0, $priced['effective_price']);
+        $this->assertSame(149.99, $priced['regular_price']);
+        $this->assertSame(149.99, $priced['effective_price']);
     }
 
     public function test_a_shipping_fee_is_whole_in_every_currency(): void
@@ -143,14 +144,15 @@ class CustomerMoneyTest extends TestCase
         $this->assertEqualsWithDelta(1000.0, $inside['subtotal_gross'], 0.0001);
     }
 
-    public function test_a_promotion_price_is_whole_and_never_above_the_price(): void
+    public function test_a_promotion_price_keeps_its_cents_and_is_never_above_the_price(): void
     {
         $service = app(PromotionService::class);
         $pct  = new Promotion(['discount_type' => 'percentage', 'discount_value' => 15]);
         $flat = new Promotion(['discount_type' => 'fixed', 'discount_value' => 0.4]);
 
-        $this->assertSame(849.0, $service->discountedUnit(999.0, $pct));   // 999 − 149.85 = 849.15 → 849
-        $this->assertSame(1000.0, $service->discountedUnit(1000.0, $flat)); // 999.60 → 1,000, no higher than the price
+        $this->assertSame(849.15, $service->discountedUnit(999.0, $pct));   // 999 − 149.85 = 849.15
+        $this->assertSame(999.6, $service->discountedUnit(1000.0, $flat));  // 1,000 − 0.40 = 999.60
+        $this->assertSame(0.0, $service->discountedUnit(0.3, $flat));       // 0.30 − 0.40: never below 0
     }
 
     /** An order written before 30 Oct: USD 34.65 × 2 less a 0.35 discount, 3.85 shipping. */
@@ -176,9 +178,10 @@ class CustomerMoneyTest extends TestCase
         $paid  = $this->centsOrder('paid');
         $actor = User::factory()->create(['status' => 'active']);
 
-        // 34.65 → 35 × 2 = 70; discount 0.35 → 0; shipping 3.85 → 4. Total 74.
+        // Prices keep their cents (2026-11-16): 34.65 × 2 = 69.30. The fees go
+        // whole: discount 0.35 → 0; shipping 3.85 → 4. Total 69.30 + 4 = 73.30.
         $this->artisan('orders:whole-amounts')
-            ->expectsOutputToContain("Order #{$open->id} {$open->order_number} USD 72.80 → would be USD 74.00")
+            ->expectsOutputToContain("Order #{$open->id} {$open->order_number} USD 72.80 → would be USD 73.30")
             ->expectsOutputToContain("Order #{$paid->id} {$paid->order_number} USD 72.80 → paid or part-paid (paid), left as is")
             ->assertSuccessful();
         $this->assertEqualsWithDelta(72.80, (float) $open->fresh()->total_amount, 0.001, 'a dry run writes nothing');
@@ -186,11 +189,11 @@ class CustomerMoneyTest extends TestCase
         $this->artisan('orders:whole-amounts', ['--apply' => true, '--actor' => (string) $actor->id])->assertSuccessful();
 
         $open = $open->fresh(['items']);
-        $this->assertEqualsWithDelta(74.0, (float) $open->total_amount, 0.001);
-        $this->assertEqualsWithDelta(70.0, (float) $open->subtotal, 0.001);
+        $this->assertEqualsWithDelta(73.30, (float) $open->total_amount, 0.001);
+        $this->assertEqualsWithDelta(69.30, (float) $open->subtotal, 0.001);
         $this->assertEqualsWithDelta(0.0, (float) $open->discount_amount, 0.001);
         $this->assertEqualsWithDelta(4.0, (float) $open->shipping_amount, 0.001);
-        $this->assertEqualsWithDelta(35.0, (float) $open->items->first()->unit_price, 0.001);
+        $this->assertEqualsWithDelta(34.65, (float) $open->items->first()->unit_price, 0.001);
         $this->assertEqualsWithDelta(72.80, (float) $paid->fresh()->total_amount, 0.001, 'money that moved is never restated');
 
         // Safe to run again: nothing left to round but the paid one.

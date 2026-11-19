@@ -21,6 +21,8 @@ class PurchaseOrderItem extends Model
         'unit_price',
         'tax_amount',
         'total_price',
+        // The production job this line was raised for (material sourcing).
+        'production_order_id',
     ];
 
     protected $casts = [
@@ -30,6 +32,11 @@ class PurchaseOrderItem extends Model
         'tax_amount' => 'decimal:2',
         'total_price' => 'decimal:2',
     ];
+
+    public function productionOrder()
+    {
+        return $this->belongsTo(ProductionOrder::class);
+    }
 
     public function purchaseOrder()
     {

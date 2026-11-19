@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { rawMaterialsApi } from "@/api/rawMaterials";
+import { supplierApi } from "@/api/procurement";
 import type {
     RawMaterial,
     MaterialTransaction,
@@ -174,6 +175,15 @@ function MaterialFormModal({
     const [codeManual, setCodeManual] = useState(false);
     // The server ignores a cost from anyone without products.view_cost (4D).
     const canSeeCost = usePermissions().can("products.view_cost");
+    // Who the material is bought from is procurement's to see and set (owner,
+    // 2026-11-19). Production needs for it go onto this supplier's draft order.
+    const canSetSupplier = usePermissions().can("procurement.create");
+    const [supplierId, setSupplierId] = useState<string>("");
+    const { data: supplierList } = useQuery({
+        queryKey: ["suppliers-for-material"],
+        queryFn: () => supplierApi.list({ per_page: 200 }),
+        enabled: open && canSetSupplier && !!editing,
+    });
 
     const form = useForm<MaterialForm>({
         resolver: zodResolver(materialSchema),
@@ -211,6 +221,7 @@ function MaterialFormModal({
                 reorder_point: editing.reorder_point,
                 is_active: editing.is_active,
             });
+            setSupplierId(editing.preferred_supplier?.id ? String(editing.preferred_supplier.id) : "");
             setCodeManual(true); // existing codes are locked to manual
         } else {
             reset({
@@ -244,8 +255,10 @@ function MaterialFormModal({
     const mutation = useMutation({
         mutationFn: (v: MaterialForm) => {
             const payload = { ...v, code: v.code.toUpperCase() };
+            const supplierChanged = canSetSupplier && !!editing
+                && (supplierId || "") !== (editing.preferred_supplier?.id ? String(editing.preferred_supplier.id) : "");
             return editing
-                ? rawMaterialsApi.update(editing.id, payload)
+                ? rawMaterialsApi.update(editing.id, supplierChanged ? { ...payload, preferred_supplier_id: supplierId ? Number(supplierId) : null } : payload)
                 : rawMaterialsApi.create(payload);
         },
         onSuccess: (res) => {
@@ -411,6 +424,22 @@ function MaterialFormModal({
                         />
                     </Field>
                 </div>
+
+                {canSetSupplier && editing && (
+                    <Field
+                        label="Bought from"
+                        hint={(editing.needs_supplier ?? 0) > 0
+                            ? `Production jobs are waiting to buy ${editing.needs_supplier} ${editing.unit_of_measure}. Choosing a supplier adds it to their draft purchase order.`
+                            : "Production needs for this material go onto this supplier's open draft purchase order. Only procurement sees this."}
+                    >
+                        <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} aria-label="Bought from">
+                            <option value="">No supplier set (last supplier used, if any)</option>
+                            {(supplierList?.data ?? []).map((s) => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                        </select>
+                    </Field>
+                )}
 
                 <Field label="Description">
                     <FieldTextarea
@@ -1432,6 +1461,11 @@ export default function RawMaterialsPage() {
                                                     <p className="text-sm font-medium text-surface-900">
                                                         {m.name}
                                                     </p>
+                                                    {(m.needs_supplier ?? 0) > 0 && (
+                                                        <span className="mt-0.5 inline-block rounded-full bg-amber-50 px-2 py-0.5 text-2xs font-semibold text-amber-700">
+                                                            {m.needs_supplier} {m.unit_of_measure} to buy · set a supplier
+                                                        </span>
+                                                    )}
                                                     <div className="flex items-center gap-2 mt-0.5">
                                                         <span className="text-xs font-mono text-surface-400">
                                                             {m.code}

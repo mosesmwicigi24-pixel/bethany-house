@@ -1043,6 +1043,9 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:orders.edit_items,sanctum');
                 Route::post('/{id}/items/{itemId}/production', [OrderController::class, 'raiseItemProduction'])
                     ->middleware('permission:production.raise_order,sanctum');
+                Route::get('/{id}/items/{itemId}/production-materials', [OrderController::class, 'productionMaterials'])
+                    ->whereNumber('id')->whereNumber('itemId')
+                    ->middleware('permission:production.raise_order,sanctum');
                 Route::post('/{id}/set-deposit',         [OrderController::class, 'setDeposit'])
                     ->middleware('permission:orders.set_deposit,sanctum');
                 Route::post('/{id}/update-currency',     [OrderController::class, 'updateCurrency'])
@@ -1521,6 +1524,9 @@ Route::prefix('v1')->group(function () {
                     Route::get('/{id}/audit-log',[PurchaseOrderController::class, 'auditLog']);
                     Route::post('/',             [PurchaseOrderController::class, 'store'])
                         ->middleware('permission:procurement.create,sanctum');
+                    Route::post('/{id}/items/{itemId}/move', [PurchaseOrderController::class, 'moveItem'])
+                        ->whereNumber('id')->whereNumber('itemId')
+                        ->middleware('permission:procurement.create,sanctum');
                     Route::post('/from-suggestions', [PurchaseOrderController::class, 'storeFromSuggestions'])
                         ->middleware('permission:procurement.create,sanctum');
                     Route::put('/{id}',          [PurchaseOrderController::class, 'update'])
@@ -1600,6 +1606,10 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:production.manage_assignees,sanctum');
                     Route::post('/{id}/materials',        [ProductionController::class, 'issueMaterials'])
                         ->middleware('permission:production.manage_assignees,sanctum');
+                    // Where the job's materials come from: store or to buy.
+                    Route::get('/{id}/material-sourcing',  [ProductionController::class, 'materialSourcing'])->whereNumber('id');
+                    Route::post('/{id}/material-sourcing', [ProductionController::class, 'sourceMaterials'])->whereNumber('id')
+                        ->middleware('permission:production.raise_order|production.manage_assignees,sanctum');
                     Route::post('/{id}/qc',               [ProductionController::class, 'qualityCheck'])
                         ->middleware('permission:production.submit_qc,sanctum');
                     Route::post('/{id}/rework',           [ProductionController::class, 'rework'])
