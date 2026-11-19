@@ -563,11 +563,14 @@ class PaymentController extends Controller
             $redirectUrl = $order->payment_token
                 ? url("/pay/{$order->payment_token}?status=returned")
                 : config('services.flutterwave.redirect_url');
+            // The reference we hand Flutterwave is the one we keep: its
+            // webhook is matched on it, whole.
+            $txRef = $order->order_number . '-' . time();
 
             $response = Http::withToken($secretKey)
                 ->timeout(15)
                 ->post('https://api.flutterwave.com/v3/payments', [
-                    'tx_ref'          => $order->order_number . '-' . time(),
+                    'tx_ref'          => $txRef,
                     'amount'          => (float) $order->total_amount,
                     'currency'        => $order->currency_code,
                     'redirect_url'    => $redirectUrl,
@@ -595,7 +598,7 @@ class PaymentController extends Controller
                 'amount'             => $order->total_amount,
                 'currency_code'      => $order->currency_code,
                 'status'             => 'pending',
-                'provider_reference' => $data['tx_ref'] ?? $order->order_number,
+                'provider_reference' => $txRef,
                 'tax_inclusive'      => $order->prices_include_tax ?? true,
             ]);
 
@@ -1207,11 +1210,17 @@ class PaymentController extends Controller
      */
     public function flutterwaveWebhook(Request $request)
     {
-        $secretHash = config('services.flutterwave.secret_hash');
-        $signature  = $request->header('verif-hash');
+        // The hash Flutterwave sends back is the one set on its dashboard and
+        // here. With none set there is nothing to compare against, so nothing
+        // is trusted: an absent header used to "match" an absent secret, and
+        // anyone could mark a payment paid (security audit 2026-11-19, PAY-01).
+        $secretHash = (string) config('services.flutterwave.secret_hash');
+        $signature  = (string) $request->header('verif-hash');
 
-        if ($signature !== $secretHash) {
-            Log::warning('Invalid Flutterwave webhook signature');
+        if ($secretHash === '' || $signature === '' || !hash_equals($secretHash, $signature)) {
+            Log::warning('Flutterwave webhook refused', [
+                'reason' => $secretHash === '' ? 'no secret hash configured' : 'bad signature',
+            ]);
             return response()->json(['message' => 'Invalid signature'], 400);
         }
 
@@ -1222,19 +1231,48 @@ class PaymentController extends Controller
             if (($data['event'] ?? '') === 'charge.completed' &&
                 ($data['data']['status'] ?? '') === 'successful') {
 
-                $txRef   = $data['data']['tx_ref'];
-                $flwRef  = $data['data']['flw_ref'];
-                $payment = Payment::where('provider_reference', 'LIKE', "%{$txRef}%")->first();
+                $txRef  = (string) ($data['data']['tx_ref'] ?? '');
+                $flwRef = (string) ($data['data']['flw_ref'] ?? '');
+                if ($txRef === '') {
+                    return response()->json(['message' => 'OK']);
+                }
+
+                // The reference we handed Flutterwave, whole — a fragment
+                // used to match any payment that merely contained it — and
+                // only a Flutterwave payment.
+                $payment = Payment::where('provider_reference', $txRef)
+                    ->where('payment_method', 'card_flutterwave')
+                    ->first();
 
                 if (!$payment) {
                     Log::warning('Flutterwave webhook: payment not found', ['tx_ref' => $txRef]);
                     return response()->json(['message' => 'OK']);
                 }
 
+                // A notice can be delivered twice — never settle twice.
+                if ($payment->status === 'paid') {
+                    return response()->json(['message' => 'Webhook processed']);
+                }
+
+                // What was charged must cover what was asked, in the same
+                // currency; anything else is held for a person to look at.
+                $charged  = (float) ($data['data']['amount'] ?? 0);
+                $currency = strtoupper((string) ($data['data']['currency'] ?? ''));
+                $expected = strtoupper((string) ($payment->currency_code ?: $payment->order?->currency_code));
+                if ($charged + 0.001 < (float) $payment->amount || ($expected !== '' && $currency !== $expected)) {
+                    $payment->update([
+                        'requires_approval' => true,
+                        'approval_status'   => 'pending_review',
+                        'notes'             => trim(($payment->notes ?? '') . " [system] Flutterwave reported {$currency} {$charged}; expected {$expected} {$payment->amount}; held for review."),
+                    ]);
+                    Log::warning('Flutterwave webhook: amount or currency mismatch', ['payment_id' => $payment->id]);
+                    return response()->json(['message' => 'Webhook processed']);
+                }
+
                 DB::transaction(function () use ($payment, $flwRef) {
                     $payment->update([
                         'status'             => 'paid',
-                        'provider_reference' => $flwRef,
+                        'provider_reference' => $flwRef !== '' ? $flwRef : $payment->provider_reference,
                         'paid_at'            => now(),
                     ]);
 
