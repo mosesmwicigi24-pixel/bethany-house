@@ -27,6 +27,7 @@ import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 import { CorrectPaymentModal, OrderDocumentHistory } from "@/components/documents/SalesRevisions";
 import { formatAmount, formatMoney } from "@/lib/customerMoney";
+import { ReceiptTerms } from "@/lib/customerTerms";
 import { MaterialSourcingFields, defaultChoices, hasProblem, toPayload, split as splitSource, type MaterialNeed, type SourceChoices } from "@/components/production/MaterialSourcing";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -2479,11 +2480,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                             <p style={dividerStyle} />
 
                             {/* Footer */}
-                            <p style={{ ...centerStyle, fontSize: "10px", lineHeight: "1.5", margin: "2px 0" }}>
-                                Thank you for shopping at Bethany House!<br />
-                                Goods once sold are not exchangeable<br />
-                                unless within 7 days with receipt.
-                            </p>
+                            <ReceiptTerms />
 
                             {/* QR Code */}
                             <div style={{ ...centerStyle, marginTop: "8px" }}>
@@ -2572,11 +2569,7 @@ function ReceiptModal({ order, onClose, initialMode = "order", initialPaymentId 
                             )}
 
                             <p style={dividerStyle} />
-                            <p style={{ ...centerStyle, fontSize: "10px", lineHeight: "1.5" }}>
-                                Thank you for choosing Bethany House!<br />
-                                Goods sold are not exchangeable<br />
-                                unless within 7 days with original receipt.
-                            </p>
+                            <ReceiptTerms thanks="Thank you for choosing Bethany House!" />
                         </>
                     )}
                 </div>

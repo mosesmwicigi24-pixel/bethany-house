@@ -27,6 +27,7 @@ import type { PosSale, Outlet } from "@/api/pos";
 import { useToastStore } from "@/store/toast.store";
 import { clsx } from "clsx";
 import { formatAmount, formatMoney } from "@/lib/customerMoney";
+import { ReceiptTerms } from "@/lib/customerTerms";
 
 interface Props {
     sale: PosSale;
@@ -450,11 +451,7 @@ function ThermalReceipt({ sale, outlet }: { sale: PosSale; outlet: Outlet }) {
             <p style={{ textAlign: "center", borderBottom: "1px dashed #000", margin: "4px 0" }} />
 
             {/* ── Footer message ── */}
-            <p style={{ textAlign: "center", fontSize: "10px", lineHeight: "1.5", margin: "2px 0" }}>
-                Thank you for shopping at Bethany House!<br />
-                Goods once sold are not exchangeable<br />
-                unless within 7 days with receipt.
-            </p>
+            <ReceiptTerms />
 
             {/* ── QR Code + KRA ETR block ── */}
             <div style={{ textAlign: "center", marginTop: "8px" }}>

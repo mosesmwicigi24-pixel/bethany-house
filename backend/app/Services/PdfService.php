@@ -908,6 +908,8 @@ HTML;
         $m        = fn (float $v, ?string $c = null) => htmlspecialchars(self::money($v, $c ?? $ccy));
         $e        = fn ($v) => htmlspecialchars((string) $v);
         $appName  = $e($s['app_name'] ?: 'Bethany House');
+        // The same terms as the printed receipts (App\Support\CustomerTerms).
+        $termsHtml = implode('', array_map(fn (string $t) => '<div class="p">' . $e($t) . '</div>', \App\Support\CustomerTerms::receipt()));
         $address  = $e(trim(($s['app_address'] ?? '') . (!empty($s['app_city']) ? ', ' . $s['app_city'] : ''), ', '));
         $email    = $e($s['app_email'] ?? '');
         $phone    = $e($s['app_phone'] ?? '');
@@ -1114,6 +1116,9 @@ td,th{vertical-align:top}
 .thanks{margin-top:24px;padding:11px 14px;background:#faf7f0;border-radius:8px}
 .thanks .t{font-size:10px;font-weight:700;color:#152441}
 .thanks .s{font-size:8px;color:#6b7585;margin-top:2px}
+.terms{margin-top:8px;padding:0 2px}
+.terms .h{font-size:7px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#152441}
+.terms .p{font-size:7.5px;color:#4b5565;margin-top:2px;line-height:1.35}
 .sign td{padding-top:26px;font-size:7.5px;color:#8a93a3;width:50%}
 .sign .line{border-top:1px solid #9aa5b8;padding-top:4px;width:78%}
 
@@ -1167,6 +1172,10 @@ td,th{vertical-align:top}
   <div class="thanks">
     <div class="t">Thank you for choosing {$appName}.</div>
     <div class="s">This receipt confirms the payments listed above. Please keep it for your records.</div>
+  </div>
+  <div class="terms">
+    <div class="h">Terms</div>
+    {$termsHtml}
   </div>
   <table class="sign"><tr>
     <td><div class="line">Received by (name &amp; signature)</div></td>
