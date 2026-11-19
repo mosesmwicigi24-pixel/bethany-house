@@ -19,7 +19,14 @@ export interface RawMaterial {
     total_stock: number;
     stock_status: "in_stock" | "low_stock" | "out_of_stock";
     stock_value?: number;
-    supplier: null; // column doesn't exist in DB
+    supplier: null; // legacy key, never filled
+    /** On hand less what is held for production jobs. */
+    free?: number;
+    reserved?: number;
+    /** Who it is bought from — sent to procurement.view holders only. */
+    preferred_supplier?: { id: number; name: string } | null;
+    /** Asked for by production jobs with no supplier to order from yet (procurement only). */
+    needs_supplier?: number;
     inventory?: MaterialInventoryRecord[];
     created_at: string;
     updated_at: string;
@@ -107,6 +114,7 @@ export const rawMaterialsApi = {
             unit_cost: number;
             reorder_point: number;
             is_active: boolean;
+            preferred_supplier_id: number | null;
         }>,
     ) =>
         // Phase 3C: a unit-cost change past 5% comes back as a waiting proposal.

@@ -27,6 +27,7 @@ import { RecordHistory } from "@/components/audit/AuditParts";
 import { PendingChanges, NeedsApprovalHint, PROPOSALS_QUERY_KEY } from "@/components/approvals/PendingChanges";
 import { CorrectPaymentModal, OrderDocumentHistory } from "@/components/documents/SalesRevisions";
 import { formatAmount, formatMoney } from "@/lib/customerMoney";
+import { MaterialSourcingFields, defaultChoices, hasProblem, toPayload, split as splitSource, type MaterialNeed, type SourceChoices } from "@/components/production/MaterialSourcing";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -3284,15 +3285,29 @@ function RaiseProductionModal({ order, item, onClose, onDone }: {
     const setRow = (i: number, patch: Partial<{ k: string; v: string }>) =>
         setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
 
+    // What the line needs from the product's bill of materials, and where each
+    // material comes from: the store, or bought (owner, 2026-11-18).
+    const { data: needsData, isLoading: needsLoading, isError: needsError } = useQuery({
+        queryKey: ["order-item-production-materials", order.id, item.id],
+        queryFn: () => ordersApi.productionMaterials(order.id, item.id),
+    });
+    const needs: MaterialNeed[] = (needsData?.materials ?? []).map(m => ({ ...m, required: Number(m.required), free: Number(m.free) }));
+    const [choices, setChoices] = useState<SourceChoices>({});
+    useEffect(() => { if (needsData) setChoices(defaultChoices(needsData.materials.map(m => ({ ...m, required: Number(m.required), free: Number(m.free) })))); }, [needsData]);
+    const totals = needs.reduce((t, m) => { const s = splitSource(m, choices[m.material_id]); return { store: t.store + (s.store > 0 ? 1 : 0), buy: t.buy + (s.buy > 0 ? 1 : 0) }; }, { store: 0, buy: 0 });
+    const blocked = needs.length > 0 && hasProblem(needs, choices);
+
     const mutation = useMutation({
         mutationFn: () => ordersApi.raiseItemProduction(order.id, item.id, {
             measurements: Object.fromEntries(rows.filter(r => r.k.trim()).map(r => [r.k.trim(), r.v])),
             color: color.trim() || undefined,
             notes: notes.trim() || undefined,
             due_date: dueDate || undefined,
+            materials: needs.length > 0 ? toPayload(needs, choices) : undefined,
         }),
         onSuccess: (res: any) => {
-            toast.success(`Production order ${res?.production_order_number ?? ""} raised`);
+            toast.success(`Production order ${res?.production_order_number ?? ""} raised`
+                + (res?.materials_status === "waiting" ? " · materials requested from procurement" : ""));
             onDone(); onClose();
         },
         onError: (e: ApiError) => toast.error(e.message),
@@ -3339,6 +3354,38 @@ function RaiseProductionModal({ order, item, onClose, onDone }: {
                     </div>
                     <p className="text-2xs text-surface-400 mt-1">You can add or edit these later on the production order too.</p>
                 </div>
+
+                {/* Required materials: from the store, or bought. */}
+                <div>
+                    <div className="flex items-center justify-between gap-2">
+                        <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Required materials</label>
+                        {needs.length > 0 && <span className="rounded-full bg-surface-100 px-2 py-0.5 text-2xs font-semibold text-surface-600">From bill of materials</span>}
+                    </div>
+                    {needsLoading ? (
+                        <p className="mt-1.5 text-xs text-surface-400">Checking the bill of materials…</p>
+                    ) : needsError ? (
+                        <p className="mt-1.5 text-xs text-amber-700">Couldn't load the materials. You can still raise the job and choose them on the production order.</p>
+                    ) : needs.length === 0 ? (
+                        <p className="mt-1.5 text-xs text-surface-500">
+                            {needsData?.has_bom ? "The bill of materials is empty." : "This product has no bill of materials yet, so no materials will be reserved or requested."}
+                        </p>
+                    ) : (
+                        <>
+                            <p className="mt-0.5 mb-2 text-xs text-surface-500">Choose where each material comes from.</p>
+                            <MaterialSourcingFields needs={needs} choices={choices} onChange={setChoices} />
+                            {!blocked && (
+                                <p className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                    <span className="font-semibold">On raising:</span>{" "}
+                                    {totals.store > 0 && `${totals.store} material${totals.store === 1 ? "" : "s"} reserved from the store`}
+                                    {totals.store > 0 && totals.buy > 0 && " · "}
+                                    {totals.buy > 0 && `${totals.buy} requested from procurement`}
+                                    {totals.buy > 0 && ". Nothing is ordered until procurement approves it"}.
+                                </p>
+                            )}
+                        </>
+                    )}
+                </div>
+
                 <div>
                     <label className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Production notes</label>
                     <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
@@ -3346,7 +3393,7 @@ function RaiseProductionModal({ order, item, onClose, onDone }: {
                 </div>
                 <div className="flex gap-2 pt-1">
                     <button onClick={onClose} className="btn-secondary flex-1 text-sm">Cancel</button>
-                    <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
+                    <button onClick={() => mutation.mutate()} disabled={mutation.isPending || needsLoading || blocked}
                         className="flex-1 px-4 py-2 rounded-xl bg-brand-600 text-white text-sm font-bold hover:bg-brand-700 disabled:opacity-50 transition-colors">
                         {mutation.isPending ? "Raising…" : "Raise production"}
                     </button>
