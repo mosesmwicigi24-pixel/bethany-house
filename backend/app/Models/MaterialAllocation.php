@@ -18,6 +18,12 @@ class MaterialAllocation extends Model
         'quantity_returned',
         'allocated_at',
         'allocated_by',
+        // Material sourcing (2026-11-19): held in the store for this job,
+        // and asked of procurement but not yet in.
+        'quantity_reserved',
+        'quantity_to_buy',
+        'sourced_at',
+        'sourced_by',
     ];
 
     protected $casts = [
@@ -26,6 +32,9 @@ class MaterialAllocation extends Model
         'quantity_used' => 'decimal:2',
         'quantity_returned' => 'decimal:2',
         'allocated_at' => 'datetime',
+        'quantity_reserved' => 'decimal:2',
+        'quantity_to_buy' => 'decimal:2',
+        'sourced_at' => 'datetime',
     ];
 
     public function productionOrder()

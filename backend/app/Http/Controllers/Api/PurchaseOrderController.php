@@ -187,6 +187,10 @@ class PurchaseOrderController extends Controller
             'items.product.translations' => fn ($q) => $q->where('language_code', 'en'),
             'items.variant:id,sku,variant_name',
             'items.material:id,name,unit_of_measure',
+            // The job a material line was raised for, and its customer order.
+            'items.productionOrder:id,order_number,status,quantity,product_id,customer_order_id',
+            'items.productionOrder.customerOrder:id,order_number',
+            'items.productionOrder.product.translations' => fn ($q) => $q->where('language_code', 'en'),
             'createdBy:id,first_name,last_name',
             'approvedBy:id,first_name,last_name',
             'goodsReceivedNotes.receivedBy:id,first_name,last_name',
@@ -376,14 +380,34 @@ class PurchaseOrderController extends Controller
     /** Next unique PO number: today's sequence, falling back to a random suffix. */
     private function nextPoNumber(): string
     {
-        $poNumber = 'PO-' . date('Ymd') . '-' . str_pad(
-            PurchaseOrder::whereDate('created_at', today())->count() + 1, 4, '0', STR_PAD_LEFT
-        );
-        while (PurchaseOrder::where('po_number', $poNumber)->exists()) {
-            $poNumber = 'PO-' . date('Ymd') . '-' . strtoupper(Str::random(4));
+        return PurchaseOrder::nextNumber();
+    }
+
+    // =========================================================================
+    // POST /api/v1/admin/purchase-orders/{id}/items/{itemId}/move
+    // =========================================================================
+
+    /**
+     * Move a production job's material line to another supplier while this
+     * order is still a draft (owner, 2026-11-19: procurement may change the
+     * supplier the hub picked). The line joins that supplier's open draft.
+     * After approval the supplier is fixed: cancel and raise a new order.
+     */
+    public function moveItem(Request $request, $id, $itemId)
+    {
+        $validated = $request->validate(['supplier_id' => 'required|integer|exists:suppliers,id']);
+
+        $line = PurchaseOrderItem::where('purchase_order_id', $id)->findOrFail($itemId);
+        if ($line->item_type !== 'material' || !$line->production_order_id) {
+            return response()->json(['message' => 'Only a material line raised for a production job can be moved. Edit the order for other lines.'], 422);
         }
 
-        return $poNumber;
+        $to = \App\Services\Production\MaterialSourcing::moveLine($line, (int) $validated['supplier_id'], $request->user());
+
+        return response()->json([
+            'message'        => "Line moved to {$to->po_number}.",
+            'purchase_order' => ['id' => $to->id, 'po_number' => $to->po_number, 'supplier_id' => $to->supplier_id],
+        ]);
     }
 
     // =========================================================================
@@ -430,7 +454,7 @@ class PurchaseOrderController extends Controller
                 FROM material_inventory mi GROUP BY mi.material_id
             ) a ON a.material_id = m.id
             LEFT JOIN (
-                SELECT ma.material_id, SUM(GREATEST(ma.quantity_required - ma.quantity_allocated, 0)) AS shortfall
+                SELECT ma.material_id, SUM(GREATEST(ma.quantity_required - ma.quantity_allocated - ma.quantity_reserved - ma.quantity_to_buy, 0)) AS shortfall
                 FROM material_allocations ma
                 JOIN production_orders p ON p.id = ma.production_order_id
                 WHERE p.status NOT IN ('completed','cancelled','draft')
@@ -1922,6 +1946,10 @@ class PurchaseOrderController extends Controller
             'purchase_order', $purchaseOrder->id,
             $userId
         );
+
+        // A line raised for a production job: what arrived is now held for
+        // that job (MaterialSourcing).
+        \App\Services\Production\MaterialSourcing::onReceived($poItem, $qty, $matInv->outlet_id);
 
         // A free line (price 0) leaves the material's cost as it was.
         return $poItem->unit_price > 0 ? $this->setLatestCost($poItem, $purchaseOrder) : null;

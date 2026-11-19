@@ -146,6 +146,16 @@ class ProductionOrder extends Model
                 $order->status = 'draft';
             }
         });
+
+        // A closed job holds nothing: its store reservations are released, and
+        // on a cancel its lines come off any purchase order still in draft
+        // (MaterialSourcing). Here, on the model, because a job is cancelled
+        // from several places (its own page, a voided or cancelled sale).
+        static::updated(function ($order) {
+            if ($order->wasChanged('status') && in_array($order->status, ['cancelled', 'completed'], true)) {
+                \App\Services\Production\MaterialSourcing::release($order, $order->status === 'cancelled');
+            }
+        });
     }
 
     // ── Relationships ─────────────────────────────────────────────────────────

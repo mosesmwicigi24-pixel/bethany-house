@@ -22,7 +22,15 @@ class Material extends Model
         'unit_cost',          // NOT cost_per_unit
         'reorder_point',
         'is_active',
+        'preferred_supplier_id',
     ];
+
+    /**
+     * Who a material is bought from is procurement's to see (owner,
+     * 2026-11-19). Hidden from every serialised material; the endpoints that
+     * may show it add it for viewers holding procurement.view.
+     */
+    protected $hidden = ['preferred_supplier_id'];
 
     protected $casts = [
         'unit_cost'     => 'decimal:2',
@@ -40,6 +48,12 @@ class Material extends Model
     public function transactions()
     {
         return $this->hasMany(MaterialTransaction::class);
+    }
+
+    /** Who this material is bought from (procurement's to see). */
+    public function preferredSupplier()
+    {
+        return $this->belongsTo(Supplier::class, 'preferred_supplier_id');
     }
 
     public function bomItems()

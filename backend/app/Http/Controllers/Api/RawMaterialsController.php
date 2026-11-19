@@ -204,9 +204,16 @@ class RawMaterialsController extends Controller
             'unit_cost'       => 'sometimes|numeric|min:0',
             'reorder_point'   => 'nullable|numeric|min:0',
             'is_active'       => 'sometimes|boolean',
+            // Who the material is bought from: production needs for it go onto
+            // this supplier's open draft purchase order (MaterialSourcing).
+            'preferred_supplier_id' => 'sometimes|nullable|integer|exists:suppliers,id',
         ]);
         if (!\App\Support\CostVisibility::allows($request->user())) {
             unset($validated['unit_cost']);   // see store()
+        }
+        // Suppliers are procurement's (owner, 2026-11-19): refused, not ignored.
+        if (array_key_exists('preferred_supplier_id', $validated) && !$request->user()->can('procurement.create')) {
+            return response()->json(['message' => 'Only procurement can set who a material is bought from.'], 403);
         }
 
         // The unit cost — what we pay the supplier — is a supplier_cost_change
@@ -231,6 +238,12 @@ class RawMaterialsController extends Controller
                 'changes'     => array_keys($plain),
             ]);
         } catch (\Exception) {}
+
+        // A supplier was just set: jobs that were waiting to buy this material
+        // go onto that supplier's draft purchase order now.
+        if (!empty($plain['preferred_supplier_id'])) {
+            \App\Services\Production\MaterialSourcing::placePending($material->fresh(), $request->user());
+        }
 
         $waiting = $proposal && $proposal->status !== \App\Models\ChangeProposal::APPLIED;
 
@@ -527,10 +540,22 @@ class RawMaterialsController extends Controller
             'total_stock'     => $totalStock,
             'stock_status'    => $isOut ? 'out_of_stock' : ($isLow ? 'low_stock' : 'in_stock'),
             'stock_value'     => round($totalStock * $unitCost, 2),
-            'supplier'        => null,            // column doesn't exist
+            'supplier'        => null,            // legacy key, never filled
             'created_at'      => $m->created_at,
             'updated_at'      => $m->updated_at,
         ];
+
+        // Free = on hand less what is held for production jobs.
+        $data['reserved'] = (float) ($m->inventory?->sum('quantity_reserved') ?? 0);
+        $data['free']     = max(0.0, round($totalStock - $data['reserved'], 2));
+
+        // Who it is bought from, and what jobs are asking for with no supplier
+        // to order from yet — for procurement only (owner, 2026-11-19).
+        if (auth()->user()?->can('procurement.view')) {
+            $supplier = $m->preferred_supplier_id ? \App\Models\Supplier::find($m->preferred_supplier_id, ['id', 'name']) : null;
+            $data['preferred_supplier'] = $supplier ? ['id' => $supplier->id, 'name' => $supplier->name] : null;
+            $data['needs_supplier']     = \App\Services\Production\MaterialSourcing::unplaced((int) $m->id);
+        }
 
         if ($withDetail && $m->relationLoaded('inventory')) {
             $data['inventory'] = $m->inventory->map(fn ($inv) =>

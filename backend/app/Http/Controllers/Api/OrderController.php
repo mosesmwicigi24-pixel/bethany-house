@@ -2228,6 +2228,13 @@ class OrderController extends Controller
             'specifications' => 'nullable|array',
             'notes'          => 'nullable|string|max:2000',
             'due_date'       => 'nullable|date',
+            // Where each material comes from (MaterialSourcing): from the
+            // store, to buy, or a split. Left out, the job is raised with its
+            // materials still to be decided.
+            'materials'               => 'nullable|array',
+            'materials.*.material_id' => 'required|integer|exists:materials,id',
+            'materials.*.from_store'  => 'nullable|numeric|min:0|decimal:0,2',
+            'materials.*.to_buy'      => 'nullable|numeric|min:0|decimal:0,2',
         ]);
 
         $order = Order::with('items')->findOrFail($orderId);
@@ -2306,6 +2313,14 @@ class OrderController extends Controller
                 'updated_at'          => now(),
             ]);
 
+            // The materials the product needs are listed on the job at once,
+            // and the choices made in the window are recorded with it.
+            $job = \App\Models\ProductionOrder::findOrFail($poId);
+            \App\Services\Production\MaterialSourcing::ensureAllocations($job);
+            if (!empty($validated['materials'])) {
+                \App\Services\Production\MaterialSourcing::source($job, $validated['materials'], $request->user());
+            }
+
             ActivityLogService::log('production_raised_from_order', $order, [
                 'order_item_id'       => $item->id,
                 'production_order_id'  => $poId,
@@ -2318,7 +2333,26 @@ class OrderController extends Controller
                 'message'                 => 'Production order raised.',
                 'production_order_id'     => $poId,
                 'production_order_number' => $prodNum,
+                'materials_status'        => \App\Services\Production\MaterialSourcing::forOrder($job)['status'],
             ]);
         });
+    }
+
+    /**
+     * GET /orders/{id}/items/{itemId}/production-materials
+     *
+     * What making this line needs, from the product's bill of materials, and
+     * how much of each material is free in the store — for the "Send to
+     * production" window. No supplier and no price: who we buy from is
+     * procurement's to see (owner, 2026-11-19).
+     */
+    public function productionMaterials(int $orderId, int $itemId)
+    {
+        $item = \App\Models\OrderItem::where('order_id', $orderId)->findOrFail($itemId);
+        if (!$item->product_id) {
+            return response()->json(['has_bom' => false, 'materials' => []]);
+        }
+
+        return response()->json(\App\Services\Production\MaterialSourcing::requirements((int) $item->product_id, (float) $item->quantity));
     }
 }
