@@ -6,9 +6,13 @@
 // bought from Bethany House, within 14 days of the customer receiving the
 // item, subject to assessment; none after that, no exceptions.
 
+/** The repair rule on its own, as quotations and invoices show it. */
+export const REPAIR_TERM =
+    "Repairs and alterations: only for items bought from Bethany House, within 14 days of receiving the item, subject to assessment. None are accepted after 14 days.";
+
 export const RECEIPT_TERMS: string[] = [
     "Goods once sold are not exchangeable unless within 7 days with the original receipt.",
-    "Repairs and alterations: only for items bought from Bethany House, within 14 days of receiving the item, subject to assessment. None are accepted after 14 days.",
+    REPAIR_TERM,
 ];
 
 /** The thank-you line and the terms, for the 80 mm thermal receipts. */
