@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { formatAmount, formatMoney } from "@/lib/customerMoney";
+import { REPAIR_TERM } from "@/lib/customerTerms";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -158,6 +159,7 @@ export default function PublicQuotationPage() {
 
                     {quote.notes && <div className="mt-4 text-xs text-surface-500"><span className="font-medium">Notes:</span> {quote.notes}</div>}
                     {quote.terms && <div className="mt-1 text-xs text-surface-500"><span className="font-medium">Terms:</span> {quote.terms}</div>}
+                    <div className="mt-1 text-xs text-surface-500"><span className="font-medium">Standard terms:</span> {REPAIR_TERM}</div>
                 </div>
 
                 {/* Action */}

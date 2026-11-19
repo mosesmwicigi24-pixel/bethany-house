@@ -650,6 +650,8 @@ HTML;
             $n      = htmlspecialchars($order['notes']);
             $extra .= "<div class=\"notes-label\" style=\"margin-top:8px\">Terms</div><div class=\"notes-box\">{$n}</div>";
         }
+        // The 14-day repair rule, on every invoice (owner, 2026-11-19).
+        $extra .= \App\Support\CustomerTerms::repairsHtml();
 
         return self::page($title, $order['order_number'] ?? '—', $order['status'] ?? 'pending',
             $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra);
@@ -749,6 +751,8 @@ HTML;
             $extra .= '<div class="notes-label" style="margin-top:8px">Terms</div><div class="notes-box">'
                 . htmlspecialchars($q['terms']) . '</div>';
         }
+        // The 14-day repair rule, on every quotation (owner, 2026-11-19).
+        $extra .= \App\Support\CustomerTerms::repairsHtml();
         if (($q['status'] ?? null) === 'void') {
             // Voided with its invoice (2026-10-26): the copy says so plainly.
             $extra .= '<div class="notes-box" style="margin-top:10px;color:#dc2626;font-weight:700">This quotation was voided'
