@@ -625,84 +625,69 @@ class PaymentController extends Controller
      */
     public function mpesaCallback(Request $request)
     {
-        $data = $request->all();
-        Log::info('M-Pesa Callback received', $data);
+        // A callback is a notice, never proof: anyone can post one. It only
+        // tells us WHICH prompt to ask Safaricom about; what Safaricom
+        // answers is what settles (security audit 2026-11-19).
+        $callback          = (array) $request->input('Body.stkCallback', []);
+        $checkoutRequestId = (string) ($callback['CheckoutRequestID'] ?? '');
+
+        Log::info('M-Pesa callback received', [
+            'checkout_request_id' => $checkoutRequestId,
+            'result_code'         => $callback['ResultCode'] ?? null,
+        ]);
+
+        if ($checkoutRequestId === '') {
+            return response()->json(['message' => 'Invalid callback data'], 400);
+        }
+
+        // Not set up ⇒ no prompt was ever ours to hear about.
+        if (!MpesaService::isConfigured()) {
+            return response()->json(['message' => 'M-Pesa is not configured'], 400);
+        }
 
         try {
-            $resultCode        = $data['Body']['stkCallback']['ResultCode'] ?? null;
-            $checkoutRequestId = $data['Body']['stkCallback']['CheckoutRequestID'] ?? null;
-
-            if (!$checkoutRequestId) {
-                return response()->json(['message' => 'Invalid callback data'], 400);
-            }
-
-            $payment = Payment::where('provider_reference', $checkoutRequestId)->first();
+            // Only a prompt still waiting: a settled or held payment is not
+            // this door's to touch.
+            $payment = Payment::where('provider_reference', $checkoutRequestId)
+                ->where('payment_method', 'mpesa')
+                ->where('status', 'pending')
+                ->where(fn ($q) => $q->whereNull('requires_approval')->orWhere('requires_approval', false))
+                ->first();
 
             if (!$payment) {
-                Log::warning('mpesaCallback: payment not found', [
-                    'checkout_request_id' => $checkoutRequestId,
-                ]);
                 return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
             }
 
-            if ($resultCode === 0) {
-                $meta           = $data['Body']['stkCallback']['CallbackMetadata']['Item'] ?? [];
-                $receipt        = collect($meta)->firstWhere('Name', 'MpesaReceiptNumber')['Value'] ?? null;
+            $paid = MpesaService::promptWasPaid($checkoutRequestId);
 
-                DB::transaction(function () use ($payment, $receipt, $data) {
-                    $payment->update([
-                        'status'             => 'paid',
-                        'provider_reference' => $receipt ?? $payment->provider_reference,
-                        'paid_at'            => now(),
-                    ]);
+            if ($paid === null) {
+                // No answer: it stays pending for the verify button.
+                Log::warning('M-Pesa callback: Safaricom gave no answer, payment left pending', ['payment_id' => $payment->id]);
+                return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
+            }
 
-                    $order = $payment->order;
-                    $order->refresh();
-                    $order->syncPaymentStatus();
-                    $order->refresh();
+            if ($paid) {
+                $receipt = collect($callback['CallbackMetadata']['Item'] ?? [])
+                    ->firstWhere('Name', 'MpesaReceiptNumber')['Value'] ?? null;
+                $receipt = is_string($receipt) && preg_match('/^[A-Z0-9]{8,12}$/', $receipt) ? $receipt : null;
 
-                    // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
-                    $this->settleReceipt($order, $payment);
-
-                    if ($order->payment_status === 'paid' && $order->status === 'pending') {
-                        $order->update(['status' => 'processing']);
-                    }
-                });
-
-                $order = $payment->fresh()->order;
-
-                // ── Notifications & audit ─────────────────────────────────────
-                NotificationService::paymentReceived(
-                    $payment->id,
-                    $payment->payment_number,
-                    $order->id,
-                    $order->order_number,
-                    (float) $payment->amount,
-                    $order->currency_code,
-                    'mpesa'
-                );
-
-                ActivityLogService::log('mpesa_payment_confirmed', $order, [
-                    'payment_id'   => $payment->id,
-                    'receipt'      => $receipt,
-                    'amount'       => $payment->amount,
-                    'via'          => 'daraja_callback',
-                ]);
-
+                $order = $payment->order;
+                DB::transaction(fn () => $this->applyMpesaSettlement($payment, $order, $receipt));
+                $this->announceMpesaSettlement($payment, $order, $receipt, 'daraja_callback_stk_query');
             } else {
                 $payment->update(['status' => 'failed']);
 
                 ActivityLogService::log('mpesa_payment_failed', $payment->order, [
                     'payment_id'  => $payment->id,
-                    'result_code' => $resultCode,
-                    'result_desc' => $data['Body']['stkCallback']['ResultDesc'] ?? 'Unknown',
+                    'result_code' => $callback['ResultCode'] ?? null,
+                    'result_desc' => $callback['ResultDesc'] ?? 'Unknown',
                 ]);
             }
 
             return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
 
         } catch (\Exception $e) {
-            Log::error('M-Pesa callback error', ['error' => $e->getMessage(), 'data' => $data]);
+            Log::error('M-Pesa callback error', ['error' => $e->getMessage(), 'checkout_request_id' => $checkoutRequestId]);
             return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
         }
     }
