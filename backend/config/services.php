@@ -62,6 +62,15 @@ return [
     ],
 
 
+    // Flutterwave. `secret_hash` is the "Secret hash" set on the Flutterwave
+    // dashboard (Settings → Webhooks); it comes back in the `verif-hash`
+    // header of every webhook. Unset ⇒ the webhook refuses everything.
+    'flutterwave' => [
+        'secret_key'   => env('FLUTTERWAVE_SECRET_KEY'),
+        'secret_hash'  => env('FLUTTERWAVE_SECRET_HASH'),
+        'redirect_url' => env('FLUTTERWAVE_REDIRECT_URL'),
+    ],
+
     // Optional shared secret the storefront sends as X-Storefront-Key on the
     // Neema lead/shipping endpoints. Unset ⇒ those endpoints are open (§6).
     'storefront' => [
