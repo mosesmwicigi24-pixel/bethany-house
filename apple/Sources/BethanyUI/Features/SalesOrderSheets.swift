@@ -618,16 +618,23 @@ struct RaiseProductionSheet: View {
     @State private var notes = ""
     @State private var dueDate: Date?
     @State private var measurements: [(String, String)] = [("", "")]
+    /// What the line needs from the bill of materials (GET …/production-materials, #573).
+    @State private var requirements: MaterialSourcing.Requirements?
+    @State private var needsFailed = false
+    @State private var choices: [Int: MaterialSourcing.Choice] = [:]
+    private var needs: [MaterialSourcing.Need] { requirements?.needs ?? [] }
+    private var blocked: Bool { (requirements == nil && !needsFailed) || (!needs.isEmpty && MaterialSourcing.hasProblem(needs, choices)) }
     var body: some View {
-        SheetFrame(title: "Send to production", submitLabel: "Raise production order", onCancel: onCancel, onSubmit: {
+        SheetFrame(title: "Send to production", submitLabel: "Raise production order", canSubmit: !blocked, onCancel: onCancel, onSubmit: {
             var body: [String: JSONValue] = [:]
             if !color.trimmingCharacters(in: .whitespaces).isEmpty { body["color"] = .string(color) }
             if !notes.trimmingCharacters(in: .whitespaces).isEmpty { body["notes"] = .string(notes) }
             if let dueDate { body["due_date"] = .string(HubDates.dayString(dueDate)) }
             let m = measurements.filter { !$0.0.trimmingCharacters(in: .whitespaces).isEmpty }
             if !m.isEmpty { body["measurements"] = .object(Dictionary(uniqueKeysWithValues: m.map { ($0.0.trimmingCharacters(in: .whitespaces), JSONValue.string($0.1)) })) }
+            if !needs.isEmpty { body["materials"] = MaterialSourcing.payload(needs, choices) }
             let r = try await env.session.client.post("/v1/admin/orders/\(order.id)/items/\(item.id)/production", json: .object(body))
-            env.toasts.show("Production order \(r.json?["production_order_number"]?.string ?? "") raised")
+            env.toasts.show(MaterialSourcing.raisedMessage(r.json ?? .null))
             onDone()
         }) {
             DetailRow("Line", "\(item.string("product_name") ?? "") × \(item.string("quantity") ?? "")")
@@ -642,7 +649,31 @@ struct RaiseProductionSheet: View {
                 }
                 Button("Add measurement") { measurements.append(("", "")) }.font(Theme.Font.secondary)
             }
+            SalesLabeledField(label: "Required materials") {
+                if needsFailed {
+                    Text("Couldn't load the materials. You can still raise the job and choose them on the production order.").font(Theme.Font.caption).foregroundStyle(Theme.Palette.amber)
+                } else if let requirements {
+                    if needs.isEmpty {
+                        Text(requirements.hasBom ? "The bill of materials is empty." : "This product has no bill of materials yet, so no materials will be reserved or requested.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                    } else {
+                        Text("Choose where each material comes from.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        MaterialSourcingFields(needs: needs, choices: $choices)
+                        if !MaterialSourcing.hasProblem(needs, choices), let s = MaterialSourcing.summary(needs, choices) {
+                            Text(s).font(Theme.Font.caption).foregroundStyle(Theme.Palette.amber)
+                        }
+                    }
+                } else {
+                    Text("Checking the bill of materials…").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                }
+            }
             TextInput(label: "Notes for the workshop", text: $notes, multiline: true)
+        }
+        .task {
+            do {
+                let r = MaterialSourcing.requirements(try await env.session.client.get("/v1/admin/orders/\(order.id)/items/\(item.id)/production-materials").json ?? .null)
+                choices = MaterialSourcing.defaultChoices(r.needs)
+                requirements = r
+            } catch { needsFailed = true }
         }
     }
 }
