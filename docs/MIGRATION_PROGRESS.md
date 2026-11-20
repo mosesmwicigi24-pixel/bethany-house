@@ -389,3 +389,65 @@ builds (#561's log, `sort -u`). Every one is fixed at its cause, not hidden:
 - `LocationService`: two `await`s on synchronous main-actor calls removed.
 
 Verification is the Apple CI build's warning count on this branch.
+
+## 2026-11-20 — Parity re-check after #563–#577
+
+Fifteen commits landed on `main` after the last parity merge (#562). Each
+console-visible change was compared with the Apple code (`git show` of each
+commit against `apple/Sources`), and `tools/parity/xref_runtime.py` was re-run.
+
+New literal gaps (22, was 20):
+`orders/{id}/items/{itemId}/production-materials` and
+`purchase-orders/{id}/items/{itemId}/move` (#573). `production-orders/{id}/material-sourcing`
+showed as a runtime-built match, but nothing in `apple/Sources` sends it.
+
+| Commit | Console change | Apple before | Slice |
+|---|---|---|---|
+| #564 | Supplier payments: I&M Bank as its own method, nothing preselected | stale list, `bank_transfer` preselected | A |
+| #565 | "Me" nav group renamed "My Workday"; course "Required" wording | old wording | A |
+| #568/#569 | Users: Staff / Website customers tabs; ID and System tag | staff only; no ID/tag | A |
+| #572 | Customer Reviews form: name, stars, review, where posted | no rating — a review added natively was skipped by the storefront | A |
+| #576 | Credentials form: fixed fields per provider, "saved, blank keeps" | free-form key/value | A |
+| #566 | Quotation picker prices each product in the quotation's currency (`quotations/reprice`); tick several | KES base price shown as a hint, price typed by hand | B |
+| #573 | Material sourcing at Send to production; job materials panel; PO line move; material's preferred supplier | missing | C |
+| #563 | BOM cost source and "without a cost"; product media notices/progress | missing | D |
+| #570 | Phone layouts | N/A (native layout) | — |
+| #574 | 14-day repair rule on quotation/invoice | PDFs come from the server, so already carry it; no API field for native screens | owner |
+| #571, #575, #577, #567 | Storefront feeds, webhook rule, starter content | server-only | — |
+
+#577's review approval lives in the Livewire admin (`/customers/reviews`), not
+the React console; outside this migration's scope as the console defines it.
+
+### Slice A (branch `apple/parity-563-577`)
+
+- **Supplier payments** — `BethanyKit/SupplierPaymentMethod.swift` mirrors
+  `SupplierPayment::METHODS` / `NEEDS_REFERENCE` with the console's labels and
+  hints; no method is preselected and the sheet cannot be sent without one;
+  the payments list shows "I&M Bank", not a humanised code.
+  `SupplierPaymentMethodTests` (4), fixture typed from the PHP constants.
+  The server rule itself is pinned by `SupplierPaymentsTest.php:211-213`
+  (no payable PO on the scratch database to try it live).
+- **Users** — segmented Staff / Website customers (`exclude_type=customer` /
+  `user_type=customer`, as the console), the console's note on the customers
+  tab, `#id` on every row and a "System" tag. "Promote to staff" is reachable
+  again (it only shows on a customer). Scratch Hub: `user_type=customer`
+  answered 0 rows; `exclude_type=customer` answered types `staff`, `system`.
+- **Customer Reviews** — the slot is renamed, a new review starts at
+  "Google review" and 5 stars, the form is name / stars / review (2,000) /
+  where posted, `styles.rating` is saved as a number, the list shows stars.
+- **Payment credentials** — the console's fixed fields (M-Pesa: business
+  name, shortcode, consumer key/secret, passkey, environment picker;
+  Paystack; Flutterwave), secrets as secure fields with "•••••••• saved" from
+  `config_set`, blank keeps the saved key. Other keys already stored on a
+  method (scratch Hub: `instructions` on mukuru, wu_moneygram, mpesa_manual,
+  bank_transfer) stay editable as saved fields, which the native form could
+  already do; the console form does not list them. **Owner note:** since #576
+  the server returns `instructions` as "" (it is not in `PLAIN_CONFIG_KEYS`),
+  so no screen can show the text a manual method gives customers.
+- **My Workday** — sidebar group renamed; course toggle reads "Required
+  (waits on Today until passed)". The phone tab stays "Me", as the console's
+  `BottomTabBar.tsx`.
+
+Checks: Linux kit tests (62 in the scratch package, incl. the 4 new) pass;
+`swiftc -parse` on every edited UI file; the macOS build and full kit suite
+are Apple CI's.

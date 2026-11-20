@@ -53,7 +53,7 @@ final class PermissionsTests: XCTestCase {
     }
 
     func testEveryMeItemIsOpenToEverySignedInPerson() {
-        let me = NavCatalogue.groups.first { $0.label == "Me" }!
+        let me = NavCatalogue.groups.first { $0.label == "My Workday" }!
         XCTAssertEqual(me.items.count, 14)
         XCTAssertTrue(me.items.allSatisfy { $0.gate.isOpen })
     }
