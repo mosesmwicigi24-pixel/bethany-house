@@ -93,3 +93,37 @@ in admin → Home Front Customization → Home Page → **Customer Reviews**.
   without a name, a text and a valid rating.
 
 Pinned by `tests/Feature/BannerCmsTest.php`.
+
+## Product reviews — HUB_CONTRACT §8 (IMPLEMENTED 2026-11-20)
+
+| Endpoint | Method | Handler | Auth |
+|---|---|---|---|
+| `/api/v1/storefront/products/{slug}/reviews` | GET | `StorefrontProductReviewController::index` | optional `X-Storefront-Key` |
+| `/api/v1/storefront/products/{slug}/reviews` | POST | `StorefrontProductReviewController::store` | optional `X-Storefront-Key` |
+
+Same public storefront-bridge group, throttled, called **server-side by the
+storefront only**. `{slug}` is the hub product's slug — the storefront passes
+a garment's base slug, so its colour and size variants share one rating.
+
+- **GET** answers `{ data: { average, count, distribution: {"5"…"1"}, reviews[…] } }`
+  from **approved** rows only (`is_approved = true`), ten reviews, most helpful
+  then newest. `count: 0` is the storefront's cue to show its fallback. A
+  review carries `id`, `rating`, `title`, `body`, `author`, `verified`,
+  `created_at`, `helpful_up`, `helpful_down`, `status` — never an email.
+- **POST** saves one customer rating (1–5, optional title / body / author /
+  email) as a **pending** row: `is_approved = false`, `source = 'storefront'`,
+  no `user_id`. It is public only after approval in admin →
+  Customers → **Reviews & Ratings**, where storefront reviewers show by the
+  name and email they typed. Nothing a customer writes is edited.
+- **Idempotent** on `client_request_id` (unique index): a retry returns the
+  same review with 200, never a second row.
+- **Verified** is decided here, not claimed: `is_verified_purchase` is true
+  (and `order_id` set) when a recognised order — `Order::recognised()`, a sale,
+  never a cart or a cancelled order — for the given email, on the order itself
+  or its customer record, holds the product.
+- Schema: `2026_11_20_100000_storefront_product_reviews` makes
+  `product_reviews.user_id` nullable and adds `author_name`, `author_email`,
+  `client_request_id` (unique) and `source` (default `hub`). Existing rows are
+  untouched.
+
+Pinned by `tests/Feature/StorefrontProductReviewsTest.php`.
