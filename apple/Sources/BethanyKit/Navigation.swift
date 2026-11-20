@@ -305,7 +305,7 @@ public enum NavCatalogue {
             NavItem("Notifications", .notifications, gate: .perm("notifications.view"), icon: "bell"),
             NavItem("Messages", .comms(), icon: "bubble.left.and.bubble.right"),
         ]),
-        NavGroup("Me", [
+        NavGroup("My Workday", [   // renamed from "Me" (console Sidebar.tsx, owner 2026-11-14); the phone tab stays "Me" as in BottomTabBar.tsx
             NavItem("Today", .me, icon: "sun.max"),
             NavItem("Updates", .updates(), icon: "megaphone"),
             NavItem("Checklists", .forms, icon: "checklist"),

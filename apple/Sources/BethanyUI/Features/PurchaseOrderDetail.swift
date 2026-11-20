@@ -358,7 +358,7 @@ struct SupplierPaymentsSection: View {
                         let voided = p["voided_at"]?.isNull == false
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                HStack { Text(p.string("payment_number") ?? "").font(Theme.Font.body.weight(.semibold)); StatusBadge(voided ? "voided" : p.string("method")?.humanized, tone: voided ? .danger : .info) }
+                                HStack { Text(p.string("payment_number") ?? "").font(Theme.Font.body.weight(.semibold)); StatusBadge(voided ? "voided" : SupplierPaymentMethod.label(for: p.string("method")), tone: voided ? .danger : .info) }
                                 Text("\(p.string("paid_at") ?? "") · \(p.string("reference") ?? "") · \(Names.person(p["recorder"]) ?? "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                                 if voided, let why = p.string("void_reason") { Text("Voided: \(why)").font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger) }
                             }
@@ -399,23 +399,26 @@ struct RecordSupplierPaymentSheet: View {
     let po: PurchaseOrderRecord
     let onDone: () -> Void
     @State private var amount = ""
-    @State private var method = "bank_transfer"
+    /// Nothing preselected (console, 2026-11-14): the payment is filed under the method someone chose.
+    @State private var method: SupplierPaymentMethod?
     @State private var reference = ""
     @State private var paidAt = Date()
     @State private var notes = ""
     @State private var requestId = UUID().uuidString
     @State private var error: APIError?
 
-    static let methods = ["bank_transfer", "mpesa", "cash", "cheque", "card", "other"]
-    static let needsReference: Set<String> = ["bank_transfer", "mpesa", "cheque", "card"]
-
-    private var valid: Bool { (JSONValue.decimal(amount)?.double ?? 0) > 0 && (!Self.needsReference.contains(method) || !reference.trimmingCharacters(in: .whitespaces).isEmpty) }
+    private var valid: Bool { SupplierPaymentMethod.canRecord(amount: JSONValue.decimal(amount)?.double, method: method, reference: reference) }
 
     var body: some View {
         ModuleFormSheet("Record payment — \(po.number)", submitLabel: "Record payment", canSubmit: valid, error: error, submit: submit) {
             ModuleField("Amount (\(po.currency))", error: error?.errors["amount"]?.first) { TextField("0.00", text: $amount).textFieldStyle(.roundedBorder) }
-            ModuleField("Method", error: error?.errors["method"]?.first) { Picker("Method", selection: $method) { ForEach(Self.methods, id: \.self) { Text($0.humanized).tag($0) } } }
-            ModuleField(Self.needsReference.contains(method) ? "Reference (required)" : "Reference", error: error?.errors["reference"]?.first) { TextField("Transaction code", text: $reference).textFieldStyle(.roundedBorder) }
+            ModuleField("Method", error: error?.errors["method"]?.first) {
+                Picker("Method", selection: $method) {
+                    Text("Choose how you paid…").tag(SupplierPaymentMethod?.none)
+                    ForEach(SupplierPaymentMethod.allCases) { Text($0.label).tag(Optional($0)) }
+                }
+            }
+            ModuleField(method?.needsReference == true ? "Reference (required)" : "Reference", error: error?.errors["reference"]?.first) { TextField(method?.referenceHint ?? "Receipt or note", text: $reference).textFieldStyle(.roundedBorder) }
             ModuleField("Paid on") { DatePicker("", selection: $paidAt, displayedComponents: .date).labelsHidden() }
             ModuleField("Notes") { TextField("Notes", text: $notes, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...4) }
             Text("Money paid to a supplier is not an expense; it settles the payables ledger. Retrying this form cannot record it twice.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
@@ -425,7 +428,7 @@ struct RecordSupplierPaymentSheet: View {
     private func submit() async {
         do {
             let r = try await env.session.client.post("/v1/admin/purchase-orders/\(po.id)/payments", json: .object([
-                "amount": JSONValue.decimal(amount) ?? .number(0), "method": .string(method), "reference": .str(reference), "paid_at": .string(apiDay(paidAt)), "notes": .str(notes), "client_request_id": .string(requestId),
+                "amount": JSONValue.decimal(amount) ?? .number(0), "method": .string(method?.rawValue ?? ""), "reference": .str(reference), "paid_at": .string(apiDay(paidAt)), "notes": .str(notes), "client_request_id": .string(requestId),
             ]))
             env.toasts.show(r.json?["message"]?.string ?? "Payment recorded"); onDone(); dismiss()
         } catch let e as APIError { error = e } catch { self.error = APIError.transport(error.localizedDescription) }
