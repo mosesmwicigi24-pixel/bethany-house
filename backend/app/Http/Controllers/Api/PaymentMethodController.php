@@ -342,8 +342,24 @@ class PaymentMethodController extends Controller
             return response()->json(['message' => 'Payment method not found.'], 404);
         }
 
+        // A field left blank — or sent back as the mask it was shown as —
+        // keeps what is saved. Re-saving the form used to write the row of
+        // dots over the real keys.
+        $existing = json_decode($method->configuration ?? '{}', true) ?: [];
+        $incoming = collect($incoming)
+            ->map(fn ($v) => is_string($v) ? trim($v) : $v)
+            ->reject(fn ($v) => $v === null || $v === '' || (is_string($v) && preg_match('/^[•*]+$/u', $v)))
+            ->all();
+
+        if (isset($incoming['environment']) && !in_array($incoming['environment'], ['sandbox', 'production'], true)) {
+            return response()->json([
+                'message' => 'Environment must be sandbox or production.',
+                'errors'  => ['environment' => ['Environment must be sandbox or production.']],
+            ], 422);
+        }
+
         DB::table('payment_methods')->where('id', $id)->update([
-            'configuration' => json_encode($incoming),
+            'configuration' => json_encode($incoming + $existing),
             'updated_at'    => now(),
         ]);
 
@@ -356,6 +372,7 @@ class PaymentMethodController extends Controller
                 'mpesa_shortcode'       => $incoming['shortcode']       ?? null,
                 'mpesa_passkey'         => $incoming['passkey']         ?? null,
                 'mpesa_environment'     => $incoming['environment']     ?? null,
+                'mpesa_account_name'    => $incoming['account_name']    ?? null,
             ],
             'paystack' => [
                 'paystack_public_key' => $incoming['public_key']  ?? null,
@@ -407,20 +424,27 @@ class PaymentMethodController extends Controller
     // PRIVATE HELPERS
     // =========================================================================
 
+    /** Gateway settings that are not secrets, and are shown back to the form. */
+    private const PLAIN_CONFIG_KEYS = ['shortcode', 'account_name', 'environment', 'public_key'];
+
     /**
      * Format a payment method row for JSON response.
      * - Decodes JSON columns
-     * - Masks sensitive credential keys (shows key names but not values)
+     * - Never returns a secret: only whether one is saved (config_set)
      * - Normalises column name differences
      */
     private function format(object $method): array
     {
         $config = json_decode($method->configuration ?? '{}', true) ?? [];
 
-        // Mask credential values - send key names only so React can show input fields
+        // Secrets never leave the server: the form is told only THAT one is
+        // saved (config_set). What is not secret — the shortcode, the name,
+        // the environment, a public key — is shown, so it can be checked.
         $maskedConfig = [];
+        $configSet    = [];
         foreach ($config as $key => $value) {
-            $maskedConfig[$key] = !empty($value) ? '••••••••' : '';
+            $configSet[$key]    = !empty($value);
+            $maskedConfig[$key] = in_array($key, self::PLAIN_CONFIG_KEYS, true) ? (string) ($value ?? '') : '';
         }
 
         return [
@@ -442,6 +466,7 @@ class PaymentMethodController extends Controller
             'display_order'        => $method->display_order ?? $method->sort_order ?? 0,
             'supported_currencies' => json_decode($method->supported_currencies ?? '["KES"]', true),
             'config'               => $maskedConfig,   // React types use 'config' key
+            'config_set'           => $configSet,
             'created_at'           => $method->created_at,
             'updated_at'           => $method->updated_at,
         ];

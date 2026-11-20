@@ -198,6 +198,8 @@ export interface PaymentMethodSetup {
     display_order: number;
     configuration: Record<string, string> | null; // DB column name
     config?: Record<string, string> | null; // key returned by backend format() helper
+    /** Which settings are saved. A secret is never sent back, only this. */
+    config_set?: Record<string, boolean> | null;
     supported_currencies: string[];
     created_at: string;
     updated_at: string;

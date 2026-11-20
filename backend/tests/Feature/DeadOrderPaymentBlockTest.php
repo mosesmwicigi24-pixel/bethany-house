@@ -36,6 +36,7 @@ use Tests\TestCase;
 class DeadOrderPaymentBlockTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\FakesSafaricom;
 
     protected function setUp(): void
     {
@@ -279,6 +280,7 @@ class DeadOrderPaymentBlockTest extends TestCase
 
         // Staff cancel while the customer's phone is still showing the prompt.
         $order->forceFill(['status' => 'cancelled', 'cancelled_at' => now()])->save();
+        $this->safaricomAnswers('0');   // Safaricom confirms the prompt was paid
 
         $this->postJson("/api/v1/pay/{$order->payment_token}/mpesa-callback", $this->stkCallback('ws_CO_LATE_1', 1000, 'RJK1LATE01'))
             ->assertOk()->assertJson(['ResultCode' => 0]);
@@ -325,6 +327,7 @@ class DeadOrderPaymentBlockTest extends TestCase
             'status' => 'pending', 'provider_reference' => 'ws_CO_LATE_2', 'recorded_by' => null,
         ]);
         $order->forceFill(['status' => 'voided'])->save();
+        $this->safaricomAnswers('0');
 
         $this->postJson('/api/webhooks/mpesa/callback', $this->stkCallback('ws_CO_LATE_2', 1000, 'RJK1LATE02'))->assertOk();
 
@@ -365,6 +368,7 @@ class DeadOrderPaymentBlockTest extends TestCase
             'status' => 'pending', 'provider_reference' => 'ws_CO_LIVE_1', 'recorded_by' => null,
         ]);
 
+        $this->safaricomAnswers('0');
         $this->postJson("/api/v1/pay/{$order->payment_token}/mpesa-callback", $this->stkCallback('ws_CO_LIVE_1', 1000, 'RJK1LIVE01'))->assertOk();
 
         $this->assertNull($push->fresh()->received_after_cancel_at);
