@@ -271,6 +271,16 @@ Route::prefix('v1')->group(function () {
         Route::patch('/storefront/interest-carts/{token}', [\App\Http\Controllers\Api\StorefrontInterestCartController::class, 'transition'])
             ->middleware('throttle:30,1');
 
+        // Product reviews for the storefront (HUB_CONTRACT §8): the rating
+        // summary and approved reviews out, moderated customer reviews in —
+        // keyed to the hub product by slug (a garment's variants share one
+        // rating). Same optional X-Storefront-Key gate as the leads bridge;
+        // nothing is public until approved in Customers → Reviews & Ratings.
+        Route::get('/storefront/products/{slug}/reviews', [\App\Http\Controllers\Api\StorefrontProductReviewController::class, 'index'])
+            ->middleware('throttle:120,1');
+        Route::post('/storefront/products/{slug}/reviews', [\App\Http\Controllers\Api\StorefrontProductReviewController::class, 'store'])
+            ->middleware('throttle:30,1');
+
         // Passwordless "Find my orders": a one-time code (WhatsApp / email) then
         // a 24h cache-backed session. Never gates checkout — pure lookup. See
         // StorefrontLookupController.

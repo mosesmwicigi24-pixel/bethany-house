@@ -55393,6 +55393,95 @@
                 }
             }
         },
+        "/api/v1/storefront/products/{slug}/reviews": {
+            "get": {
+                "operationId": "get_v1_storefront_products_by_slug_reviews",
+                "summary": "Index (StorefrontProductReview)",
+                "tags": [
+                    "storefront"
+                ],
+                "parameters": [
+                    {
+                        "name": "slug",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "x-throttle": [
+                    "public-api",
+                    "120,1"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            },
+            "post": {
+                "operationId": "post_v1_storefront_products_by_slug_reviews",
+                "summary": "Store (StorefrontProductReview)",
+                "tags": [
+                    "storefront"
+                ],
+                "parameters": [
+                    {
+                        "name": "slug",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "x-throttle": [
+                    "public-api",
+                    "30,1"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationError"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/storefront/shipping/estimate": {
             "get": {
                 "operationId": "get_v1_storefront_shipping_estimate",
