@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### In progress — production calendar, Codex
+
+- Refining `apple/Sources/BethanyUI/Features/ProductionBoards.swift` for a tailor-focused calendar using the existing scoped schedule endpoint. Its payload has due dates and workload counts but no collection/fitting dates or order IDs; those gaps need separate verification before adding such actions.
+
 ### Tailors Hub app icon — 23 November 2026
 
 - Added a terracotta scissors-and-thread icon to the Apple TailorsMobile app icon catalog. The iPhone simulator build succeeded and the installed icon was inspected on the iPhone 17 Pro home screen. App Store distribution remains separate and unverified.
