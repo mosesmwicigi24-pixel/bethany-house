@@ -477,3 +477,38 @@ Not ported, on purpose: the console's live "subtotal + shipping" on the form
 (native keeps "computed by the server when saved" — no client money
 arithmetic), and typing a product name on a free line to pick a product (the
 picker covers it).
+### Slice C: material sourcing (#573), branch `apple/parity-material-sourcing`
+
+- `BethanyKit/MaterialSourcing.swift` mirrors the console's
+  `components/production/MaterialSourcing.tsx`: default (store when it has
+  enough, else buy), split (starts at what is free, short of the whole need),
+  the three refusals ("Only 1 m free in the store.", "Enter how much comes
+  from the store.", "Less than 16 pcs, or choose From store."), the payload,
+  the "On raising: …" summary, the raise toast, and the job's state (status,
+  what is outstanding, free + what the job already holds, the current
+  decision as choices). `MaterialSourcingTests` (6) on real answers from the
+  scratch Hub, seeded as backend `MaterialSourcingTest` (2 shirts = 5 m fabric
+  + 16 buttons; store 1 m and 120).
+- **Send to production** (`RaiseProductionSheet`): GET
+  `orders/{id}/items/{itemId}/production-materials`, a From store / To buy /
+  Split row per material, `materials` sent with the raise; blocked while
+  loading or when a row is refused; the console's empty-BOM and load-failure
+  wording. Scratch Hub: fabric 1 + 4, buttons 16 + 0 was accepted, answer
+  `materials_status: "waiting"`.
+- **Production job**: "Where the materials come from" panel (GET/POST
+  `production-orders/{id}/material-sourcing`), status chip, per-material
+  issued / reserved / being bought / not yet sourced; "Choose sources" /
+  "Change" for `production.raise_order` or `production.manage_assignees`
+  while the job is open. Scratch Hub refused 5 m from store with "White
+  cotton fabric: only 0 m free in the store."
+- **Purchase order lines**: the job and customer order a material line was
+  raised for, "job cancelled", and "Move to another supplier" on a draft for
+  `procurement.create` (POST `…/items/{itemId}/move`), then opens the order
+  the line joined. Scratch Hub: "Line moved to PO-20261121-0002."
+- **Raw materials**: "N m to buy · set a supplier" on the list
+  (`needs_supplier`, sent to procurement only) and "Bought from" on edit for
+  `procurement.create`, sent only when changed.
+
+The console's "Adjust price" step of 0.01 needs nothing natively: Apple never
+rounded a typed unit price, and no Swift code rounds prices to whole units
+(the #573 "prices keep two decimals" half).
