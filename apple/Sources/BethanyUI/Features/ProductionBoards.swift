@@ -169,55 +169,43 @@ struct QCView: View {
 
 struct ProductionCalendarView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @State private var schedule: Resource<JSONValue>?
     @State private var month = Date()
+    @State private var selectedDay: Date?
     @State private var showAllOverdue = false
+    @State private var openingOrder = false
+
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = HubDates.nairobi
+        calendar.firstWeekday = 2
+        return calendar
+    }
 
     var body: some View {
-        // A floor worker's schedule holds only her own jobs (server, Production
-        // Cycle 8), so "earliest free slot" — a date-promising figure for whoever
-        // runs the floor — would mean nothing to her.
         let floorWorker = env.session.permissions.isFloorWorker
-        Page("Production Calendar", subtitle: floorWorker ? "Your jobs by due date" : "Delivery promises against the floor's load") {
+        Page("Production Calendar", subtitle: floorWorker ? "Plan your work, one day at a time" : "See upcoming production deadlines") {
             if let schedule {
-                LoadableView(schedule.state, retry: { schedule.load() }) { s in
-                    let active = s["active_count"]?.string ?? "0"
-                    let tiles: [(String, String, StatusTone?)] = floorWorker
-                        ? [("Your active orders", active, nil)]
-                        : [("Active orders", active, nil), ("Earliest free slot", s["earliest_free_slot"]?.string ?? "—", .info)]
-                    StatsRow(tiles: tiles)
-                    let byStage = s["by_stage"]?.object ?? [:]
-                    if !byStage.isEmpty {
-                        SectionCard("Open work per stage") {
-                            ForEach(byStage.keys.sorted(), id: \.self) { k in
-                                DetailRow(s["stage_names"]?[k]?.string ?? "Stage \(k)", byStage[k]?.string)
-                            }
-                        }
+                LoadableView(schedule.state, retry: { schedule.load() }) { data in
+                    let orders = (data["upcoming_orders"]?.array ?? []).sorted {
+                        ($0["due_date"]?.date ?? .distantFuture) < ($1["due_date"]?.date ?? .distantFuture)
                     }
-                    let orders = s["upcoming_orders"]?.array ?? []
                     let today = HubDates.dayString(Date())
-                    let overdue = orders.filter { item in
-                        item["due_date"]?.date.map { HubDates.dayString($0) < today } ?? false
-                    }
-                    if !overdue.isEmpty {
-                        SectionCard("Overdue") {
-                            ForEach(Array(overdue.prefix(showAllOverdue ? overdue.count : 3).enumerated()), id: \.offset) { _, order in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(order["product_name"]?.string ?? order["order_number"]?.string ?? "Production order")
-                                        .font(.subheadline.weight(.semibold))
-                                    DateText(order["due_date"]?.date, style: .date).font(.caption)
-                                }
-                            }
-                            if overdue.count > 3 {
-                                Button(showAllOverdue ? "Show fewer" : "Show all \(overdue.count) overdue orders") {
-                                    showAllOverdue.toggle()
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(Theme.Palette.brandDeep)
-                            }
-                        }
+                    let overdue = orders.filter { $0["due_date"]?.date.map { HubDates.dayString($0) < today } ?? false }
+                    summary(data, overdue: overdue.count, floorWorker: floorWorker)
+                    if !floorWorker, let slot = data["earliest_free_slot"]?.string {
+                        Label("Earliest free slot: \(slot)", systemImage: "calendar.badge.clock")
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                     monthView(orders)
+                    if !overdue.isEmpty { overdueSection(overdue) }
+                    stages(data)
+                    if floorWorker {
+                        Button { env.navigator.go(.productionMyTasks) } label: {
+                            Label("Open My Tasks", systemImage: "scissors")
+                        }.tint(Theme.Palette.brandDeep)
+                    }
                 }
             }
         }
@@ -226,62 +214,167 @@ struct ProductionCalendarView: View {
         #endif
         .task {
             if schedule == nil {
-                let c = env.session.client
-                schedule = Resource { try await c.get("/v1/admin/production/schedule").json ?? .null }
+                let client = env.session.client
+                schedule = Resource { try await client.get("/v1/admin/production/schedule").json ?? .null }
                 schedule?.load()
             }
         }
         .refreshable { await schedule?.reload() }
     }
 
+    private func summary(_ data: JSONValue, overdue: Int, floorWorker: Bool) -> some View {
+        HStack(spacing: 10) {
+            summaryTile(floorWorker ? "Your active orders" : "Active orders", value: data["active_count"]?.string ?? "—", icon: "scissors", tint: Theme.Palette.brandDeep)
+            summaryTile("Past due", value: "\(overdue)", icon: "calendar.badge.exclamationmark", tint: overdue > 0 ? Theme.Palette.danger : Theme.textSecondary)
+        }
+    }
+
+    private func summaryTile(_ title: String, value: String, icon: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon).font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
+            Text(value).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
+        }
+        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+        .padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line))
+        .accessibilityElement(children: .combine)
+    }
+
     private func monthView(_ orders: [JSONValue]) -> some View {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = HubDates.nairobi
+        let cal = calendar
         let start = cal.date(from: cal.dateComponents([.year, .month], from: month)) ?? month
-        let days = cal.range(of: .day, in: .month, for: start)?.count ?? 30
+        let numberOfDays = cal.range(of: .day, in: .month, for: start)?.count ?? 30
+        let offset = (cal.component(.weekday, from: start) - cal.firstWeekday + 7) % 7
         let byDay = Dictionary(grouping: orders.filter { $0["due_date"]?.date != nil }) { HubDates.dayString($0["due_date"]!.date!) }
-        let f = DateFormatter()
-        f.timeZone = HubDates.nairobi
-        f.dateFormat = "LLLL yyyy"
+        let monthKey = String(HubDates.dayString(start).prefix(7))
+        let monthOrders = orders.filter { $0["due_date"]?.date.map { HubDates.dayString($0).hasPrefix(monthKey) } ?? false }
+        let visibleOrders = selectedDay.map { day in monthOrders.filter { $0["due_date"]?.date.map { HubDates.dayString($0) == HubDates.dayString(day) } ?? false } } ?? monthOrders
+        let formatter = DateFormatter()
+        formatter.timeZone = HubDates.nairobi
+        formatter.dateFormat = "LLLL yyyy"
         return SectionCard {
             HStack {
-                Button { month = cal.date(byAdding: .month, value: -1, to: month) ?? month } label: { Image(systemName: "chevron.left") }
-                Spacer(); Text(f.string(from: start)).font(Theme.Font.sectionTitle); Spacer()
-                Button { month = cal.date(byAdding: .month, value: 1, to: month) ?? month } label: { Image(systemName: "chevron.right") }
-            }
-            .buttonStyle(.plain)
-            HStack {
-                Button("Today") { month = Date() }
+                Button { changeMonth(-1) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }.accessibilityLabel("Previous month")
+                Spacer()
+                Text(formatter.string(from: start)).font(.headline)
+                Spacer()
+                Button { changeMonth(1) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("Next month")
+            }.buttonStyle(.plain)
+            HStack(spacing: 12) {
+                Button("Today") { month = Date(); selectedDay = Date() }
                 if let next = orders.compactMap({ $0["due_date"]?.date }).filter({ $0 >= cal.startOfDay(for: Date()) }).min() {
-                    Button("Next due date") { month = next }
+                    Button("Next deadline") { month = next; selectedDay = next }
                 }
-            }
-            .font(.subheadline)
-            .tint(Theme.Palette.brandDeep)
-            ForEach(1...days, id: \.self) { d in
-                let date = cal.date(byAdding: .day, value: d - 1, to: start)!
-                let key = HubDates.dayString(date)
-                if let due = byDay[key], !due.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { DateText(date, style: .date); if date < cal.startOfDay(for: Date()) { StatusBadge("past due", tone: .danger) } }
-                        ForEach(Array(due.enumerated()), id: \.offset) { _, o in
-                            HStack {
-                                Text(o["order_number"]?.string ?? "").font(Theme.Font.body.weight(.semibold))
-                                StatusBadge(o["status"]?.string)
-                                PriorityBadge(priority: o["priority"]?.string)
-                                Text("\(o["quantity"]?.int ?? 0) × \(o["product_name"]?.string ?? "")").font(Theme.Font.secondary).lineLimit(1)
-                                Spacer()
-                                if let c = o["customer_name"]?.string { Text(c).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
-                                Text("\(o["completion_percentage"]?.int ?? 0)%").font(Theme.Font.caption).monospacedDigit()
+                Spacer()
+                if selectedDay != nil { Button("Show month") { selectedDay = nil } }
+            }.font(.caption.weight(.medium)).tint(Theme.Palette.brandDeep)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 4) {
+                ForEach(["M", "T", "W", "T", "F", "S", "S"].indices, id: \.self) { index in
+                    Text(["M", "T", "W", "T", "F", "S", "S"][index]).font(.caption2.weight(.medium)).foregroundStyle(Theme.textSecondary).frame(maxWidth: .infinity)
+                }
+                ForEach(0..<offset, id: \.self) { _ in Color.clear.frame(height: 44) }
+                ForEach(1...numberOfDays, id: \.self) { day in
+                    if let date = cal.date(byAdding: .day, value: day - 1, to: start) {
+                        let count = byDay[HubDates.dayString(date)]?.count ?? 0
+                        let selected = selectedDay.map { cal.isDate($0, inSameDayAs: date) } ?? false
+                        Button { selectedDay = date } label: {
+                            VStack(spacing: 2) {
+                                Text("\(day)").font(.subheadline.weight(selected ? .semibold : .regular)).monospacedDigit()
+                                Circle().fill(count > 0 ? (selected ? Color.white : Theme.Palette.brandDeep) : .clear).frame(width: 5, height: 5)
                             }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(selected ? Color.white : Theme.text)
+                            .background(selected ? Theme.Palette.brandDeep : Color.clear, in: RoundedRectangle(cornerRadius: 10))
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(date.formatted(date: .complete, time: .omitted)), \(count) due orders")
                     }
-                    .padding(.vertical, 4)
-                    Divider()
                 }
             }
-            if !byDay.keys.contains(where: { $0.hasPrefix(String(HubDates.dayString(start).prefix(7))) }) {
-                Text("No due dates this month.").font(Theme.Font.secondary).foregroundStyle(Theme.textTertiary)
+            Divider().padding(.vertical, 4)
+            HStack {
+                if let selectedDay {
+                    DateText(selectedDay, style: .date).font(.subheadline.weight(.semibold))
+                } else {
+                    Text("Due this month").font(.subheadline.weight(.semibold))
+                }
+                Spacer()
+                Text("\(visibleOrders.count) \(visibleOrders.count == 1 ? "order" : "orders")").font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            if visibleOrders.isEmpty {
+                Text(selectedDay == nil ? "No production deadlines this month." : "No production deadlines on this day.").font(.subheadline).foregroundStyle(Theme.textSecondary).padding(.vertical, 6)
+            } else {
+                ForEach(Array(visibleOrders.enumerated()), id: \.offset) { _, order in orderRow(order) }
+            }
+        }
+    }
+
+    private func changeMonth(_ delta: Int) {
+        month = calendar.date(byAdding: .month, value: delta, to: month) ?? month
+        selectedDay = nil
+    }
+
+    @ViewBuilder private func orderRow(_ order: JSONValue) -> some View {
+        if env.session.can("production.view"), let number = order["order_number"]?.string, !number.isEmpty {
+            Button { Task { await openOrder(number) } } label: {
+                orderContent(order, navigable: true)
+            }.buttonStyle(.plain).disabled(openingOrder)
+                .accessibilityHint("Open production order")
+        } else {
+            orderContent(order, navigable: false)
+        }
+    }
+
+    private func orderContent(_ order: JSONValue, navigable: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "calendar").foregroundStyle(Theme.Palette.brandDeep).frame(width: 28, height: 28).background(Theme.Palette.brandDeep.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(order["product_name"]?.string ?? "Production order").font(.subheadline.weight(.semibold))
+                Text(order["order_number"]?.string ?? "").font(.caption).foregroundStyle(Theme.textSecondary)
+                if let date = order["due_date"]?.date { HStack(spacing: 3) { Text("Due"); DateText(date, style: .date) }.font(.caption).foregroundStyle(Theme.textSecondary) }
+            }
+            Spacer(minLength: 4)
+            if let progress = order["completion_percentage"]?.int { Text("\(progress)%").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(Theme.textSecondary) }
+            if navigable { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary).accessibilityHidden(true) }
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func openOrder(_ number: String) async {
+        guard !openingOrder else { return }
+        openingOrder = true
+        defer { openingOrder = false }
+        do {
+            let response = try await env.session.client.get("/v1/admin/production-orders", query: ["search": number, "per_page": "100"])
+            let matches = (response.json?.records ?? []).filter { $0.string("order_number") == number }
+            guard matches.count == 1, let id = matches.first?.int("id") else {
+                env.toasts.show("Couldn't find this order. Refresh the calendar and try again.", tone: .warning)
+                return
+            }
+            let route = Route.productionOrder(id: id)
+            if let currentRoutePath { currentRoutePath.wrappedValue.append(route) }
+            else { env.navigator.push(route) }
+        } catch { env.toasts.error(error) }
+    }
+
+    private func overdueSection(_ overdue: [JSONValue]) -> some View {
+        SectionCard("Past due") {
+            Text("These production deadlines have passed.").font(.caption).foregroundStyle(Theme.textSecondary)
+            ForEach(Array(overdue.prefix(showAllOverdue ? overdue.count : 3).enumerated()), id: \.offset) { _, order in orderRow(order) }
+            if overdue.count > 3 {
+                Button(showAllOverdue ? "Show fewer" : "Show all \(overdue.count) orders") { showAllOverdue.toggle() }
+                    .font(.caption.weight(.semibold)).foregroundStyle(Theme.Palette.brandDeep)
+            }
+        }
+    }
+
+    @ViewBuilder private func stages(_ data: JSONValue) -> some View {
+        let byStage = data["by_stage"]?.object ?? [:]
+        if !byStage.isEmpty {
+            SectionCard("Open work by stage") {
+                Text("Open tasks across these orders, including paused work.").font(.caption).foregroundStyle(Theme.textSecondary)
+                ForEach(byStage.keys.sorted(), id: \.self) { key in
+                    DetailRow(data["stage_names"]?[key]?.string ?? "Stage \(key)", byStage[key]?.string)
+                }
             }
         }
     }

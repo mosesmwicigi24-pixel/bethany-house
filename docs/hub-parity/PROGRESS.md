@@ -1,8 +1,10 @@
 # Tailors Hub audit progress
 
-### In progress — production calendar, Codex
+### Production calendar — 24 November 2026, Codex
 
-- Refining `apple/Sources/BethanyUI/Features/ProductionBoards.swift` for a tailor-focused calendar using the existing scoped schedule endpoint. Its payload has due dates and workload counts but no collection/fitting dates or order IDs; those gaps need separate verification before adding such actions.
+- Redesigned `ProductionBoards.swift` with a selectable month grid, due-order agenda, past-due summary and open-stage workload. Existing schedule data is scoped by the server. Tapping a card uses the permission-scoped production-order search and exact order number to resolve its ID; if lookup fails the app reports it.
+- On an iPhone 17 Pro simulator with a fictional Hub, selecting 24 November filtered the agenda to one order; tapping the sample card opened the matching order and Back returned to the calendar. No live data was changed.
+- Open: the schedule response does not include fitting or collection dates. Those dates appear in order details when available, but are not shown as calendar events. Simulator coverage does not establish live Hub parity or all permissions, failure and accessibility states.
 
 ### Tailors Hub app icon — 23 November 2026
 
