@@ -75,7 +75,9 @@ jobs:
         working-directory: backend
         run: |
           TOKEN=$(php ../apple/UITests/Fixtures/seed.php | tail -1)
-          nohup php artisan serve --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/serve.log" 2>&1 &
+          # Several workers, as a real Hub has: one worker queues every request
+          # behind the slowest (the first run took 10 s for the dashboard).
+          PHP_CLI_SERVER_WORKERS=4 nohup php artisan serve --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/serve.log" 2>&1 &
           for i in $(seq 1 30); do curl -fs "$HUB/api/v1/settings/currencies" > /dev/null && break; sleep 1; done
           ../apple/UITests/Fixtures/seed_api.sh "$HUB" "$TOKEN"
 

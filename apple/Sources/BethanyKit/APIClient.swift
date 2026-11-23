@@ -88,16 +88,27 @@ public actor APIClient {
     /// Sends the request, handling the session statuses once:
     /// 423 pin_locked → wait for the PIN unlock, retry (up to 3);
     /// 403 step_up_required → wait for step-up, retry (up to 2);
-    /// 401 → session ended.
+    /// 401 → session ended, unless the token was renewed while the request
+    /// was in flight (see below).
     public func send(_ request: Request) async throws -> Response {
         var pinRetries = 3
         var stepUpRetries = 2
+        var retriedAfterRenewal = false
         while true {
-            let response = try await perform(request)
+            let (response, sentToken) = try await perform(request)
             switch response.status {
             case 200..<300:
                 return response
             case 401:
+                // Renewal rotates the token and the server deletes the old one
+                // at once (SessionRenewal::renew). A request already on its way
+                // with the old token comes back 401 although the session is
+                // alive: send it once more with the current token. Only a 401
+                // on the token we hold now ends the session.
+                if !retriedAfterRenewal, let sentToken, let current = await auth?.bearerToken(), current != sentToken {
+                    retriedAfterRenewal = true
+                    continue
+                }
                 await auth?.sessionExpired()
                 throw APIError(response)
             case 423 where response.json?["reason"]?.string == "pin_locked" && pinRetries > 0:
@@ -154,7 +165,8 @@ public actor APIClient {
 
     // MARK: Internals
 
-    private func perform(_ request: Request) async throws -> Response {
+    /// The response, and the bearer token the request carried.
+    private func perform(_ request: Request) async throws -> (Response, String?) {
         var components = URLComponents(url: baseURL.appendingPathComponent(request.path.hasPrefix("/") ? String(request.path.dropFirst()) : request.path), resolvingAgainstBaseURL: false)!
         let items = request.query.compactMap { k, v in v.map { URLQueryItem(name: k, value: $0) } }
         if !items.isEmpty { components.queryItems = items }
@@ -163,7 +175,8 @@ public actor APIClient {
         urlRequest.setValue(device.id, forHTTPHeaderField: "X-Device-Id")
         urlRequest.setValue("0", forHTTPHeaderField: "X-Device-Touch")
         if request.background { urlRequest.setValue("1", forHTTPHeaderField: "X-Background-Request") }
-        if let token = await auth?.bearerToken() { urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let token = await auth?.bearerToken()
+        if let token { urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         for (k, v) in request.headers { urlRequest.setValue(v, forHTTPHeaderField: k) }
 
         switch request.body {
@@ -185,7 +198,7 @@ public actor APIClient {
         guard let http = raw as? HTTPURLResponse else { throw APIError.transport("No HTTP response") }
         var headers: [String: String] = [:]
         for (k, v) in http.allHeaderFields { if let k = k as? String, let v = v as? String { headers[k] = v } }
-        return Response(status: http.statusCode, headers: headers, data: data)
+        return (Response(status: http.statusCode, headers: headers, data: data), token)
     }
 
     private static func multipartBody(_ parts: [MultipartPart], boundary: String) -> Data {

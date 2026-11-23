@@ -46,6 +46,10 @@ final class ScreenTourTests: XCTestCase {
     func testEveryScreen() throws {
         let app = XCUIApplication()
         app.launchEnvironment["HUB_URL"] = Self.hub
+        #if os(iOS)
+        // The iPad as a workstation: landscape, sidebar beside the screen.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        #endif
         app.launch()
         dismissSystemAlerts()
         signIn(app)
@@ -60,6 +64,12 @@ final class ScreenTourTests: XCTestCase {
             snap(app, String(format: "%03d %@", i + 1, screen.name))
             for text in ["Something went wrong", "Can't reach Bethany House"] where app.staticTexts[text].exists {
                 problems.append("\(screen.name) (\(screen.path)): \(text)")
+            }
+            // Signed out mid-tour is a failure (the first run found one), and
+            // the tour signs in again so the remaining screens are still seen.
+            if app.textFields["signin.email"].exists {
+                problems.append("\(screen.name) (\(screen.path)): signed out")
+                signIn(app)
             }
         }
         XCTAssertTrue(problems.isEmpty, "Screens that failed to load:\n" + problems.joined(separator: "\n"))
@@ -92,7 +102,7 @@ final class ScreenTourTests: XCTestCase {
     /// spinner shows (10 s at most — a screen still spinning is shot as it is).
     @MainActor
     private func settle(_ app: XCUIApplication) {
-        Thread.sleep(forTimeInterval: 1.5)
+        Thread.sleep(forTimeInterval: 2)
         let deadline = Date().addingTimeInterval(10)
         while Date() < deadline, app.activityIndicators.count + app.progressIndicators.count > 0 {
             Thread.sleep(forTimeInterval: 0.5)
