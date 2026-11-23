@@ -95,6 +95,8 @@ internal fun ProductionOrderDetailScreen(orderId: Int) {
     val scope = rememberCoroutineScope()
     val res = remember(orderId) { Resource(scope) { val j = env.client.get("/v1/admin/production-orders/$orderId").json; Record(j["order"] ?: j ?: JsonNull) } }
     var sheet by remember { mutableStateOf<OrderSheet?>(null) }
+    /** Set by a failed inspection: the rework sheet opens next, with this note as its reason. */
+    var reworkReason by remember { mutableStateOf<String?>(null) }
     var showAudit by remember { mutableStateOf(false) }
     LaunchedEffect(res) { res.load() }
     val reload = { res.load() }
@@ -216,7 +218,9 @@ internal fun ProductionOrderDetailScreen(orderId: Int) {
                 val sale = o.r["customer_order"]["order_number"].str; val sid = o.r.int("customer_order_id")
                 if (sale != null && sid != null) DetailRow("Sales order") { TextButton(onClick = { env.navigator.push(Route.Order(sid)) }) { Text(sale) } }
                 listOf("Measurements" to "measurements", "Specifications" to "specifications", "Preferences" to "customer_preferences").forEach { (title, key) ->
-                    val pairs = o.r[key].stringPairs
+                    // Measurements in the clergy sheet's order, gender first (MeasurementSheet).
+                    val pairs = if (key == "measurements") MeasurementSheet.of(o.r[key]).let { m -> listOfNotNull(m.gender?.let { "for" to it.humanized }) + m.body }
+                        else o.r[key].stringPairs
                     if (pairs.isNotEmpty()) {
                         Text(title.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary, modifier = Modifier.padding(top = 4.dp))
                         pairs.forEach { (k, v) -> DetailRow(k.humanized, v) }
@@ -238,8 +242,13 @@ internal fun ProductionOrderDetailScreen(orderId: Int) {
             OrderSheet.EDIT -> EditProductionOrderSheet(o, dismiss, reload)
             OrderSheet.ASSIGN -> AssignTailorsSheet(o, dismiss, reload)
             OrderSheet.MATERIALS -> IssueMaterialsSheet(o, dismiss, reload)
-            OrderSheet.QC -> QcSheet(o, dismiss, reload)
-            OrderSheet.REWORK -> ReworkSheet(o, dismiss, reload)
+            // A failed inspection leads straight to the decision it needs —
+            // which stage the order goes back to — with the inspector's note
+            // as the reason (console Production Cycle 10).
+            OrderSheet.QC -> QcSheet(o, onDismiss = {
+                sheet = if (reworkReason != null) OrderSheet.REWORK else null
+            }) { passed, notes -> reworkReason = if (passed || !env.session.current.can("production.submit_qc")) null else notes; reload() }
+            OrderSheet.REWORK -> ReworkSheet(o, onDismiss = { sheet = null; reworkReason = null }, onSaved = reload, initialReason = reworkReason)
             OrderSheet.COMPLETE -> CompleteAndStockSheet(o, dismiss, reload)
             OrderSheet.BATCHES -> BatchesSheet(o, dismiss, reload)
             OrderSheet.CANCEL -> TextPromptSheet("Cancel ${o.number}", dismiss, placeholder = "Reason (optional)", required = false, confirmLabel = "Cancel order", destructive = true) { reason ->

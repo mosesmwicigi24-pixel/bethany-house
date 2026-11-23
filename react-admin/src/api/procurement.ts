@@ -579,4 +579,30 @@ export const supplierPaymentApi = {
         get<{ data: SupplierPayableRow[]; total_owed_kes: number; unconverted: string[]; basis: string }>(
             "/v1/admin/purchase-orders/payables",
         ),
+
+    /** Every order that still owes its supplier money. */
+    owedOrders: () =>
+        get<{ data: OwedOrder[]; total_owed_kes: number; unconverted: string[] }>(
+            "/v1/admin/purchase-orders/payables/orders",
+        ),
+
+    /** Mark several orders as paid in full: one payment each, for what it owes. */
+    bulkPay: (data: {
+        purchase_order_ids: number[]; method: string; reference?: string;
+        date_mode: "order_date" | "one_date"; paid_at?: string; notes?: string; client_request_id: string;
+    }) =>
+        post<{ message: string; paid: BulkPaidRow[]; skipped: BulkSkippedRow[] }>(
+            "/v1/admin/purchase-orders/payments/bulk", data,
+        ),
 };
+
+export interface OwedOrder {
+    id: number; po_number: string; supplier_id: number; supplier: string;
+    order_date: string | null; status: string; currency: string;
+    payable: number; paid: number; balance: number; balance_kes: number | null;
+}
+export interface BulkPaidRow {
+    id: number; po_number: string; payment_number: string;
+    amount: number; currency: string; amount_kes: number | null; paid_at: string | null;
+}
+export interface BulkSkippedRow { id: number; po_number: string | null; reason: string }

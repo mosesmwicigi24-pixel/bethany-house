@@ -1,6 +1,6 @@
 name: Apple
 
-# Native apps (macOS and iPadOS): compiles the shared Swift package and both
+# Native apps (macOS, iPhone/iPad, and the Tailors Hub workshop app): compiles the shared Swift package and both
 # app targets, and runs the BethanyKit unit tests, on a GitHub macOS runner.
 # Until 2026-11-10 nothing compiled the SwiftUI code; this is the first gate
 # that does. Unsigned builds only: no signing identity, no upload, no
@@ -60,6 +60,13 @@ jobs:
       - name: iPhone and iPad app (HubMobile), unsigned
         run: >
           xcodebuild -project BethanyHub.xcodeproj -scheme HubMobile
+          -destination 'generic/platform=iOS' -configuration Debug
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+          build
+
+      - name: Tailors Hub (TailorsMobile), unsigned
+        run: >
+          xcodebuild -project BethanyHub.xcodeproj -scheme TailorsMobile
           -destination 'generic/platform=iOS' -configuration Debug
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
           build

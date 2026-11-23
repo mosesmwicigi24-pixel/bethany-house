@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bethany Hub's deep links (merged into MainActivity). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".MainActivity">
+            <!-- bethanyhub:// deep links -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bethanyhub" />
+            </intent-filter>
+            <!-- Android App Links for the Hub (assetlinks.json served by the backend, Step 2) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="hub.bethanyhouse.co.ke" android:pathPrefix="/admin" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
