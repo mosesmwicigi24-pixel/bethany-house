@@ -24,10 +24,14 @@ public final class AppEnvironment {
         public var reverbHost: String?
         public var reverbPort: Int
         public var reverbScheme: String
+        /// Bethany Hub or Tailors Hub (`AppFlavor`).
+        public var flavor: AppFlavor
 
         /// Production defaults; a dev build points `hubURL` at a local stack.
         public init(hubURL: URL = URL(string: "https://hub.bethanyhouse.co.ke")!,
-                    reverbKey: String? = nil, reverbHost: String? = nil, reverbPort: Int = 443, reverbScheme: String = "wss") {
+                    reverbKey: String? = nil, reverbHost: String? = nil, reverbPort: Int = 443, reverbScheme: String = "wss",
+                    flavor: AppFlavor = .hub) {
+            self.flavor = flavor
             self.hubURL = hubURL
             self.reverbKey = reverbKey
             self.reverbHost = reverbHost ?? hubURL.host
@@ -40,12 +44,16 @@ public final class AppEnvironment {
 
     public init(config: Config = Config()) {
         self.config = config
-        self.session = SessionStore(baseURL: config.hubURL.appendingPathComponent("api"))
+        self.session = SessionStore(baseURL: config.hubURL.appendingPathComponent("api"), flavor: config.flavor)
         let kioskStore = KioskStore()
         self.kiosk = kioskStore
         self.kioskAPI = KioskAPI(baseURL: config.hubURL.appendingPathComponent("api"), store: kioskStore, device: session.device)
-        let push = PushRegistration(client: session.client, device: session.device)
-        session.pushRegistrar = push
+        // Push is Bethany Hub's only: the server sends to one app identity
+        // (APNS_BUNDLE_ID) and drops any other app's device token, so Tailors
+        // Hub does not register until the server can address it.
+        if config.flavor == .hub {
+            session.pushRegistrar = PushRegistration(client: session.client, device: session.device)
+        }
     }
 
     /// Console URL for a route, for sharing and for the bridge view.

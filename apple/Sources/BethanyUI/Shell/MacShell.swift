@@ -112,6 +112,7 @@ struct SidebarView: View {
 
 struct SidebarFooter: View {
     @Environment(AppEnvironment.self) private var env
+    @State private var unsent = 0
     var body: some View {
         VStack(spacing: 6) {
             if !env.connection.isOnline {
@@ -125,7 +126,7 @@ struct SidebarFooter: View {
                     Button(item.label) { env.navigator.go(item.route) }
                 }
                 Divider()
-                Button("Sign out") { Task { await env.session.signOut(); await env.sessionDidChange() } }
+                Button("Sign out") { Task { unsent = await env.requestSignOut() } }
             } label: {
                 HStack {
                     Image(systemName: "person.crop.circle.fill").foregroundStyle(Theme.Palette.brand)
@@ -141,6 +142,7 @@ struct SidebarFooter: View {
         }
         .padding(Theme.Space.m)
         .background(.bar)
+        .modifier(SignOutGuard(unsent: $unsent))
     }
 }
 

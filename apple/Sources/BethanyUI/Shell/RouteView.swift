@@ -14,7 +14,9 @@ public struct RouteView: View {
     public init(_ route: Route) { self.route = route }
 
     public var body: some View {
-        if let gate = NavCatalogue.item(for: route)?.gate, !env.session.allows(gate) {
+        if !env.session.flavor.allows(route) {
+            NotInThisAppView()
+        } else if let gate = NavCatalogue.item(for: route)?.gate, !env.session.allows(gate) {
             NoAccessView(route: route)
         } else if let screen = FeatureRegistry.screen(for: route) {
             screen
@@ -54,6 +56,27 @@ public enum FeatureRegistry {
         guard !registered else { return }
         registered = true
         Features.registerAll()
+    }
+}
+
+/// A screen Tailors Hub does not carry (reached by a link, a push tap or a
+/// button inside another screen). Never the website fallback.
+struct NotInThisAppView: View {
+    @Environment(AppEnvironment.self) private var env
+    var body: some View {
+        EmptyState("This page is in Bethany Hub", message: "\(env.session.flavor.appName) has the workshop, your time and pay, and messages. Open Bethany Hub for everything else.", symbol: "rectangle.on.rectangle.slash", actionLabel: "Go home") {
+            env.navigator.go(env.session.home)
+        }
+    }
+}
+
+/// Signed in to Tailors Hub without production access.
+struct WorkshopOnlyView: View {
+    @Environment(AppEnvironment.self) private var env
+    var body: some View {
+        EmptyState("Tailors Hub is for the workshop", message: "Your account has no production work. Sign in to Bethany Hub instead; it has everything your role opens.", symbol: "scissors", actionLabel: "Sign out") {
+            Task { await env.signOutNow() }
+        }
     }
 }
 

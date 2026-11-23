@@ -1,0 +1,29 @@
+# Installs the iPhone/iPad app (HubMobile) on your own device with a FREE
+# Apple ID (Xcode "Personal Team"). Run scripts/personal-device.sh rather
+# than this file directly.
+#
+# A Personal Team cannot sign push notifications or associated domains, and
+# cannot use ke.co.bethanyhouse.hub (registered for the store build). So this
+# build differs from the real one in exactly three ways:
+#   - bundle id ke.co.bethanyhouse.hub.test (installs beside the store app)
+#   - no push notifications
+#   - no associated domains (Hub links do not open the app; passkey step-up
+#     falls back to the password)
+# It still talks to the live Hub: everything done in it is real.
+# Tailors Hub needs no cut-down entitlements (it has no push or associated
+# domains); only its bundle id gets the same .test suffix.
+# Writes BethanyHubPersonal.xcodeproj (git-ignored); project.yml is unchanged.
+include:
+  - project.yml
+name: BethanyHubPersonal
+targets:
+  HubMobile:
+    entitlements:
+      path: Apps/HubMobile/HubMobile.personal.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub.test
+  TailorsMobile:
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.tailors.test
