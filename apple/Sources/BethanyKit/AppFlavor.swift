@@ -3,8 +3,8 @@ import Foundation
 /// Which app this build is. Both are built from the same code:
 ///
 /// - `hub` "Bethany Hub": the whole Hub, every screen a person's permissions open.
-/// - `tailors` "Tailors Hub": the workshop app (owner, 2026-11-23). Only the
-///   production screens, the person's own pay and time, and staff messages.
+/// - `tailors` "Tailors Hub": the workshop app, staff workday and
+///   permission-gated People screens.
 ///   Signing in needs production access; anyone else is sent to Bethany Hub.
 ///
 /// What a flavour hides is presentation only. The API enforces every
@@ -50,13 +50,14 @@ public enum TailorsHub {
     /// Workshop staff: tailors, QC inspectors, production managers.
     public static let signInGate = NavGate.anyOf(["production.worker", "production.view", "production.submit_qc", "production.approve_qc"])
 
-    /// The whole of Tailors Hub. Production work; the person's own clock,
-    /// shifts, leave, hours and payslips; messages, updates and training; their
-    /// profile. Nothing that sells, buys, counts stock or reports money.
+    /// Workshop, staff workday and People screens. Catalogue gates still
+    /// restrict team, HR and payroll pages to permitted users.
     public static func allows(_ route: Route) -> Bool {
         switch route {
         case .productionMyTasks, .productionOrders, .productionOrder, .wip, .qc, .productionCalendar,
-             .clock, .myShifts, .myLeave, .myTimesheet, .myPayslips,
+             .me, .forms, .handbook, .sign, .todos, .colleagues,
+             .clock, .myShifts, .myLeave, .myTimesheet, .myPayslips, .myAdvances,
+             .peopleOverview, .peopleRequests, .attendance, .formsManage, .roster, .timesheets, .leave, .people, .payroll,
              .comms, .updates, .courses, .profile:
             return true
         default:

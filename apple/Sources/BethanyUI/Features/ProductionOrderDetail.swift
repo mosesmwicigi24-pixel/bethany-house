@@ -212,9 +212,14 @@ struct ProductionOrderDetailView: View {
             if let sale = o.r["customer_order"]?["order_number"]?.string, let sid = o.r.int("customer_order_id") {
                 HStack { Text("Sales order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(sale) { env.navigator.push(.order(id: sid)) } }
             }
-            ForEach([("Measurements", "measurements"), ("Specifications", "specifications"), ("Preferences", "customer_preferences")], id: \.0) { title, key in
-                // Measurements in the clergy sheet's order, who it is for first (MeasurementSheet).
-                let pairs: [(String, String)] = key == "measurements" ? MeasurementSheet.rows(o.r[key]) : (o.r[key]?.stringPairs ?? [])
+            let measurements = MeasurementSheet.of(o.r["measurements"])
+            if measurements.gender != nil || !measurements.body.isEmpty {
+                Text("Measurements").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                    .accessibilityAddTraits(.isHeader)
+                WorkshopMeasurements(measurements: measurements)
+            }
+            ForEach([("Specifications", "specifications"), ("Preferences", "customer_preferences")], id: \.0) { title, key in
+                let pairs = o.r[key]?.stringPairs ?? []
                 if !pairs.isEmpty {
                     Text(title).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).textCase(.uppercase).padding(.top, 4)
                     ForEach(pairs, id: \.0) { k, v in DetailRow(k.humanized, v) }
@@ -266,6 +271,7 @@ struct ProductionTaskRow: View {
         let assignee = Names.person(task["assigned_to_user"] ?? task["assigned_to"])
         let done = task["quantity_done"]?.int ?? 0
         HStack(alignment: .top) {
+            ProductionStageIcon(stage: task["stage"])
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     if let seq = task["sequence"]?.int { Text("\(seq).").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }

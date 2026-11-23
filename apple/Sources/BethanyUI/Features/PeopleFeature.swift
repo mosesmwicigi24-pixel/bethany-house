@@ -41,11 +41,11 @@ struct PeopleOverviewView: View {
                         StatTile("Open shifts", value: o["week"]?["open_shifts"]?.string ?? "0", hint: "this week")
                         StatTile("Flagged punches", value: o["week"]?["flagged_punches"]?.string ?? "0", hint: "this week", tone: (o["week"]?["flagged_punches"]?.int ?? 0) > 0 ? .warning : nil)
                     }
-                    HStack(spacing: Theme.Space.s) {
-                        Button { env.navigator.go(.peopleRequests) } label: { Label("Requests (\(o["requests"]?["count"]?.int ?? 0))", systemImage: "tray.full") }
-                        Button { env.navigator.go(.roster) } label: { Label("Roster", systemImage: "calendar.badge.clock") }
-                        Button { env.navigator.go(.attendance) } label: { Label("Attendance", systemImage: "location") }
-                        if env.session.can("attendance.view_team") { Button { env.navigator.go(.timesheets) } label: { Label("Timesheets", systemImage: "tablecells") } }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Theme.Space.s) { overviewLinks(o) }
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: Theme.Space.s) {
+                            overviewLinks(o)
+                        }
                     }
                     .buttonStyle(.bordered).tint(Theme.Palette.brandDeep)
 
@@ -100,6 +100,16 @@ struct PeopleOverviewView: View {
             }
         }
         .refreshable { await resource?.reload() }
+    }
+
+    @ViewBuilder
+    private func overviewLinks(_ overview: JSONValue) -> some View {
+        Button { env.navigator.go(.peopleRequests) } label: { Label("Requests (\(overview["requests"]?["count"]?.int ?? 0))", systemImage: "tray.full") }
+        Button { env.navigator.go(.roster) } label: { Label("Roster", systemImage: "calendar.badge.clock") }
+        Button { env.navigator.go(.attendance) } label: { Label("Attendance", systemImage: "location") }
+        if env.session.can("attendance.view_team") {
+            Button { env.navigator.go(.timesheets) } label: { Label("Timesheets", systemImage: "tablecells") }
+        }
     }
 
     @ViewBuilder

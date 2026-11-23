@@ -15,13 +15,15 @@ import Network
 /// the user's own login keychain and FileVault are the boundary.
 public actor OfflineStore {
     public let root: URL
-    private let userId: Int
+    private var isReplaying = false
 
     public init(userId: Int) {
-        self.userId = userId
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         root = base.appendingPathComponent("BethanyHub/user-\(userId)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    init(root: URL) {
+        self.root = root
     }
 
     private func url(_ key: String) -> URL {
@@ -29,11 +31,12 @@ public actor OfflineStore {
         return root.appendingPathComponent("\(safe).json")
     }
 
-    private func write(_ data: Data, to url: URL) {
+    private func write(_ data: Data, to url: URL) throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         #if os(iOS)
-        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         #else
-        try? data.write(to: url, options: [.atomic])
+        try data.write(to: url, options: [.atomic])
         #endif
     }
 
@@ -49,7 +52,7 @@ public actor OfflineStore {
 
     public func put(_ json: JSONValue, for key: String) {
         guard let data = try? HubJSON.encoder.encode(Envelope(at: Date(), json: json)) else { return }
-        write(data, to: url(key))
+        try? write(data, to: url(key))
     }
 
     public func get(_ key: String) -> Cached<JSONValue>? {
@@ -82,35 +85,61 @@ public actor OfflineStore {
     private var queueURL: URL { root.appendingPathComponent("pending-queue.json") }
 
     public func pending() -> [PendingOperation] {
-        guard let data = try? Data(contentsOf: queueURL), let q = try? HubJSON.decoder.decode([PendingOperation].self, from: data) else { return [] }
-        return q
+        (try? readQueue()) ?? []
     }
 
-    public func enqueue(_ op: PendingOperation) {
-        var q = pending()
-        if let k = op.dedupeKey { q.removeAll { $0.dedupeKey == k } }
-        q.append(op)
-        if let data = try? HubJSON.encoder.encode(q) { write(data, to: queueURL) }
+    /// Use when an unreadable queue must be distinguished from an empty one.
+    public func pendingChecked() throws -> [PendingOperation] {
+        try readQueue()
+    }
+
+    private func readQueue() throws -> [PendingOperation] {
+        do {
+            return try HubJSON.decoder.decode([PendingOperation].self, from: Data(contentsOf: queueURL))
+        } catch CocoaError.fileReadNoSuchFile {
+            return []
+        }
+    }
+
+    /// True only after the new queue is stored. An unreadable queue cannot be
+    /// replaced with an empty one, since it may contain work we still owe the Hub.
+    @discardableResult
+    public func enqueue(_ op: PendingOperation) -> Bool {
+        do {
+            var queue = try readQueue()
+            if let key = op.dedupeKey { queue.removeAll { $0.dedupeKey == key } }
+            queue.append(op)
+            try write(HubJSON.encoder.encode(queue), to: queueURL)
+            return true
+        } catch {
+            return false
+        }
     }
 
     public func dequeue(_ id: UUID) {
-        var q = pending()
-        q.removeAll { $0.id == id }
-        if let data = try? HubJSON.encoder.encode(q) { write(data, to: queueURL) }
+        guard var queue = try? readQueue(), queue.contains(where: { $0.id == id }) else { return }
+        queue.removeAll { $0.id == id }
+        if let data = try? HubJSON.encoder.encode(queue) { try? write(data, to: queueURL) }
     }
 
     /// Replays the queue. A final 4xx drops the item (the server refused it;
     /// the caller reports `refused`); a transport failure stops and keeps the rest.
     public func replay(with client: APIClient) async -> (sent: [PendingOperation], refused: [(PendingOperation, APIError)]) {
+        guard !isReplaying else { return ([], []) }
+        isReplaying = true
+        defer { isReplaying = false }
         var sent: [PendingOperation] = []
         var refused: [(PendingOperation, APIError)] = []
         for op in pending() {
+            // A newer value may have replaced an unsent count while a previous
+            // request was in flight. Only replay the still-queued operations.
+            guard pending().contains(where: { $0.id == op.id }) else { continue }
             guard let method = APIClient.Method(rawValue: op.method) else { dequeue(op.id); continue }
             do {
                 _ = try await client.send(.init(method, op.path, body: .json(op.body)))
                 dequeue(op.id)
                 sent.append(op)
-            } catch let e as APIError where e.status >= 400 && e.status < 500 && e.status != 401 && e.status != 423 {
+            } catch let e as APIError where Self.isFinalRefusal(e.status) {
                 dequeue(op.id)
                 refused.append((op, e))
             } catch {
@@ -118,6 +147,10 @@ public actor OfflineStore {
             }
         }
         return (sent, refused)
+    }
+
+    public static func isFinalRefusal(_ status: Int) -> Bool {
+        (400..<500).contains(status) && ![401, 408, 423, 429].contains(status)
     }
 
     public func purge() {

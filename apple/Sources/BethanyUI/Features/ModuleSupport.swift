@@ -125,28 +125,46 @@ struct RecordListView<Row: View>: View {
 
 /// A tappable card row for list screens.
 struct ModuleRowCard<Content: View>: View {
-    let action: () -> Void
+    private enum Target {
+        case action(() -> Void)
+        case route(Route)
+    }
+    private let target: Target
     @ViewBuilder let content: Content
 
     init(action: @escaping () -> Void, @ViewBuilder content: () -> Content) {
-        self.action = action
+        target = .action(action)
+        self.content = content()
+    }
+
+    init(route: Route, @ViewBuilder content: () -> Content) {
+        target = .route(route)
         self.content = content()
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: Theme.Space.m) {
-                content
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary).padding(.top, 4)
+        Group {
+            switch target {
+            case let .action(action):
+                Button(action: action) { label }
+            case let .route(route):
+                NavigationLink(value: route) { label }
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.field))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.field).stroke(Theme.line, lineWidth: 1))
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var label: some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            content
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary).padding(.top, 4)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.field))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.field).stroke(Theme.line, lineWidth: 1))
+        .contentShape(Rectangle())
     }
 }
 

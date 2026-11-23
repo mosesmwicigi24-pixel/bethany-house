@@ -17,6 +17,7 @@ public final class AppEnvironment {
     public let kioskAPI: KioskAPI
     public private(set) var realtime: RealtimeClient?
     public private(set) var offline: OfflineStore?
+    private var offlineUserId: Int?
 
     public struct Config: Sendable {
         public var hubURL: URL
@@ -66,10 +67,21 @@ public final class AppEnvironment {
         await sessionDidChange()
     }
 
+    /// Resolve the signed-in person's store even when the shell is still
+    /// finishing its session-change observation.
+    public func offlineStoreForCurrentUser() -> OfflineStore? {
+        guard session.state == .signedIn, let me = session.me else { return nil }
+        if offlineUserId != me.id || offline == nil {
+            offline = OfflineStore(userId: me.id)
+            offlineUserId = me.id
+        }
+        return offline
+    }
+
     /// Call after sign-in/sign-out: realtime and offline follow the person.
     public func sessionDidChange() async {
         if let me = session.me, session.state == .signedIn {
-            offline = OfflineStore(userId: me.id)
+            _ = offlineStoreForCurrentUser()
             if let key = config.reverbKey, let host = config.reverbHost {
                 let rt = RealtimeClient(configuration: .init(appKey: key, host: host, port: config.reverbPort, scheme: config.reverbScheme), client: session.client)
                 realtime = rt
@@ -83,6 +95,7 @@ public final class AppEnvironment {
             await realtime?.disconnect()
             realtime = nil
             offline = nil
+            offlineUserId = nil
         }
     }
 

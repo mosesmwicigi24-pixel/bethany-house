@@ -5,6 +5,7 @@ import BethanyKit
 
 struct HandbookView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @State private var query = ""
     @State private var list: Resource<JSONValue>?
     @State private var editing = false
@@ -22,7 +23,11 @@ struct HandbookView: View {
                         Text(cat.uppercased()).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                         ListCard {
                             ForEach(groups[cat] ?? []) { a in
-                                Button { env.navigator.push(.handbook(id: a.int("id"))) } label: {
+                                Button {
+                                    guard let id = a.int("id") else { return }
+                                    if let currentRoutePath { currentRoutePath.wrappedValue.append(.handbook(id: id)) }
+                                    else { env.navigator.push(.handbook(id: id)) }
+                                } label: {
                                     ListRow {
                                         HStack(spacing: Theme.Space.m) {
                                             VStack(alignment: .leading, spacing: 2) {
@@ -75,7 +80,7 @@ struct ArticleView: View {
             if let article {
                 LoadableView(article.state, retry: { article.load() }) { a in
                     SectionCard {
-                        Text("\(a.string("category") ?? "General")\(a["outlet"]?["name"]?.string.map { " · \($0)" } ?? "") · updated \(MeFormat.dayYear(a.date("updated_at")))\(a["published_at"]?.isNull ?? true ? " · draft" : "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        Text("\(a.string("category") ?? "General")\(a["outlet"]?["name"]?.string.map { " · \($0)" } ?? "")\(a.date("updated_at").map { " · updated \(MeFormat.dayYear($0))" } ?? "")\(a["published_at"]?.isNull ?? true ? " · draft" : "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                         Text(a.string("body") ?? "").font(Theme.Font.body).lineSpacing(3).textSelection(.enabled)
                         if a.flag("must_read"), let postId = a.int("post_id") {
                             if let at = a.date("acknowledged_at") {
@@ -185,6 +190,7 @@ struct ArticleEditSheet: View {
 
 struct CoursesView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @State private var list: Resource<JSONValue>?
     @State private var editing = false
 
@@ -221,7 +227,11 @@ struct CoursesView: View {
         let passed = me?["passed"]?.bool ?? false
         let required = c.flag("required")
         let lessons = c.int("lessons_count") ?? 0
-        return Button { env.navigator.push(.courses(id: c.int("id"))) } label: {
+        return Button {
+            let route = Route.courses(id: c.int("id"))
+            if let currentRoutePath { currentRoutePath.wrappedValue.append(route) }
+            else { env.navigator.push(route) }
+        } label: {
             HStack(spacing: Theme.Space.m) {
                 ZStack {
                     Circle().fill(passed ? Theme.Palette.success : Theme.Palette.neutralSoft)

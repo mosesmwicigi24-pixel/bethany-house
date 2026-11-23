@@ -5,6 +5,7 @@ import BethanyKit
 
 struct SignView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @State private var list: Resource<JSONValue>?
 
     var body: some View {
@@ -13,7 +14,11 @@ struct SignView: View {
                 LoadableView(list.state, retry: { list.load() }, isEmpty: { $0.records.isEmpty }, empty: { EmptyState("Nobody has asked you to sign anything", symbol: "signature") }) { d in
                     ListCard {
                         ForEach(d.records) { r in
-                            Button { env.navigator.push(.sign(id: r.int("id"))) } label: {
+                            Button {
+                                guard let id = r.int("id") else { return }
+                                if let currentRoutePath { currentRoutePath.wrappedValue.append(.sign(id: id)) }
+                                else { env.navigator.push(.sign(id: id)) }
+                            } label: {
                                 ListRow {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 2) {
@@ -66,7 +71,8 @@ struct SignDetailView: View {
             if let request {
                 LoadableView(request.state, retry: { request.load() }) { r in
                     SectionCard {
-                        Text("\(r.string("requested_by").map { "Asked by \($0) on \(MeFormat.dayYear(r.date("created_at")))" } ?? "")\(r.date("due_at").map { " · by \(MeFormat.dayYear($0))" } ?? "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        Text([r.string("requested_by").map { "Asked by \($0)" }, r.date("created_at").map { "on \(MeFormat.dayYear($0))" }, r.date("due_at").map { "by \(MeFormat.dayYear($0))" }].compactMap { $0 }.joined(separator: " · "))
+                            .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                         if r.string("kind") == "document" {
                             if let link = r["document_link"], let s = link["url"]?.string, let url = URL(string: s) {
                                 Link(destination: url) { Label("Open the document to read it", systemImage: "doc") }.font(Theme.Font.body.weight(.medium))
@@ -149,16 +155,20 @@ struct TodosView: View {
     @State private var doing: Record?
     @State private var doneNote = ""
     @State private var busy = false
+    @State private var completionError: String?
 
     private var canGive: Bool { list?.value?["can_give"]?.bool ?? false }
 
     var body: some View {
         Page("To-dos", subtitle: subtitle) {
-            HStack {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ChipPicker(options: [("mine", "Mine"), ("given", "I gave")] + (canGive ? [("team", "The team")] : []), selection: $scope)
-                Spacer()
-                Picker("", selection: $status) { Text("open").tag("open"); Text("done").tag("done"); Text("all").tag("all") }.pickerStyle(.segmented).frame(maxWidth: 200)
-                Button(canGive ? "New to-do" : "Add") { adding = true }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                HStack {
+                    Picker("Status", selection: $status) { Text("Open").tag("open"); Text("Done").tag("done"); Text("All").tag("all") }
+                        .pickerStyle(.segmented).frame(maxWidth: 240)
+                    Spacer(minLength: 8)
+                    Button(canGive ? "New to-do" : "Add") { adding = true }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                }
             }
             if let list {
                 LoadableView(list.state, retry: { list.load() }, isEmpty: { $0.records.isEmpty }, empty: { EmptyState("Nothing here", symbol: "checkmark.circle") }) { d in
@@ -172,7 +182,12 @@ struct TodosView: View {
         .refreshable { await load() }
         .sheet(isPresented: $adding) { AddTodoSheet(canGive: canGive) { adding = false; Task { await load() } } }
         .sheet(item: $doing) { t in
-            MeSheet(t.string("title") ?? "Done", primary: "Done", busy: busy, action: { await update(t, ["status": .string("done"), "done_note": doneNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .null : .string(doneNote.trimmingCharacters(in: .whitespacesAndNewlines))]); doing = nil }) {
+            MeSheet(t.string("title") ?? "Done", primary: "Done", busy: busy, action: {
+                if await update(t, ["status": .string("done"), "done_note": doneNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .null : .string(doneNote.trimmingCharacters(in: .whitespacesAndNewlines))]) {
+                    doing = nil
+                }
+            }) {
+                if let completionError { NoticeText(completionError, tone: .danger) }
                 FieldLabel("Anything to say about it? (optional\(t["creator"]?["name"]?.string.map { !t.flag("gave") ? "; \($0) will see it" : "" } ?? ""))") {
                     TextField("", text: $doneNote, axis: .vertical).lineLimit(3...6).textFieldStyle(.roundedBorder)
                 }
@@ -200,7 +215,7 @@ struct TodosView: View {
         return ListRow {
             HStack(alignment: .top, spacing: Theme.Space.m) {
                 Button {
-                    if st == "open" { doneNote = ""; doing = t } else { Task { await update(t, ["status": .string("open")]) } }
+                    if st == "open" { doneNote = ""; completionError = nil; doing = t } else { Task { await update(t, ["status": .string("open")]) } }
                 } label: {
                     ZStack {
                         Circle().strokeBorder(st == "done" ? Theme.Palette.success : overdue ? Theme.Palette.danger : Theme.line, lineWidth: 2)
@@ -219,7 +234,7 @@ struct TodosView: View {
                         } else {
                             Text("no due time").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                         }
-                        Text(st == "done" ? " · done \(MeFormat.dayTime(t.date("done_at")))\(t.string("done_note").map { " — \($0)" } ?? "")" : st == "cancelled" ? " · cancelled" : "").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        Text(st == "done" ? " · done\(t.date("done_at").map { " \(MeFormat.dayTime($0))" } ?? "")\(t.string("done_note").map { " — \($0)" } ?? "")" : st == "cancelled" ? " · cancelled" : "").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 Spacer()
@@ -234,13 +249,20 @@ struct TodosView: View {
         }
     }
 
-    private func update(_ t: Record, _ fields: [String: JSONValue]) async {
+    @discardableResult
+    private func update(_ t: Record, _ fields: [String: JSONValue]) async -> Bool {
+        completionError = nil
         busy = true; defer { busy = false }
         do {
             let r = try await env.session.client.patch("/v1/admin/todos/\(t.id)", json: .object(fields))
             env.toasts.show(r.json?["message"]?.string ?? "Saved")
             await load()
-        } catch { env.toasts.error(error) }
+            return true
+        } catch {
+            if doing != nil { completionError = (error as? APIError)?.message ?? error.localizedDescription }
+            else { env.toasts.error(error) }
+            return false
+        }
     }
 
     private func remove(_ t: Record) async {
@@ -260,9 +282,11 @@ struct AddTodoSheet: View {
     @State private var userId: Int?
     @State private var people: [Record] = []
     @State private var busy = false
+    @State private var saveError: String?
 
     var body: some View {
         MeSheet("New to-do", primary: userId == nil ? "Add" : "Give", disabled: title.trimmingCharacters(in: .whitespaces).isEmpty, busy: busy, action: { await save() }) {
+            if let saveError { NoticeText(saveError, tone: .danger) }
             FieldLabel("What") { TextField("", text: $title).textFieldStyle(.roundedBorder) }
             FieldLabel("Details (optional)") { TextField("", text: $details, axis: .vertical).lineLimit(3...6).textFieldStyle(.roundedBorder) }
             Toggle("By when", isOn: $hasDue)
@@ -278,6 +302,7 @@ struct AddTodoSheet: View {
     }
 
     private func save() async {
+        saveError = nil
         busy = true; defer { busy = false }
         let d = details.trimmingCharacters(in: .whitespacesAndNewlines)
         let body: JSONValue = .object([
@@ -290,7 +315,7 @@ struct AddTodoSheet: View {
             let r = try await env.session.client.post("/v1/admin/todos", json: body)
             env.toasts.show(r.json?["message"]?.string ?? "Added")
             onDone()
-        } catch { env.toasts.error(error) }
+        } catch { saveError = (error as? APIError)?.message ?? error.localizedDescription }
     }
 }
 

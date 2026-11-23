@@ -1,7 +1,7 @@
 import SwiftUI
 import BethanyKit
 
-/// Clock in on the phone (ClockPage.tsx). One screen, one big button. The
+/// Clock in on the phone (ClockPage.tsx). The
 /// device reports where it is and how sure it is; the server decides inside
 /// or outside the outlet's zone and keeps the evidence. Every state is
 /// explained in words (locating, location off, outside, offline).
@@ -57,8 +57,8 @@ struct ClockView: View {
                     ForEach(outlets, id: \.self) { o in Text(o["name"]?.string ?? "Outlet").tag(o["id"]?.int ?? 0) }
                 }
             }
-            if location.status == .denied || location.status == .restricted {
-                NoticeText("Clocking in needs your location, only at the moment you press the button. Allow location for Bethany House Hub in Settings, then try again.", tone: .danger)
+            if location.isDenied {
+                NoticeText("Clocking in and out uses your location to check the workshop. Allow location for \(env.session.flavor.appName) in Settings, then try again.", tone: .danger)
             } else if case .unavailable(let m) = location.status {
                 HStack { NoticeText(m, tone: .warning); Button("Try again") { Task { await location.startUpdating() } } }
             }
@@ -86,6 +86,9 @@ struct ClockView: View {
                 }
             }
         }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task {
             if status == nil {
                 let c = env.session.client
@@ -95,7 +98,7 @@ struct ClockView: View {
                 status?.load(); shifts?.load(); leave?.load()
             }
             await loadPending()
-            await location.startUpdating()
+            if location.isAuthorized { await location.startUpdating() }
             if pending != nil, env.connection.isOnline { await sendPending() }
         }
         .onDisappear { location.stopUpdating() }
@@ -112,7 +115,8 @@ struct ClockView: View {
             switch location.status {
             case .denied, .restricted: return ("Location is off for this app", .danger)
             case .unavailable: return ("Location unavailable", .danger)
-            case .idle, .asking, .locating: return ("Finding you…", .neutral)
+            case .idle: return (location.isDenied ? "Location is off for this app" : "Location checked when you clock in or out", .neutral)
+            case .asking, .locating: return ("Finding you…", .neutral)
             case .fixed:
                 guard let fix else { return ("Finding you…", .neutral) }
                 guard let outlet else { return ("No outlet to clock into", .danger) }
@@ -137,33 +141,42 @@ struct ClockView: View {
 
     private var clockCard: some View {
         SectionCard {
-            TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                VStack(spacing: Theme.Space.m) {
-                    Text(MeFormat.time(ctx.date)).font(Theme.Font.display(48, weight: .heavy)).monospacedDigit()
-                    Text(stateLine).font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
-                    Button { Task { await punch() } } label: {
-                        ZStack {
-                            Circle().fill(active != nil ? Theme.Palette.ink : Theme.Palette.brand)
-                                .shadow(color: (active != nil ? Color.black : Theme.Palette.brand).opacity(0.3), radius: 14, y: 8)
-                            if busy {
-                                ProgressView().tint(.white)
-                            } else {
-                                VStack(spacing: 4) {
-                                    Text(active != nil ? "CLOCK OUT" : "CLOCK IN").font(.system(size: 20, weight: .heavy)).tracking(1)
-                                    Text(buttonHint).font(Theme.Font.caption).opacity(0.9).multilineTextAlignment(.center).padding(.horizontal, 16)
-                                }
-                                .foregroundStyle(.white)
-                            }
-                        }
-                        .frame(width: 176, height: 176)
+            VStack(alignment: .leading, spacing: 10) {
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(MeFormat.time(ctx.date)).font(.largeTitle.weight(.semibold)).monospacedDigit()
+                        Text(stateLine).font(.subheadline).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                if fix == nil && !location.isDenied && !location.isUpdating && location.status != .asking {
+                    Button {
+                        Task { await location.startUpdating() }
+                    } label: {
+                        Label("Check location", systemImage: "location")
+                            .frame(minHeight: Theme.tapTarget)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .foregroundStyle(Theme.Palette.brandDeep)
+                    .accessibilityHint("Check your location before clocking in or out")
+                } else {
+                    Button {
+                        Task { await punch() }
+                    } label: {
+                        HStack {
+                            if busy { ProgressView().controlSize(.small) }
+                            Text(active != nil ? "Clock out" : "Clock in")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.vertical, 5)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.Palette.brandDeep)
                     .disabled(!canPunch)
-                    .opacity(canPunch ? 1 : 0.4)
-                    .accessibilityLabel(active != nil ? "Clock out" : "Clock in")
+                    Text(buttonHint).font(.caption).foregroundStyle(Theme.textSecondary)
                 }
-                .frame(maxWidth: .infinity)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if let active {
                 HStack {
                     Spacer()
@@ -206,11 +219,11 @@ struct ClockView: View {
     }
 
     private var buttonHint: String {
-        if fix == nil { return "waiting for location" }
+        if fix == nil { return "Waiting for location" }
         if active != nil { return outlet?["name"]?.string ?? "" }
-        if verdict.inside { return "you are at \(outlet?["name"]?.string ?? "the outlet")" }
-        if verdict.nearEdge { return "near the zone · will be noted" }
-        return "outside the zone"
+        if verdict.inside { return "You are at \(outlet?["name"]?.string ?? "the outlet")" }
+        if verdict.nearEdge { return "Near the zone · will be noted" }
+        return "Outside the zone"
     }
 
     // MARK: Today, this week, last punch
@@ -227,7 +240,7 @@ struct ClockView: View {
         return ListCard {
             row("Today's shift") {
                 Button { env.navigator.go(.myShifts) } label: {
-                    Text(today.map { "\($0["starts_at"]?.string ?? "") – \($0["ends_at"]?.string ?? "")\($0["label"]?.string.map { " · \($0)" } ?? "")" }
+                    Text(today.map { "\($0["starts_at"]?.string ?? "") – \($0["ends_at"]?.string ?? "")\($0["label"]?.string.map { " · \($0)" } ?? "")\($0["outlet"]?.string.map { " · \($0)" } ?? "")" }
                          ?? next.map { "Next: \(MeFormat.weekday(MeFormat.date($0["date"]?.string))) \($0["starts_at"]?.string ?? "")" }
                          ?? "None rostered").fontWeight(.semibold)
                 }.buttonStyle(.plain)
@@ -247,9 +260,6 @@ struct ClockView: View {
                         FlagChips(last)
                     }
                 } else { Text("—") }
-            }
-            if let shift = data?["today_shift"], shift.object != nil {
-                row("Today's shift") { Text("\(shift["starts_at"]?.string ?? "")–\(shift["ends_at"]?.string ?? "")\(shift["outlet"]?.string.map { " · \($0)" } ?? "")").fontWeight(.semibold) }
             }
             if rules?["location_mode"]?.string == "trail" {
                 ListRow {
@@ -297,9 +307,24 @@ struct ClockView: View {
     }
 
     private func punch(force: Bool = false) async {
-        guard let fix, let outlet, let outletId = outlet["id"]?.int else { return }
+        guard !busy, let fix, let outlet, let outletId = outlet["id"]?.int else { return }
         busy = true
         defer { busy = false }
+        guard let offline = env.offlineStoreForCurrentUser() else {
+            env.toasts.show("Can't check saved work on this device. Try again.", tone: .danger)
+            return
+        }
+        do {
+            let saved = try await offline.pendingChecked()
+            if saved.contains(where: { $0.kind == "punch" }) {
+                await loadPending()
+                env.toasts.show("Send the saved punch before recording another.", tone: .warning)
+                return
+            }
+        } catch {
+            env.toasts.show("Can't read saved work on this device. Ask a manager for help before clocking in or out.", tone: .danger)
+            return
+        }
         var body = punchBody(fix)
         let path: String
         if active != nil {
@@ -321,7 +346,10 @@ struct ClockView: View {
         } catch {
             if isOfflineError(error) && !force, let offline = env.offline {
                 let op = OfflineStore.PendingOperation(kind: "punch", method: "POST", path: path, body: .object(body), dedupeKey: "punch")
-                await offline.enqueue(op)
+                guard await offline.enqueue(op) else {
+                    env.toasts.show("This punch could not be saved on this device. Try again.", tone: .danger)
+                    return
+                }
                 pending = op
                 env.connection.pendingCount = await offline.pending().count
                 env.toasts.show(active != nil ? "No signal. Your clock-out is saved and will be sent when you are back online." : "No signal. Your clock-in is saved and will be sent when you are back online.", tone: .info)
@@ -358,11 +386,13 @@ struct ClockView: View {
             env.toasts.show("Your \(pending.path.hasSuffix("clock-in") ? "clock-in" : "clock-out") from \(MeFormat.when(pending.recordedAt)) has been sent.")
             await status?.reload()
         } catch {
-            if !isOfflineError(error) {
+            if let apiError = error as? APIError, OfflineStore.isFinalRefusal(apiError.status) {
                 await offline.dequeue(pending.id)
                 self.pending = nil
                 env.connection.pendingCount = await offline.pending().count
-                env.toasts.show("The saved punch could not be recorded: \((error as? APIError)?.message ?? error.localizedDescription)", tone: .danger)
+                env.toasts.show("The saved punch could not be recorded: \(apiError.message)", tone: .danger)
+            } else if !isOfflineError(error) {
+                env.toasts.show("Your saved punch is still on this device. Try sending it again.", tone: .warning)
             }
         }
     }
