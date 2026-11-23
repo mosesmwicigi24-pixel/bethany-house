@@ -136,7 +136,7 @@ struct PadShell: View {
                 }
             }
         } detail: {
-            NavigationStack(path: $nav.path) {
+            NavigationStack(path: nav.pathBinding(for: nav.selection)) {
                 RouteView(nav.selection ?? env.session.home)
                     .navigationDestination(for: Route.self) { RouteView($0) }
                     .toolbar {
