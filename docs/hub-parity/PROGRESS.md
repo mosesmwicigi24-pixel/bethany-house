@@ -2,7 +2,8 @@
 
 ### In progress — 23 November 2026, Codex
 
-- Refining the Apple production-order Details and Thread UI in `ProductionOrderDetail.swift`, and reviewing the time-clock UI in `MeFeatureClock.swift` against the Hub; preserving existing Hub APIs and permissions. Claude has claimed Android offline files separately.
+- Refining the Apple production-order Details and Thread UI in `ProductionOrderDetail.swift`, reviewing the time-clock UI in `MeFeatureClock.swift` against the Hub, and auditing the Apple More pages one by one; preserving existing Hub APIs and permissions. Claude has claimed Android offline files separately.
+- Local slice: order header separates status badges from the order number; details use labelled rows; the thread composer uses a separate type selector and guards repeated sends. Clock shows an error and retry when status cannot load, and avoids presenting absent summary data as zero. iPhone simulator build succeeded and 121 Swift tests passed. The finished layouts, thread sending/failure and clock actions still need simulator verification. The full More-page audit remains in progress.
 
 ### iPhone simulator review — 23 November 2026
 

@@ -91,7 +91,7 @@ struct ProductionOrderDetailView: View {
                         .frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.field))
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text(o.number).font(Theme.Font.display(20)); StatusBadge(o.status); PriorityBadge(priority: o.priority); if o.isOverdue { StatusBadge("overdue", tone: .danger) } }
+                    Text(o.number).font(Theme.Font.display(20)).fixedSize(horizontal: false, vertical: true)
                     Text("\(o.quantity) × \(o.productName)").font(Theme.Font.body)
                     if let sku = o.productSku { Text("SKU \(sku)").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                     if let c = o.customerLabel {
@@ -105,11 +105,16 @@ struct ProductionOrderDetailView: View {
                     if let p = o.r["progress"], let f = p["finished"]?.int, let s = p["stages"]?.int { Text("\(f)/\(s) stages").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                 }
             }
-            ProgressView(value: Double(o.percent), total: 100).tint(Theme.Palette.brand)
-            HStack {
-                DetailRow("Due") { DateText(o.dueDate, style: .date) }
-                DetailRow("Started") { DateText(o.r.date("started_at"), style: .date) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    StatusBadge(o.status)
+                    PriorityBadge(priority: o.priority)
+                    if o.isOverdue { StatusBadge("overdue", tone: .danger) }
+                }.fixedSize()
             }
+            ProgressView(value: Double(o.percent), total: 100).tint(Theme.Palette.brand)
+            DetailRow("Due") { DateText(o.dueDate, style: .date) }
+            DetailRow("Started") { DateText(o.r.date("started_at"), style: .date) }
         }
     }
 
@@ -204,12 +209,17 @@ struct ProductionOrderDetailView: View {
 
     private func details(_ o: ProductionOrderRecord) -> some View {
         SectionCard("Details") {
-            DetailRow("Outlet", o.r["outlet"]?["name"]?.string)
-            DetailRow("Raised by", Names.person(o.r["created_by"]))
-            DetailRow("Created") { DateText(o.r.date("created_at")) }
-            DetailRow("Fitting") { DateText(o.r.date("fitting_date"), style: .date) }
-            DetailRow("Collection") { DateText(o.r.date("collection_date"), style: .date) }
-            if let n = o.r.string("notes"), !n.isEmpty { DetailRow("Notes", n) }
+            detailLine("Outlet", icon: "building.2") { Text(o.r["outlet"]?["name"]?.string ?? "—") }
+            detailLine("Raised by", icon: "person") { Text(Names.person(o.r["created_by"]) ?? "—") }
+            detailLine("Created", icon: "calendar") { DateText(o.r.date("created_at")) }
+            detailLine("Fitting", icon: "calendar.badge.clock") { DateText(o.r.date("fitting_date"), style: .date) }
+            detailLine("Collection", icon: "bag") { DateText(o.r.date("collection_date"), style: .date) }
+            if let n = o.r.string("notes"), !n.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Notes", systemImage: "text.alignleft").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
+                    Text(n).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(12).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
+            }
             if let sale = o.r["customer_order"]?["order_number"]?.string, let sid = o.r.int("customer_order_id") {
                 HStack { Text("Sales order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(sale) { env.navigator.push(.order(id: sid)) } }
             }
@@ -227,6 +237,17 @@ struct ProductionOrderDetailView: View {
                 }
             }
         }
+    }
+
+    private func detailLine<Content: View>(_ title: String, icon: String, @ViewBuilder value: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
+            Spacer(minLength: 12)
+            value().font(.subheadline).multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 5)
     }
 
     // MARK: Actions
@@ -380,27 +401,45 @@ struct ProductionMessagesSection: View {
     @State private var res: Resource<[Record]>?
     @State private var text = ""
     @State private var type = "message"
+    @State private var sending = false
 
     var body: some View {
         SectionCard("Thread") {
             if let res {
                 LoadableView(res.state, retry: { res.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No messages yet", symbol: "bubble.left") }) { msgs in
                     ForEach(msgs) { m in
-                        HStack(alignment: .top, spacing: Theme.Space.s) {
-                            Text(m["user"]?["initials"]?.string ?? "?").font(Theme.Font.caption).frame(width: 28, height: 28).background(Theme.Palette.neutralSoft, in: Circle())
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack { Text(Names.person(m["user"]) ?? "").font(Theme.Font.caption.weight(.semibold)); if m.string("type") == "note" { StatusBadge("note", tone: .amber) }; Spacer(); DateText(m.date("created_at"), style: .relative) }
-                                Text(m.string("body") ?? "").font(Theme.Font.secondary)
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(m["user"]?["initials"]?.string ?? "?").font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.Palette.brandDeep).frame(width: 32, height: 32)
+                                .background(Theme.Palette.brandDeep.opacity(0.09), in: Circle())
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(Names.person(m["user"]) ?? "Team member").font(.caption.weight(.semibold))
+                                    if m.string("type") == "note" { StatusBadge("note", tone: .amber) }
+                                    Spacer(minLength: 4)
+                                    DateText(m.date("created_at"), style: .relative).font(.caption).foregroundStyle(Theme.textSecondary)
+                                }
+                                Text(m.string("body") ?? "").font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                        .padding(.vertical, 3)
+                        .padding(10).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
                     }
                 }
             }
-            HStack {
-                Picker("", selection: $type) { Text("Message").tag("message"); Text("Note").tag("note") }.frame(maxWidth: 130)
-                TextField("Write to the people on this order…", text: $text).textFieldStyle(.roundedBorder).onSubmit { Task { await send() } }
-                Button("Send") { Task { await send() } }.disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Type", selection: $type) { Text("Message").tag("message"); Text("Note").tag("note") }
+                    .pickerStyle(.segmented).accessibilityLabel("Message type").disabled(sending)
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField(type == "note" ? "Write a note…" : "Write a message…", text: $text, axis: .vertical)
+                        .lineLimit(1...4).textFieldStyle(.roundedBorder).disabled(sending)
+                    Button { Task { await send() } } label: {
+                        if sending { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.up").font(.subheadline.weight(.semibold)) }
+                    }
+                    .buttonStyle(.borderedProminent).tint(Theme.Palette.brandDeep)
+                    .disabled(sending || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Send \(type)")
+                }
             }
         }
         .task {
@@ -414,7 +453,9 @@ struct ProductionMessagesSection: View {
 
     private func send() async {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return }
+        guard !body.isEmpty, !sending else { return }
+        sending = true
+        defer { sending = false }
         do {
             _ = try await env.session.client.post("/v1/admin/production-orders/\(orderId)/messages", json: .object(["body": .string(body), "type": .string(type)]))
             text = ""
