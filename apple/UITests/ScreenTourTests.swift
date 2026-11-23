@@ -3,8 +3,8 @@ import BethanyKit
 
 /// The screen tour: signs in to a throwaway Hub (apple/UITests/Fixtures, CI
 /// job "UI tour" in .github/workflows/apple-ui.yml), then opens every screen in
-/// the navigation catalogue and the fixture's record pages through the app's
-/// own `bethanyhub://` links. Each screen is kept as a screenshot attachment,
+/// the navigation catalogue and the fixture's record pages, one tap of the
+/// app's DEBUG-only tour button at a time (BethanyUI UITestRouteField). Each screen is kept as a screenshot attachment,
 /// and a screen that shows "Something went wrong" or "Can't reach Bethany
 /// House" fails the run, named.
 ///
@@ -46,7 +46,8 @@ final class ScreenTourTests: XCTestCase {
     func testEveryScreen() throws {
         let app = XCUIApplication()
         app.launchEnvironment["HUB_URL"] = Self.hub
-        app.launchEnvironment["BH_UITEST_ROUTES"] = "1"
+        // The app walks this list, one screen per tap of its hidden "next" button.
+        app.launchEnvironment["BH_UITEST_ROUTES"] = Self.screens.map(\.path).joined(separator: "\n")
         #if os(iOS)
         // The iPad as a workstation: landscape, sidebar beside the screen.
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -58,7 +59,9 @@ final class ScreenTourTests: XCTestCase {
 
         var problems: [String] = []
         for (i, screen) in Self.screens.enumerated() {
-            go(app, screen.path)
+            if !go(app, screen.path) {
+                problems.append("\(screen.name) (\(screen.path)): the app did not open it")
+            }
             settle(app)
             dismissSystemAlerts()
             snap(app, String(format: "%03d %@", i + 1, screen.name))
@@ -77,24 +80,20 @@ final class ScreenTourTests: XCTestCase {
 
     // MARK: - Steps
 
-    /// Navigate in the running app through the DEBUG-only route field
-    /// (BethanyUI UITestRouteField), as a sidebar click would.
+    /// Open the next screen in the running app through the DEBUG-only
+    /// button (BethanyUI UITestRouteField), as a sidebar click would, and
+    /// confirm the app says it opened `path`.
     @MainActor
-    private func go(_ app: XCUIApplication, _ path: String) {
-        let field = app.textFields["uitest.route"]
-        guard field.waitForExistence(timeout: 10) else { return }
-        // The field gives up focus after each navigation (so the iPad keyboard
-        // does not cover the screenshot); tap until it has focus again, then type.
-        for _ in 0..<4 {
-            field.click_or_tap()
-            if field.hasKeyboardFocus { break }
-            Thread.sleep(forTimeInterval: 0.5)
+    @discardableResult
+    private func go(_ app: XCUIApplication, _ path: String) -> Bool {
+        let next = app.buttons["uitest.next"]
+        guard next.waitForExistence(timeout: 10) else {
+            XCTFail("the tour button is missing (opening \(path))")
+            return false
         }
-        guard field.hasKeyboardFocus else {
-            XCTFail("could not focus the route field for \(path)")
-            return
-        }
-        field.typeText(path + "\n")
+        next.click_or_tap()
+        let opened = NSPredicate(format: "value == %@", path)
+        return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: opened, object: next)], timeout: 5) == .completed
     }
 
     @MainActor
@@ -155,8 +154,6 @@ final class ScreenTourTests: XCTestCase {
 }
 
 private extension XCUIElement {
-    var hasKeyboardFocus: Bool { (value(forKey: "hasKeyboardFocus") as? Bool) ?? false }
-
     func click_or_tap() {
         #if os(macOS)
         click()
