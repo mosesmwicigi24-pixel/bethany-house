@@ -96,7 +96,7 @@ struct FinanceReportView: View {
                     StatTile("Tax on sales", value: fmtMoney(j["tax_collected"], currency: "KES"))
                     StatTile("Discounts given", value: fmtMoney(j["discounts_given"], currency: "KES"))
                 }
-                Text("Gross profit = recognised net revenue − historical COGS; net profit = gross profit − approved/paid operating expenses (CLAUDE.md §7).").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                Text("Gross profit = recognised net revenue − historical COGS; net profit = gross profit − approved/paid operating expenses.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
             }
             SectionCard("Expenses by category") { if j["expenses_by_category"]?.array != nil { AutoTable(rows: jrows(j["expenses_by_category"]), currency: "KES") } else { AutoPairs(json: j["expenses_by_category"]) } }
             if let c = j["comparison"], !c.isNull { SectionCard("Previous period") { AutoPairs(json: c) } }

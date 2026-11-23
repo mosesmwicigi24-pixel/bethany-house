@@ -123,7 +123,11 @@ struct InventoryReportView: View {
             case "stock":
                 Toggle("Low stock only", isOn: $lowOnly).toggleStyle(.switch).font(Theme.Font.secondary)
                 ReportData("/v1/admin/reports/inventory/stock-on-hand", query: outlet.merging(["low_stock_only": lowOnly ? "1" : nil]) { $1 }) { j in
-                    SectionCard("Totals") { AutoTiles(json: j["totals"]) ; BasisCaption("Stock value needs cost (products.view_cost); the server sends null without it.") }
+                    SectionCard("Totals") {
+                        AutoTiles(json: j["totals"])
+                        // Only for someone who may not see costs: for everyone else the note misled.
+                        if !env.session.canViewCost { BasisCaption("Stock value needs permission to see costs (products.view_cost); the server sends none without it.") }
+                    }
                     SectionCard("Items") { AutoTable(rows: jrows(j["items"]), currency: "KES") { r in if let id = r.int("product_id") { env.navigator.go(.product(id: id)) } } }
                 }
             case "low": ReportData("/v1/admin/reports/inventory/low-stock", query: outlet) { j in
