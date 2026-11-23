@@ -147,8 +147,10 @@ struct OrderDetailView: View {
                     HStack(spacing: 6) {
                         StatusBadge(o.status)
                         StatusBadge(o.string("payment_status"))
-                        StatusBadge((o.string("sales_bucket") ?? o.string("order_type") ?? "").humanized, tone: .neutral)
-                        if let src = o.string("source_channel") { StatusBadge(src, tone: .info) }
+                        let channel = OrderChannelLabel.of(salesBucket: o.string("sales_bucket"), orderType: o.string("order_type"), sourceChannel: o.string("source_channel"))
+                        StatusBadge(channel, tone: .neutral)
+                        // The source, unless the channel already names it ("WhatsApp").
+                        if let src = o.string("source_channel"), OrderChannelLabel.chatSources[src] != channel { StatusBadge(src, tone: .info) }
                         if o["dispatched_at"]?.isNull == false { StatusBadge("dispatched", tone: .success) }
                     }
                     HStack(spacing: Theme.Space.m) {
