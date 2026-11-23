@@ -224,8 +224,6 @@ export default function BulkClipsPage() {
         await Promise.all(Array.from({ length: Math.min(CONCURRENCY, todo.length) }, worker));
         setRunning(false);
         qc.invalidateQueries({ queryKey: ["products"] });
-        const after = new Map(rows.map((r) => [r.id, r]));
-        void after;
         toast.success(`Finished: ${todo.length} clip${todo.length === 1 ? "" : "s"} processed. See each row for its result.`);
     };
 
