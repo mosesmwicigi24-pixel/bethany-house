@@ -58,7 +58,7 @@ final class AppFlavorTests: XCTestCase {
         let labels = AppFlavor.tailors.groups(for: owner).flatMap { g in g.items.map { "\(g.label)/\($0.label)" } }
         XCTAssertEqual(labels, [
             "Workspace/Messages",
-            "Me/Updates", "Me/Training", "Me/Clock in", "Me/My shifts", "Me/My leave", "Me/My hours", "Me/My payslips",
+            "My Workday/Updates", "My Workday/Training", "My Workday/Clock in", "My Workday/My shifts", "My Workday/My leave", "My Workday/My hours", "My Workday/My payslips",
             "Production/My Tasks", "Production/Production Orders", "Production/Work In Progress", "Production/Quality Control", "Production/Calendar",
         ])
         XCTAssertEqual(AppFlavor.tailors.userMenu.map(\.label), ["My profile"])
