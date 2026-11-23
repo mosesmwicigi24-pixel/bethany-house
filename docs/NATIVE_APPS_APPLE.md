@@ -37,6 +37,11 @@ after 7 days; Run again. It uses the live Hub. The script fills in your
 Personal Team from the "Apple Development" certificate Xcode created, so
 regenerating does not lose it.
 
+**Setting up a Mac in one go:** `scripts/mac-setup.sh [branch]` installs
+XcodeGen and Codex (ChatGPT's coding agent) if missing, starts the sync below,
+generates and opens the Xcode project, and starts Codex in the folder. Safe to
+run again.
+
 **Keeping a Mac current with every change:** `scripts/mac-sync.sh --install`
 (or `--install <branch>` to follow a pull request's branch before it merges).
 Every 5 minutes it fetches from GitHub, fast-forwards, and regenerates the Xcode
