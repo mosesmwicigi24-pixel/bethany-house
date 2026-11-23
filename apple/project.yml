@@ -151,6 +151,7 @@ targets:
             CFBundleURLSchemes: [tailorshub]
     settings:
       base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Apps/TailorsMobile/TailorsMobile.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.tailors
         PRODUCT_NAME: Tailors Hub

@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Tailors Hub app icon — 23 November 2026
+
+- Added a terracotta scissors-and-thread icon to the Apple TailorsMobile app icon catalog. The iPhone simulator build succeeded and the installed icon was inspected on the iPhone 17 Pro home screen. App Store distribution remains separate and unverified.
+
 ### In progress — 23 November 2026, Codex
 
 - Refining the Apple production-order Details and Thread UI in `ProductionOrderDetail.swift`, reviewing the time-clock UI in `MeFeatureClock.swift` against the Hub, and auditing the Apple More pages one by one; preserving existing Hub APIs and permissions. Claude has claimed Android offline files separately.
