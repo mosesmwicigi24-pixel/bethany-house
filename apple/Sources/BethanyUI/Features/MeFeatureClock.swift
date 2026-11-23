@@ -351,7 +351,7 @@ struct ClockView: View {
                     return
                 }
                 pending = op
-                env.connection.pendingCount = await offline.pending().count
+                await env.refreshPendingCount()
                 env.toasts.show(active != nil ? "No signal. Your clock-out is saved and will be sent when you are back online." : "No signal. Your clock-in is saved and will be sent when you are back online.", tone: .info)
             } else {
                 if let a = error as? APIError, a.raw?["requires_override"]?.bool == true { serverAsksOverride = true }
@@ -374,27 +374,32 @@ struct ClockView: View {
         pending = await env.offline?.pending().first { $0.kind == "punch" }
     }
 
-    /// Sends the kept punch; a refusal drops it (the server said no), a
-    /// transport failure keeps it for next time.
+    /// Sends the kept punch through the store's one sending path, shared with
+    /// the automatic replay, so the same punch is never sent twice. A refusal
+    /// drops it (the server said no); a temporary failure keeps it.
     private func sendPending() async {
-        guard let pending, let offline = env.offline else { return }
-        do {
-            _ = try await env.session.client.send(.init(.post, pending.path, body: .json(pending.body)))
-            await offline.dequeue(pending.id)
+        guard let pending, let offline = env.offlineStoreForCurrentUser() else { return }
+        let what = "\(pending.path.hasSuffix("clock-in") ? "clock-in" : "clock-out") from \(MeFormat.when(pending.recordedAt))"
+        let outcome = await offline.send(pending.id, using: OfflineStore.transport(env.session.client))
+        switch outcome {
+        case .sent, .sentButNotCleared:
             self.pending = nil
-            env.connection.pendingCount = await offline.pending().count
-            env.toasts.show("Your \(pending.path.hasSuffix("clock-in") ? "clock-in" : "clock-out") from \(MeFormat.when(pending.recordedAt)) has been sent.")
+            env.toasts.show("Your \(what) has been sent.")
             await status?.reload()
-        } catch {
-            if let apiError = error as? APIError, OfflineStore.isFinalRefusal(apiError.status) {
-                await offline.dequeue(pending.id)
-                self.pending = nil
-                env.connection.pendingCount = await offline.pending().count
-                env.toasts.show("The saved punch could not be recorded: \(apiError.message)", tone: .danger)
-            } else if !isOfflineError(error) {
-                env.toasts.show("Your saved punch is still on this device. Try sending it again.", tone: .warning)
-            }
+        case .refused(_, let message):
+            self.pending = nil
+            env.toasts.show("The saved punch could not be recorded: \(message)", tone: .danger)
+        case .keptForRetry:
+            if env.connection.isOnline { env.toasts.show("Your saved punch is still on this device. Try sending it again.", tone: .warning) }
+        case .alreadySending:
+            break   // the automatic replay has it; its result updates this screen
+        case .notQueued:
+            await loadPending()
+            await status?.reload()
+        case .unreadable:
+            env.toasts.show("Changes saved on this device could not be read. Ask a manager for help.", tone: .danger)
         }
+        await env.refreshPendingCount()
     }
 
     // MARK: Location on shift (rules.location_mode == "trail"; iOS only)

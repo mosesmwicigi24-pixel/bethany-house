@@ -480,7 +480,7 @@ struct MyTasksView: View {
             env.toasts.show("This change could not be saved on this device. Try again.", tone: .danger)
             return false
         }
-        env.connection.pendingCount = await offline.pending().count
+        await env.refreshPendingCount()
         await refreshPending()
         env.toasts.show("Saved on this device. Waiting to sync.", tone: .warning)
         if env.connection.isOnline { Task { await sync() } }

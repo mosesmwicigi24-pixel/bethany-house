@@ -15,7 +15,6 @@ import Network
 /// the user's own login keychain and FileVault are the boundary.
 public actor OfflineStore {
     public let root: URL
-    private var isReplaying = false
 
     public init(userId: Int) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -84,13 +83,18 @@ public actor OfflineStore {
 
     private var queueURL: URL { root.appendingPathComponent("pending-queue.json") }
 
+    /// The queue as best known. An unreadable queue reads as empty here, so use
+    /// `pendingChecked()` wherever "nothing waiting" must be true (sign-out,
+    /// the pending badge, replay).
     public func pending() -> [PendingOperation] {
-        (try? readQueue()) ?? []
+        (try? pendingChecked()) ?? []
     }
 
     /// Use when an unreadable queue must be distinguished from an empty one.
+    /// Operations already accepted by the server are left out even when the
+    /// file could not be rewritten afterwards (`delivered`).
     public func pendingChecked() throws -> [PendingOperation] {
-        try readQueue()
+        try readQueue().filter { !delivered.contains($0.id) }
     }
 
     private func readQueue() throws -> [PendingOperation] {
@@ -109,44 +113,130 @@ public actor OfflineStore {
             var queue = try readQueue()
             if let key = op.dedupeKey { queue.removeAll { $0.dedupeKey == key } }
             queue.append(op)
-            try write(HubJSON.encoder.encode(queue), to: queueURL)
+            try store(queue)
             return true
         } catch {
             return false
         }
     }
 
-    public func dequeue(_ id: UUID) {
-        guard var queue = try? readQueue(), queue.contains(where: { $0.id == id }) else { return }
-        queue.removeAll { $0.id == id }
-        if let data = try? HubJSON.encoder.encode(queue) { try? write(data, to: queueURL) }
+    /// Removes an operation from the stored queue. False when the queue could
+    /// not be read or rewritten; the operation then stays on disk.
+    @discardableResult
+    public func dequeue(_ id: UUID) -> Bool {
+        do {
+            var queue = try readQueue()
+            guard queue.contains(where: { $0.id == id }) else { return true }
+            queue.removeAll { $0.id == id }
+            try store(queue)
+            return true
+        } catch {
+            return false
+        }
     }
 
-    /// Replays the queue. A final 4xx drops the item (the server refused it;
-    /// the caller reports `refused`); a transport failure stops and keeps the rest.
-    public func replay(with client: APIClient) async -> (sent: [PendingOperation], refused: [(PendingOperation, APIError)]) {
-        guard !isReplaying else { return ([], []) }
-        isReplaying = true
-        defer { isReplaying = false }
-        var sent: [PendingOperation] = []
-        var refused: [(PendingOperation, APIError)] = []
-        for op in pending() {
-            // A newer value may have replaced an unsent count while a previous
-            // request was in flight. Only replay the still-queued operations.
-            guard pending().contains(where: { $0.id == op.id }) else { continue }
-            guard let method = APIClient.Method(rawValue: op.method) else { dequeue(op.id); continue }
-            do {
-                _ = try await client.send(.init(method, op.path, body: .json(op.body)))
-                dequeue(op.id)
-                sent.append(op)
-            } catch let e as APIError where Self.isFinalRefusal(e.status) {
-                dequeue(op.id)
-                refused.append((op, e))
-            } catch {
-                break
+    /// Writes the queue, dropping anything already delivered; once that write
+    /// succeeds, nothing delivered remains on disk.
+    private func store(_ queue: [PendingOperation]) throws {
+        try write(HubJSON.encoder.encode(queue.filter { !delivered.contains($0.id) }), to: queueURL)
+        delivered.removeAll()
+    }
+
+    // MARK: Sending (one path for replay and for a screen's "Send now")
+
+    /// Operations being sent right now. A second sender for the same
+    /// operation is told `.alreadySending` instead of sending it again.
+    private var inFlight: Set<UUID> = []
+    /// Sent and accepted, but the queue file could not be rewritten. Hidden
+    /// from `pendingChecked()` and never sent again while the app runs; the
+    /// next successful write (or `forgetDelivered`) clears it from disk.
+    private var delivered: Set<UUID> = []
+
+    public enum SendOutcome: Sendable, Equatable {
+        /// Accepted by the server and removed from the queue.
+        case sent
+        /// Accepted by the server, but the queue file could not be updated.
+        /// It will not be sent again while the app is running.
+        case sentButNotCleared
+        /// The server refused it for good (`isFinalRefusal`); removed.
+        case refused(status: Int, message: String)
+        /// Not sent (offline, temporary error, session expired); kept for retry.
+        case keptForRetry
+        /// Another sender has this operation in flight.
+        case alreadySending
+        /// No longer queued (sent, replaced by a newer value, or never queued).
+        case notQueued
+        /// The stored queue could not be read.
+        case unreadable
+    }
+
+    /// Sends one queued operation exactly once at a time. Replay and the
+    /// clock screen's resend both come here, so the same operation is never
+    /// in flight twice.
+    public func send(_ id: UUID, using transport: @Sendable (PendingOperation) async throws -> Void) async -> SendOutcome {
+        guard !inFlight.contains(id) else { return .alreadySending }
+        let queue: [PendingOperation]
+        do { queue = try pendingChecked() } catch { return .unreadable }
+        guard let op = queue.first(where: { $0.id == id }) else { return .notQueued }
+        inFlight.insert(id)
+        defer { inFlight.remove(id) }
+        do {
+            try await transport(op)
+        } catch let e as APIError where Self.isFinalRefusal(e.status) {
+            if !dequeue(id) { delivered.insert(id) }
+            return .refused(status: e.status, message: e.message)
+        } catch {
+            return .keptForRetry
+        }
+        if dequeue(id) { return .sent }
+        delivered.insert(id)
+        return .sentButNotCleared
+    }
+
+    /// The Hub client as a transport.
+    public static func transport(_ client: APIClient) -> @Sendable (PendingOperation) async throws -> Void {
+        { op in
+            guard let method = APIClient.Method(rawValue: op.method) else {
+                throw APIError(status: 400, message: "This saved change cannot be sent (unknown method \(op.method)).")
+            }
+            _ = try await client.send(.init(method, op.path, body: .json(op.body)))
+        }
+    }
+
+    public struct ReplayResult: Sendable {
+        public var sent: [PendingOperation] = []
+        public var refused: [(PendingOperation, APIError)] = []
+        /// Accepted by the server but still in the stored queue file.
+        public var notCleared: [PendingOperation] = []
+        /// The stored queue could not be read: nothing was sent, nothing lost.
+        public var unreadable = false
+    }
+
+    /// Replays the queue in order. A final 4xx drops the item (the server
+    /// refused it; the caller reports `refused`); a transport failure stops
+    /// and keeps the rest. An unreadable queue is reported, never treated as empty.
+    public func replay(with client: APIClient) async -> ReplayResult {
+        await replay(using: Self.transport(client))
+    }
+
+    public func replay(using transport: @Sendable (PendingOperation) async throws -> Void) async -> ReplayResult {
+        var result = ReplayResult()
+        let queue: [PendingOperation]
+        do { queue = try pendingChecked() } catch { result.unreadable = true; return result }
+        for op in queue {
+            switch await send(op.id, using: transport) {
+            case .sent: result.sent.append(op)
+            case .sentButNotCleared: result.sent.append(op); result.notCleared.append(op)
+            case .refused(let status, let message): result.refused.append((op, APIError(status: status, message: message)))
+            case .notQueued: continue
+            // Another sender has this one in flight: stop here so nothing
+            // after it reaches the server first. That sender carries on.
+            case .alreadySending: return result
+            case .unreadable: result.unreadable = true; return result
+            case .keptForRetry: return result
             }
         }
-        return (sent, refused)
+        return result
     }
 
     public static func isFinalRefusal(_ status: Int) -> Bool {
@@ -165,6 +255,8 @@ public final class ConnectionMonitor {
     public private(set) var isOnline = true
     public private(set) var isExpensive = false
     public var pendingCount = 0
+    /// The saved queue could not be read: `pendingCount` is not known.
+    public var pendingUnreadable = false
     private let monitor = NWPathMonitor()
 
     public init() {

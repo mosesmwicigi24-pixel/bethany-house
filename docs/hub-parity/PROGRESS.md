@@ -21,3 +21,52 @@
 - Manual punch resend and automatic queue replay each send independently. Concurrent execution can therefore issue the same pending request twice. The server checks whether a user is already clocked in, but the inspected controller does not establish request idempotency or prove concurrent safety. Investigate and test before relying on this path.
 - Queue deletion errors are currently suppressed, so a reported successful send may remain queued and be retried. This remains open.
 - After the latest changes, the shared Mac app target built successfully with code signing disabled, and the Swift suite passed 96 tests. A Mac runtime walkthrough and the remaining iPad and iPhone scenarios have not been completed.
+
+### Offline queue P0 fixes (23 November 2026, later)
+
+Branch brought up to date with `main` (#578–#582, #553 merged today). Conflicts
+were the earlier Tailors Hub code arriving twice (once squashed); the newer
+branch side was kept and the menu test follows `main`'s "Me" → "My Workday"
+rename.
+
+- **One sending path.** `OfflineStore.send(_:using:)` is now the only way a
+  queued operation is sent. Automatic replay and the clock screen's resend
+  both use it, and an operation already in flight is never sent a second time
+  (`.alreadySending`). A replay that meets an operation in flight stops there,
+  so nothing queued after it reaches the server first.
+- **Accepted but not cleared.** `dequeue` reports failure instead of
+  swallowing it. An operation the server accepted whose removal could not be
+  written is held in memory as delivered: hidden from the queue, never resent
+  while the app runs, and dropped from disk at the next successful write.
+  Replay reports these (`notCleared`) and the app says they will not be sent
+  again.
+- **Unreadable is never empty.** Replay reports an unreadable queue
+  (`unreadable`) and sends nothing. The sign-out guard uses the checked read
+  and warns "Saved changes can't be read" instead of signing out silently. The
+  pending badge is set only from the checked read (`refreshPendingCount`), and
+  `ConnectionMonitor.pendingUnreadable` flags an unreadable queue (shown in the
+  Mac sidebar).
+- **Tests.** Five new `OfflineStoreTests`: two senders at once send a punch
+  once; replay keeps order behind an operation in flight; temporary failure
+  keeps and final refusal removes; accepted-but-uncleared is not resent and
+  leaves disk at the next write; an unreadable queue replays nothing and is
+  reported. All 8 offline-store tests pass on Linux (Swift 6.0.3, APIClient
+  stubbed). Mutation check: removing the in-flight guard fails the two
+  concurrency tests (the punch is sent twice); removing the delivered filter
+  fails the uncleared test.
+- **Not verified here:** the SwiftUI changes (clock screen, sign-out alert,
+  Mac badge) compile only in Apple CI; no simulator or device run.
+
+Still open:
+- Restart durability: an accepted-but-uncleared operation survives on disk
+  only until the next successful write; if the app is killed first, it can be
+  resent after restart. The server side (punch state check, absolute progress
+  counts) limits the effect, but request idempotency is not established
+  server-side — UNKNOWN — NEEDS VERIFICATION.
+- Android has its own offline store and sign-out guard; none of these fixes is
+  ported there yet.
+- Tailors Hub scope: commit 4eb0ecfd widens Apple's Tailors Hub to People,
+  employee files, payroll, advances and the staff workday screens. The owner's
+  approved scope (2026-11-23) excluded these. Android still has the approved
+  list. Awaiting the owner's decision; `docs/TAILORS_HUB.md` is out of date
+  until then.

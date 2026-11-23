@@ -90,7 +90,7 @@ public final class AppEnvironment {
                     Task { @MainActor in self?.handleNotificationPushed(event) }
                 }
             }
-            connection.pendingCount = await offline?.pending().count ?? 0
+            await refreshPendingCount()
         } else {
             await realtime?.disconnect()
             realtime = nil
@@ -120,12 +120,32 @@ public final class AppEnvironment {
         if let title = event.payload?["title"]?.string { toasts.show(title, tone: .info) }
     }
 
-    /// Replays queued offline operations when a connection returns.
+    /// The pending badge, from a checked read: an unreadable queue is flagged
+    /// (`pendingUnreadable`), never shown as nothing waiting.
+    public func refreshPendingCount() async {
+        guard let offline else { connection.pendingCount = 0; connection.pendingUnreadable = false; return }
+        do {
+            connection.pendingCount = try await offline.pendingChecked().count
+            connection.pendingUnreadable = false
+        } catch {
+            connection.pendingUnreadable = true
+        }
+    }
+
+    /// Replays queued offline operations when a connection returns. Every
+    /// send goes through `OfflineStore.send`, the same path as a screen's
+    /// "Send now", so nothing is sent twice.
     public func replayPending() async {
         guard let offline, connection.isOnline else { return }
         let result = await offline.replay(with: session.client)
-        connection.pendingCount = await offline.pending().count
+        await refreshPendingCount()
+        if result.unreadable {
+            toasts.show("Changes saved on this device could not be read, so they were not sent. Don't sign out; ask a manager for help.", tone: .danger)
+        }
         if !result.sent.isEmpty { toasts.show("\(result.sent.count) saved change\(result.sent.count == 1 ? "" : "s") sent") }
+        if !result.notCleared.isEmpty {
+            toasts.show("\(result.notCleared.count) sent change\(result.notCleared.count == 1 ? " was" : "s were") received by the Hub but could not be cleared from this device. They will not be sent again.", tone: .warning)
+        }
         for (op, e) in result.refused { toasts.show("\(op.kind.humanized) was refused: \(e.message)", tone: .danger) }
     }
 }
