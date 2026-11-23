@@ -84,6 +84,7 @@ export function StepUpDialog() {
             title="Confirm it’s you"
             size="sm"
             closeOnBackdrop={false}
+            onTop
             footer={
                 <>
                     <button type="button" onClick={cancel} className="btn-secondary btn-sm">Cancel</button>

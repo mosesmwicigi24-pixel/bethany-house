@@ -130,7 +130,8 @@ struct MyTasksView: View {
                     .foregroundStyle(Theme.textSecondary)
                 }
             }
-            let specs = (o["specifications"]?.stringPairs ?? []) + (o["measurements"]?.stringPairs ?? [])
+            // Measurements in the clergy sheet's order (MeasurementSheet), not alphabetical.
+            let specs: [(String, String)] = (o["specifications"]?.stringPairs ?? []) + MeasurementSheet.rows(o["measurements"])
             if !specs.isEmpty {
                 DisclosureGroup("Specs & measurements") {
                     ForEach(specs, id: \.0) { k, v in DetailRow(k.humanized, v) }

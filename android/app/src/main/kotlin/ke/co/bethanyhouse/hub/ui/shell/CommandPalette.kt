@@ -24,7 +24,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
-import ke.co.bethanyhouse.hub.core.NavCatalogue
 import ke.co.bethanyhouse.hub.core.NavItem
 import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.get
@@ -49,7 +48,7 @@ fun CommandPalette(dismiss: () -> Unit) {
     val s = env.session.current
     val pages = remember(query) {
         val q = query.trim().lowercase()
-        if (q.isEmpty()) emptyList() else NavCatalogue.allItems.filter { it.gate.allows(s.permissions) && it.label.lowercase().contains(q) }.take(8)
+        if (q.isEmpty()) emptyList() else s.flavor.searchable(s.permissions).filter { it.label.lowercase().contains(q) }.take(8)
     }
 
     LaunchedEffect(query) {

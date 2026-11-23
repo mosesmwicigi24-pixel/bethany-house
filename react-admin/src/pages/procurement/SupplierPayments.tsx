@@ -23,6 +23,18 @@ const METHODS: Array<[string, string]> = [
     ["bank_transfer", "Bank transfer (other bank)"], ["cheque", "Cheque"],
     ["card", "Card"], ["other", "Other"],
 ];
+/** Paid before the hub kept supplier payments: offered only when marking
+ *  orders paid in bulk, shown wherever a payment is listed. */
+export const PRE_RECORDS: [string, string] = ["pre_records", "Paid before records began"];
+export const SUPPLIER_PAYMENT_METHODS = METHODS;
+export const SUPPLIER_PAYMENT_NEEDS_REFERENCE = ["im_bank", "bank_transfer", "mpesa", "cheque", "card"];
+export const SUPPLIER_REFERENCE_HINT: Record<string, string> = {
+    mpesa: "M-PESA code, e.g. SKA1B2C3D4",
+    im_bank: "I&M transaction reference",
+    bank_transfer: "Bank and transaction reference",
+    cheque: "Cheque number",
+    card: "Card slip or authorisation number",
+};
 const NEEDS_REFERENCE = ["im_bank", "bank_transfer", "mpesa", "cheque", "card"];
 const REFERENCE_HINT: Record<string, string> = {
     mpesa: "M-PESA code, e.g. SKA1B2C3D4",
@@ -119,7 +131,7 @@ export function SupplierPaymentsCard({ poId, payable, canPay, canVoid, onChanged
                                 <div className="min-w-0">
                                     <p className={clsx("font-medium text-surface-800", p.voided_at && "line-through")}>
                                         {money(p.amount, p.currency_code)}
-                                        <span className="font-normal text-surface-500"> · {METHODS.find(([m]) => m === p.method)?.[1] ?? p.method}</span>
+                                        <span className="font-normal text-surface-500"> · {[...METHODS, PRE_RECORDS].find(([m]) => m === p.method)?.[1] ?? p.method}</span>
                                     </p>
                                     <p className="text-surface-500 break-all">
                                         {p.payment_number} · {String(p.paid_at).slice(0, 10)}{p.reference && ` · ${p.reference}`}
