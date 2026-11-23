@@ -64,7 +64,7 @@ foreach ([
     ['Test Communion Cups (box)', 'UIT-CUPS', 10, null, false],
     ['Test Clergy Shirt', 'UIT-SHIRT', 2500, null, true],
 ] as [$name, $sku, $kes, $usd, $made]) {
-    $p = Product::factory()->create(['sku' => $sku, 'category_id' => $cat, 'status' => 'published', 'is_producible' => $made]);
+    $p = Product::factory()->create(['sku' => $sku, 'category_id' => $cat, 'status' => 'active', 'is_producible' => $made]);
     DB::table('product_translations')->insert(['product_id' => $p->id, 'language_code' => 'en', 'name' => $name, 'created_at' => $now, 'updated_at' => $now]);
     DB::table('product_prices')->insert(['product_id' => $p->id, 'currency_code' => 'KES', 'regular_price' => $kes, 'created_at' => $now, 'updated_at' => $now]);
     if ($usd !== null) {

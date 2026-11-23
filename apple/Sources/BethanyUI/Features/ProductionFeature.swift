@@ -143,6 +143,10 @@ struct ProductionOrderRow: View {
                 Text("\(order.quantity) × \(order.productName)").font(Theme.Font.secondary)
                 HStack(spacing: Theme.Space.s) {
                     if let c = order.customerLabel { Label(c, systemImage: "person").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
+                    else if order.isCustomerJob {
+                        // As the console: a customer's job whose name is missing says so.
+                        Label(order.r["customer_order"]?["order_number"]?.string.map { "\($0) · name missing" } ?? "Name missing", systemImage: "person.crop.circle.badge.questionmark").font(Theme.Font.caption).foregroundStyle(Theme.Palette.warning)
+                    }
                     else { Label("For stock", systemImage: "shippingbox").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                     if let d = order.dueDate { Label { DateText(d, style: .date) } icon: { Image(systemName: "calendar") }.font(Theme.Font.caption) }
                     if let s = order.currentStage { Text(s).font(Theme.Font.caption).foregroundStyle(Theme.Palette.brandDeep) }

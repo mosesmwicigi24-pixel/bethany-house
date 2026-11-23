@@ -33,7 +33,9 @@ struct ProductListItem: Identifiable, Hashable {
     var type: String { json["product_type"]?.string ?? "simple" }
     var category: String? { json["category"]?["name_en"]?.string }
     var image: String? { json["primary_image"]?["image_url"]?.string }
-    var stock: Int { json["total_stock"]?.int ?? 0 }
+    /// Nil when the list does not carry stock (GET /products sends none today):
+    /// never shown as 0, which reads as "out of stock".
+    var stock: Int? { json["total_stock"]?.int }
     var lowThreshold: Int { json["low_stock_threshold"]?.int ?? 0 }
     var variants: Int { json["variants_count"]?.int ?? 0 }
     var price: Money? { json["base_price"]?["regular_price"].flatMap { Money(json: $0, currency: json["base_price"]?["currency_code"]?.string ?? "KES") } }
@@ -161,7 +163,7 @@ struct ProductsListView: View {
                     HStack { Text(p.name).font(Theme.Font.body).lineLimit(1); StatusBadge(p.status); if p.featured { StatusBadge("featured", tone: .accent) } }
                     Text("\(p.sku) · \(p.category ?? "No category") · \(ProductVocab.types.first { $0.0 == p.type }?.1 ?? p.type.humanized)\(p.variants > 0 ? " · \(p.variants) variants" : "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
                     HStack(spacing: 6) {
-                        Text("Stock \(p.stock)").font(Theme.Font.caption).foregroundStyle(p.stock <= 0 ? Theme.Palette.danger : (p.stock <= p.lowThreshold ? Theme.Palette.warning : Theme.textSecondary))
+                        if let stock = p.stock { Text("Stock \(stock)").font(Theme.Font.caption).foregroundStyle(stock <= 0 ? Theme.Palette.danger : (stock <= p.lowThreshold ? Theme.Palette.warning : Theme.textSecondary)) }
                         if p.producible { Text("· producible").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
                     }
                 }

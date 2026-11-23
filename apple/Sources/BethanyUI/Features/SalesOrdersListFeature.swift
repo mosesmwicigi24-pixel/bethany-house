@@ -36,7 +36,7 @@ struct OrdersListView: View {
     }
 
     var body: some View {
-        Page(title, subtitle: list.map { "\($0.total) orders" }) {
+        Page(title, subtitle: list.map { "\($0.total) order\($0.total == 1 ? "" : "s")" }) {
             filters
             if let list {
                 LoadableView(list.state, retry: { Task { await list.load() } }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No orders match", message: "Try another status, date range or search.", symbol: "bag") }) { rows in
