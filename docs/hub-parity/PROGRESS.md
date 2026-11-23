@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Production-order layout — 24 November 2026
+
+- Reordered the order page to show its summary, work instructions and measurements, then compact stages; removed its PDF action and Details section at the owner's request. The removed Details section previously displayed fitting/collection dates and a sales-order link; those are no longer shown on this page.
+- Added restrained color to the shared measurement icons. The iPhone simulator build succeeded and a fictional order's summary, measurement grid and section sequence were checked. Dark appearance and large text remain unverified.
+
 ### Production calendar — 24 November 2026, Codex
 
 - Restyled open-stage workload rows with relevant existing production icons and task-count badges. Checked four fictional stage types on iPhone 17 Pro; an empty `by_stage` response still hides the section.

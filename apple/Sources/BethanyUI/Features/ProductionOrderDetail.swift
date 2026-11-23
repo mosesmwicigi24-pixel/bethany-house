@@ -26,18 +26,20 @@ struct ProductionOrderDetailView: View {
                     let o = ProductionOrderRecord(r)
                     header(o)
                     actions(o)
-                    tasks(o)
                     workInstructions(o)
+                    tasks(o)
                     if !o.batches.isEmpty || canEdit(o) { batchesSection(o) }
                     MaterialSourcingPanel(orderId: orderId, closed: ["completed", "cancelled"].contains(o.status ?? ""))
                     if !o.allocations.isEmpty || r["material_requirements"]?.array?.isEmpty == false { materials(o) }
-                    details(o)
                     ProductionMessagesSection(orderId: orderId)
                     if showAudit { ModuleAuditLog(path: "/v1/admin/production-orders/\(orderId)/audit-log") }
                     else { Button("Show audit log") { showAudit = true }.font(Theme.Font.secondary) }
                 }
             }
         }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task { if res == nil { load() } }
         .refreshable { await res?.reload() }
         // A failed inspection leads straight to "Send back for rework", with the
@@ -155,7 +157,6 @@ struct ProductionOrderDetailView: View {
                     if status != "completed", s.can("production.delete_order") {
                         ConfirmButton("Delete permanently", message: "Removes the order and its tasks, batches and allocations; serials are voided and the linked sales line unlinked. This cannot be undone.", destructive: true, action: { await forceDelete() }) { Label("Delete", systemImage: "trash") }
                     }
-                    DocumentButton("PDF", path: "/v1/admin/pdf/production-orders/\(orderId)", suggestedName: "\(o.number).pdf")
                 }
             }
         }
@@ -165,9 +166,9 @@ struct ProductionOrderDetailView: View {
     private func tasks(_ o: ProductionOrderRecord) -> some View {
         SectionCard("Stages") {
             if o.tasks.isEmpty { Text(o.status == "draft" ? "Tasks are created when the order is confirmed." : "No tasks on this order.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary) }
-            ForEach(Array(o.tasks.enumerated()), id: \.offset) { _, t in
+            ForEach(Array(o.tasks.enumerated()), id: \.offset) { index, t in
                 ProductionTaskRow(task: t, order: o, onChanged: reload)
-                Divider()
+                if index < o.tasks.count - 1 { Divider() }
             }
         }
     }
@@ -236,30 +237,6 @@ struct ProductionOrderDetailView: View {
         }
     }
 
-    private func details(_ o: ProductionOrderRecord) -> some View {
-        SectionCard("Details") {
-            detailLine("Outlet", icon: "building.2") { Text(o.r["outlet"]?["name"]?.string ?? "—") }
-            detailLine("Raised by", icon: "person") { Text(Names.person(o.r["created_by"]) ?? "—") }
-            detailLine("Created", icon: "calendar") { DateText(o.r.date("created_at")) }
-            detailLine("Fitting", icon: "calendar.badge.clock") { DateText(o.r.date("fitting_date"), style: .date) }
-            detailLine("Collection", icon: "bag") { DateText(o.r.date("collection_date"), style: .date) }
-            if let sale = o.r["customer_order"]?["order_number"]?.string, let sid = o.r.int("customer_order_id") {
-                HStack { Text("Sales order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(sale) { env.navigator.push(.order(id: sid)) } }
-            }
-        }
-    }
-
-    private func detailLine<Content: View>(_ title: String, icon: String, @ViewBuilder value: () -> Content) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Label(title, systemImage: icon)
-                .font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
-            Spacer(minLength: 12)
-            value().font(.subheadline).multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.vertical, 5)
-    }
-
     // MARK: Actions
 
     private func post(_ action: String, json: JSONValue = .object([:]), success: String?) async {
@@ -302,19 +279,19 @@ struct ProductionTaskRow: View {
         let status = task["status"]?.string ?? "pending"
         let assignee = Names.person(task["assigned_to_user"] ?? task["assigned_to"])
         let done = task["quantity_done"]?.int ?? 0
-        HStack(alignment: .top) {
-            ProductionStageIcon(stage: task["stage"])
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
+        HStack(alignment: .center, spacing: 9) {
+            ProductionStageIcon(stage: task["stage"], tint: status == "completed" ? Theme.Palette.success : Theme.Palette.brandDeep)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
                     if let seq = task["sequence"]?.int { Text("\(seq).").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
-                    Text(task["stage"]?["name"]?.string ?? "Stage").font(Theme.Font.body.weight(.semibold))
-                    StatusBadge(status)
+                    Text(task["stage"]?["name"]?.string ?? "Stage").font(.subheadline.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                     if task["concurrent_allowed"]?.bool == true { StatusBadge("unlocked", tone: .accent) }
                 }
-                Text(assignee.map { "Assigned to \($0)" } ?? "Unassigned").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                Text("\(done) of \(order.quantity) pieces").font(Theme.Font.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
+                Text("\(assignee ?? "Unassigned") · \(done) of \(order.quantity) pieces")
+                    .font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
             }
-            Spacer()
+            Spacer(minLength: 2)
+            StatusBadge(status)
             if env.session.can("production.manage_assignees"), ProductionStatus.acceptsFloorWork(order.status) {
                 Menu {
                     if status == "pending" || status == "paused" { Button("Start") { Task { await act("start") } } }
@@ -328,7 +305,7 @@ struct ProductionTaskRow: View {
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 
     private func act(_ action: String) async {

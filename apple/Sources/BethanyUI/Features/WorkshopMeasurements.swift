@@ -25,19 +25,21 @@ struct WorkshopMeasurements: View {
                 }
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                     ForEach(measurements.body, id: \.0) { key, value in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label(key.humanized, systemImage: symbol(for: key))
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-                                .labelStyle(.titleAndIcon)
-                                .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(alignment: .top, spacing: 5) {
+                                Image(systemName: symbol(for: key))
+                                    .foregroundStyle(iconColor(for: key))
+                                    .accessibilityHidden(true)
+                                Text(key.humanized).foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }.font(.caption)
                             Text(value)
                                 .font(.headline)
                                 .monospacedDigit()
                                 .foregroundStyle(Theme.text)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(9)
+                        .padding(8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 8))
                         .accessibilityElement(children: .ignore)
@@ -49,6 +51,14 @@ struct WorkshopMeasurements: View {
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func iconColor(for key: String) -> Color {
+        switch MeasurementSheet.rank(key) % 3 {
+        case 0: return Theme.Palette.brandDeep
+        case 1: return Theme.Palette.info
+        default: return Theme.Palette.amber
         }
     }
 
