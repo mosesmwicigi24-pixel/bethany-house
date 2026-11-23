@@ -14,6 +14,10 @@ struct PurchaseOrderDetailView: View {
     @State private var sheet: Sheet?
     @State private var showAudit = false
     @State private var showRevisions = false
+    @State private var moving: MovingLine?
+
+    /// A job's material line being moved to another supplier (#573).
+    struct MovingLine: Identifiable { let id = UUID(); let line: JSONValue; let supplierId: Int? }
 
     enum Sheet: Identifiable {
         case reject, cancel, approve, receive, returnGoods, invoice, payment, revise
@@ -50,6 +54,12 @@ struct PurchaseOrderDetailView: View {
                 case .payment: RecordSupplierPaymentSheet(po: po) { reload() }
                 case .revise: RevisePurchaseOrderSheet(po: po) { reload() }
                 }
+            }
+        }
+        .sheet(item: $moving) { m in
+            MovePurchaseLineSheet(poId: poId, currentSupplierId: m.supplierId, line: m.line) { newPo in
+                // As the console: go to the purchase order the line joined.
+                if newPo != poId { env.navigator.go(.purchaseOrder(id: newPo)) } else { reload() }
             }
         }
     }
@@ -134,6 +144,20 @@ struct PurchaseOrderDetailView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(lineTitle(i)).font(Theme.Font.body)
                         Text("\(quantityText(i["quantity"])) @ \(Money(json: i["unit_price"] ?? .null, currency: po.currency)?.formatted() ?? "—") · received \(quantityText(i["quantity_received"]))").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
+                        // The production job this material was requested for (#573).
+                        if let job = i["production_order"], !job.isNull {
+                            HStack(spacing: 6) {
+                                if let jid = job["id"]?.int {
+                                    Button("Job \(job["order_number"]?.string ?? "")") { env.navigator.go(.productionOrder(id: jid)) }.buttonStyle(.borderless)
+                                }
+                                if let o = job["customer_order"]?["order_number"]?.string { Text("· Order \(o)").foregroundStyle(Theme.textSecondary) }
+                                if job["status"]?.string == "cancelled" { StatusBadge("job cancelled", tone: .danger) }
+                                if po.status == "draft" && env.session.can("procurement.create") {
+                                    Button("Move to another supplier") { moving = MovingLine(line: i, supplierId: po.r.int("supplier_id") ?? po.r["supplier"]?["id"]?.int) }.buttonStyle(.borderless)
+                                }
+                            }
+                            .font(Theme.Font.caption)
+                        }
                     }
                     Spacer()
                     MoneyText((i["total_price"] ?? i["subtotal"]).flatMap { Money(json: $0, currency: po.currency) })

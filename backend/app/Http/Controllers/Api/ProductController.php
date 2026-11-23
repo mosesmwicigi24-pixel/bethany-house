@@ -1402,6 +1402,10 @@ class ProductController extends Controller
             'primary_image'       => $primary ? ['id' => $primary->id, 'image_url' => $primary->image_url, 'alt_text' => $primary->alt_text] : null,
             'base_price'          => $basePrice ? ['regular_price' => $basePrice->regular_price, 'sale_price' => $basePrice->sale_price, 'currency_code' => 'KES'] : null,
             'variants_count'      => $product->variants_count ?? 0,
+            // Clip state, so the bulk clips page can say which products already
+            // have one (and which are mid-conversion) without a detail call each.
+            'video_url'           => $product->video_url,
+            'video_status'        => $product->video_status,
         ];
     }
 
