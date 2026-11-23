@@ -175,7 +175,8 @@ struct QCSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     let order: ProductionOrderRecord
-    let onDone: () -> Void
+    /// Called after a recorded result: whether it passed, and the inspector's note.
+    let onDone: (_ passed: Bool, _ notes: String) -> Void
     @State private var passed = true
     @State private var passedQty: String
     @State private var failedQty = "0"
@@ -185,7 +186,7 @@ struct QCSheet: View {
 
     static let defectTypes = ["stitching", "measurement", "fabric", "finishing", "embroidery", "colour", "other"]
 
-    init(order: ProductionOrderRecord, onDone: @escaping () -> Void) {
+    init(order: ProductionOrderRecord, onDone: @escaping (_ passed: Bool, _ notes: String) -> Void) {
         self.order = order
         self.onDone = onDone
         _passedQty = State(initialValue: String(order.quantity))
@@ -219,7 +220,8 @@ struct QCSheet: View {
         ])
         do {
             _ = try await env.session.client.post("/v1/admin/production-orders/\(order.id)/qc", json: body)
-            env.toasts.show(passed ? "QC passed" : "QC failed — recorded on the order", tone: passed ? .success : .warning); onDone(); dismiss()
+            env.toasts.show(passed ? "QC passed" : "QC failed — recorded on the order", tone: passed ? .success : .warning)
+            onDone(passed, notes.trimmingCharacters(in: .whitespacesAndNewlines)); dismiss()
         } catch let e as APIError { error = e } catch { self.error = APIError.transport(error.localizedDescription) }
     }
 }
@@ -231,6 +233,8 @@ struct ReworkSheet: View {
     @Environment(\.dismiss) private var dismiss
     let order: ProductionOrderRecord
     let onSaved: () -> Void
+    /// The inspector's note when this sheet follows a failed inspection.
+    var initialReason: String? = nil
     @State private var reason = ""
     @State private var picked: Set<Int> = []
     @State private var pieces: [Int: String] = [:]
@@ -257,6 +261,14 @@ struct ReworkSheet: View {
             }
         }
         .task { if people == nil { people = Lookup.assignable(env.session.client) } }
+        // The inspector already wrote what failed: start from that note so it
+        // is not typed twice (console Production Cycle 10). It stays editable.
+        .onAppear {
+            if reason.isEmpty {
+                let note = initialReason?.trimmingCharacters(in: .whitespacesAndNewlines)
+                reason = (note?.isEmpty == false ? note : nil) ?? MeasurementSheet.lastQcNote(order.r.string("notes")) ?? ""
+            }
+        }
     }
 
     private func submit() async {
@@ -285,7 +297,7 @@ struct CompleteAndStockSheet: View {
     @State private var finalQty: String
     @State private var error: APIError?
 
-    init(order: ProductionOrderRecord, onDone: @escaping () -> Void) {
+    init(order: ProductionOrderRecord, onDone: @escaping (_ passed: Bool, _ notes: String) -> Void) {
         self.order = order
         self.onDone = onDone
         _finalQty = State(initialValue: String(order.quantity))

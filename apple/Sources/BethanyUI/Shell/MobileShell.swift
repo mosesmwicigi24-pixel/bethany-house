@@ -74,6 +74,7 @@ struct PhoneShell: View {
 
 struct MoreList: View {
     @Environment(AppEnvironment.self) private var env
+    @State private var unsent = 0
     var body: some View {
         List {
             ForEach(NavCatalogue.groups.compactMap { $0.visible(for: env.session.permissions) }) { group in
@@ -87,19 +88,21 @@ struct MoreList: View {
             .task { await env.refreshCounts() }
             Section {
                 ForEach(NavCatalogue.userMenu) { item in NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) } }
-                Button(role: .destructive) { Task { await env.session.signOut(); await env.sessionDidChange() } } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
+                Button(role: .destructive) { Task { unsent = await env.requestSignOut() } } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
             } header: {
                 Text(env.session.me?.name ?? "")
             }
         }
         .navigationTitle("More")
         .listStyle(.insetGrouped)
+        .modifier(SignOutGuard(unsent: $unsent))
     }
 }
 
 struct PadShell: View {
     @Environment(AppEnvironment.self) private var env
     @State private var visibility: NavigationSplitViewVisibility = .automatic
+    @State private var unsent = 0
 
     var body: some View {
         @Bindable var nav = env.navigator
@@ -127,7 +130,7 @@ struct PadShell: View {
                     Menu {
                         ForEach(NavCatalogue.userMenu) { item in Button(item.label) { env.navigator.go(item.route) } }
                         Divider()
-                        Button("Sign out", role: .destructive) { Task { await env.session.signOut(); await env.sessionDidChange() } }
+                        Button("Sign out", role: .destructive) { Task { unsent = await env.requestSignOut() } }
                     } label: { Image(systemName: "person.crop.circle") }
                 }
             }
@@ -146,6 +149,7 @@ struct PadShell: View {
         }
         .sheet(isPresented: $nav.searchPresented) { CommandPalette() }
         .onAppear { if nav.selection == nil { nav.selection = env.session.home } }
+        .modifier(SignOutGuard(unsent: $unsent))
     }
 }
 #endif

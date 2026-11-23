@@ -49,6 +49,11 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -222,6 +227,27 @@ private fun SidebarContent() {
     val scope = rememberCoroutineScope()
     val groups = NavCatalogue.groups.mapNotNull { it.visible(s.permissions) }
     val dim = Color(0xFFB7C0D3)
+    // Changes saved offline wait in this person's own store on the device and
+    // are sent the next time they sign in here; never under someone else.
+    // Say so before signing out, so nobody leaves thinking their work is in.
+    var unsentAtSignOut by remember { mutableIntStateOf(0) }
+    fun signOut() = scope.launch {
+        val waiting = env.offline?.pending()?.size ?: 0
+        if (waiting > 0 && unsentAtSignOut == 0) unsentAtSignOut = waiting else env.session.signOut()
+    }
+    if (unsentAtSignOut > 0) AlertDialog(
+        onDismissRequest = { unsentAtSignOut = 0 },
+        title = { Text("Changes not sent yet") },
+        text = {
+            Text(
+                (if (unsentAtSignOut == 1) "1 change you made offline has" else "$unsentAtSignOut changes you made offline have") +
+                    " not reached the Hub. They stay on this device and are sent the next time you sign in here. " +
+                    "To send them now, wait for a connection before signing out.",
+            )
+        },
+        confirmButton = { TextButton(onClick = { scope.launch { unsentAtSignOut = 0; env.session.signOut() } }) { Text("Sign out anyway") } },
+        dismissButton = { TextButton(onClick = { unsentAtSignOut = 0 }) { Text("Stay signed in") } },
+    )
     Column(Modifier.fillMaxHeight()) {
         Row(Modifier.padding(Space.l), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(32.dp).padding(end = 0.dp).background(Palette.brand, MaterialTheme.shapes.extraSmall).padding(6.dp), contentAlignment = Alignment.Center) { Text("BH", style = MaterialTheme.typography.labelSmall, color = Color.White) }
@@ -240,7 +266,7 @@ private fun SidebarContent() {
                     headlineContent = { Text("Sign out", color = Color(0xFFFCA5A5)) },
                     leadingContent = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, tint = Color(0xFFFCA5A5)) },
                     colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable { scope.launch { env.session.signOut() } },
+                    modifier = Modifier.clickable { signOut() },
                 )
             }
         }
