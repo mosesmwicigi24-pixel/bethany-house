@@ -19,7 +19,7 @@ public struct MacShell: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            NavigationStack(path: $nav.path) {
+            NavigationStack(path: nav.pathBinding(for: nav.selection)) {
                 Group {
                     if let route = nav.selection {
                         RouteView(route)
@@ -29,10 +29,9 @@ public struct MacShell: View {
                 }
                 .navigationDestination(for: Route.self) { RouteView($0) }
             }
-            // A new section is a new stack that starts from the path it was
-            // given: with the identity on the root view alone, a jump into a
-            // record of another section (go(.productionOrder) from Sales)
-            // sometimes kept the old, empty path and showed the list (UI tour).
+            // A new section is a new stack; the old one's last write to the
+            // path is ignored (Navigator.pathBinding), so a jump into a record
+            // of another section opens the record, not its list.
             .id(nav.selection)
             .background(Theme.canvas)
         }

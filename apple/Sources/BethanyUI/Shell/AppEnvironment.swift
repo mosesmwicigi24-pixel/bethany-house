@@ -141,6 +141,18 @@ public final class Navigator {
 
     public func push(_ route: Route) { path.append(route) }
 
+    /// The path binding for the stack showing `section`. A stack that is
+    /// being replaced (the section changed) writes its own path back as it
+    /// goes; that write is ignored, or it would wipe the record `go(_:)` just
+    /// opened in the new section (UI tour, 2026-11-23: records reached from
+    /// another section showed their list, every time on the iPad).
+    public func pathBinding(for section: Route?) -> Binding<[Route]> {
+        Binding(
+            get: { self.path },
+            set: { new in if self.selection == section { self.path = new } }
+        )
+    }
+
     /// The sidebar entry a detail route belongs under.
     public static func parent(of route: Route) -> Route? {
         switch route {

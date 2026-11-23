@@ -92,15 +92,27 @@ final class ScreenTourTests: XCTestCase {
             return false
         }
         let opened = NSPredicate(format: "value == %@", path)
-        func arrived() -> Bool {
-            XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: opened, object: next)], timeout: 5) == .completed
+        func arrived(_ timeout: TimeInterval) -> Bool {
+            XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: opened, object: next)], timeout: timeout) == .completed
         }
-        // The button's keyboard shortcut first: it needs no hit-testing.
-        app.typeKey("]", modifierFlags: [.command, .option, .control])
-        if arrived() { return true }
-        // Then a tap on it, wherever it is.
-        next.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click_or_tap()
-        return arrived()
+        // A press can be lost (tour run 9: the iPad's first press was, and
+        // every screen after it was one behind). The button's value says where
+        // the app is, so press until it reaches `path`, never past it.
+        let order = Self.screens.map(\.path)
+        guard let target = order.firstIndex(of: path) else { return false }
+        for attempt in 0..<4 {
+            let at = (next.value as? String).flatMap { order.firstIndex(of: $0) } ?? -1
+            if at == target { return true }
+            if at > target { return false }
+            if attempt % 2 == 0 {
+                // The button's keyboard shortcut first: it needs no hit-testing.
+                app.typeKey("]", modifierFlags: [.command, .option, .control])
+            } else {
+                next.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click_or_tap()
+            }
+            if arrived(3) { return true }
+        }
+        return arrived(1)
     }
 
     @MainActor

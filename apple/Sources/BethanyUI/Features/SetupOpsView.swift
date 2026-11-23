@@ -17,6 +17,7 @@ struct ProductionStagesView: View {
             HStack { Spacer(); Button { editing = StageDraft() } label: { Label("New stage", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) }
             RemoteJSON("/v1/admin/product-stages", version: version) { j, reload in
                 let rows = order.isEmpty ? j.listRecords : order
+                if rows.isEmpty { EmptyState("No stages yet", message: "Production orders move through these stages in order.", symbol: "list.number") }
                 ForEach(Array(rows.enumerated()), id: \.element.id) { i, s in
                     HStack {
                         Circle().fill(Color(hex: UInt32(s.string("color")?.dropFirst() ?? "757d72", radix: 16) ?? 0x757D72)).frame(width: 12, height: 12)
