@@ -9,6 +9,9 @@ struct ProductionOrderDetailView: View {
     let orderId: Int
     @State private var res: Resource<Record>?
     @State private var sheet: Sheet?
+    /// Set by a failed inspection: the rework sheet opens next, with this note as its reason.
+    @State private var reworkNext: String?
+    @State private var reworkReason: String?
     @State private var showAudit = false
 
     enum Sheet: Identifiable {
@@ -35,15 +38,23 @@ struct ProductionOrderDetailView: View {
         }
         .task { if res == nil { load() } }
         .refreshable { await res?.reload() }
-        .sheet(item: $sheet) { s in
+        // A failed inspection leads straight to "Send back for rework", with the
+        // inspector's note as the reason (console Production Cycle 10). It opens
+        // from onDismiss: SwiftUI cannot present a sheet while one is closing.
+        .sheet(item: $sheet, onDismiss: {
+            if let note = reworkNext { reworkNext = nil; reworkReason = note; sheet = .rework } else { reworkReason = nil }
+        }) { s in
             if let r = res?.value {
                 let o = ProductionOrderRecord(r)
                 switch s {
                 case .edit: EditProductionOrderSheet(order: o, onSaved: reload)
                 case .assign: AssignTailorsSheet(order: o, onSaved: reload)
                 case .materials: IssueMaterialsSheet(order: o, onSaved: reload)
-                case .qc: QCSheet(order: o, onDone: reload)
-                case .rework: ReworkSheet(order: o, onSaved: reload)
+                case .qc: QCSheet(order: o) { passed, notes in
+                    if !passed, env.session.can("production.submit_qc") { reworkNext = notes }
+                    reload()
+                }
+                case .rework: ReworkSheet(order: o, onSaved: reload, initialReason: reworkReason)
                 case .complete: CompleteAndStockSheet(order: o, onDone: reload)
                 case .batches: BatchesSheet(order: o, onSaved: reload)
                 case .cancel: TextPromptSheet("Cancel \(o.number)", placeholder: "Reason (optional)", required: false, confirmLabel: "Cancel order", destructive: true) { reason in
@@ -202,7 +213,8 @@ struct ProductionOrderDetailView: View {
                 HStack { Text("Sales order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(sale) { env.navigator.push(.order(id: sid)) } }
             }
             ForEach([("Measurements", "measurements"), ("Specifications", "specifications"), ("Preferences", "customer_preferences")], id: \.0) { title, key in
-                let pairs = o.r[key]?.stringPairs ?? []
+                // Measurements in the clergy sheet's order, who it is for first (MeasurementSheet).
+                let pairs: [(String, String)] = key == "measurements" ? MeasurementSheet.rows(o.r[key]) : (o.r[key]?.stringPairs ?? [])
                 if !pairs.isEmpty {
                     Text(title).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).textCase(.uppercase).padding(.top, 4)
                     ForEach(pairs, id: \.0) { k, v in DetailRow(k.humanized, v) }

@@ -97,6 +97,9 @@ struct QCView: View {
     @State private var tab = "qc_pending"
     @State private var inspecting: Record?
     @State private var reworking: Record?
+    /// Set by a failed inspection: the rework sheet opens when the QC sheet has closed.
+    @State private var reworkNext: (record: Record, reason: String)?
+    @State private var reworkReason: String?
 
     var body: some View {
         Page("Quality Control", subtitle: "Inspect finished work before it is stocked") {
@@ -145,8 +148,20 @@ struct QCView: View {
         }
         .onChange(of: tab) { _, t in list?.query["status"] = t; Task { await list?.load() } }
         .refreshable { await list?.load() }
-        .sheet(item: $inspecting) { r in QCSheet(order: ProductionOrderRecord(r)) { Task { await list?.load() } } }
-        .sheet(item: $reworking) { r in ReworkSheet(order: ProductionOrderRecord(r)) { Task { await list?.load() } } }
+        // A failed inspection leads straight to "Send back for rework", with the
+        // inspector's note as the reason (console Production Cycle 10). The second
+        // sheet opens from onDismiss: SwiftUI cannot present it while the first closes.
+        .sheet(item: $inspecting, onDismiss: {
+            if let next = reworkNext { reworkNext = nil; reworkReason = next.reason; reworking = next.record }
+        }) { r in
+            QCSheet(order: ProductionOrderRecord(r)) { passed, notes in
+                if !passed { reworkNext = (r, notes) }
+                Task { await list?.load() }
+            }
+        }
+        .sheet(item: $reworking, onDismiss: { reworkReason = nil }) { r in
+            ReworkSheet(order: ProductionOrderRecord(r), onSaved: { Task { await list?.load() } }, initialReason: reworkReason)
+        }
     }
 }
 
@@ -158,13 +173,18 @@ struct ProductionCalendarView: View {
     @State private var month = Date()
 
     var body: some View {
-        Page("Production Calendar", subtitle: "Delivery promises against the floor's load") {
+        // A floor worker's schedule holds only her own jobs (server, Production
+        // Cycle 8), so "earliest free slot" — a date-promising figure for whoever
+        // runs the floor — would mean nothing to her.
+        let floorWorker = env.session.permissions.isFloorWorker
+        Page("Production Calendar", subtitle: floorWorker ? "Your jobs by due date" : "Delivery promises against the floor's load") {
             if let schedule {
                 LoadableView(schedule.state, retry: { schedule.load() }) { s in
-                    StatsRow(tiles: [
-                        ("Active orders", s["active_count"]?.string ?? "0", nil),
-                        ("Earliest free slot", s["earliest_free_slot"]?.string ?? "—", .info),
-                    ])
+                    let active = s["active_count"]?.string ?? "0"
+                    let tiles: [(String, String, StatusTone?)] = floorWorker
+                        ? [("Your active orders", active, nil)]
+                        : [("Active orders", active, nil), ("Earliest free slot", s["earliest_free_slot"]?.string ?? "—", .info)]
+                    StatsRow(tiles: tiles)
                     let byStage = s["by_stage"]?.object ?? [:]
                     if !byStage.isEmpty {
                         SectionCard("Open work per stage") {

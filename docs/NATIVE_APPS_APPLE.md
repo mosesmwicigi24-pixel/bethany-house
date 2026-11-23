@@ -8,6 +8,7 @@ Code: `apple/`. One Swift package, two app targets.
 | `BethanyUI` | `apple/Sources/BethanyUI` | Design system (`Theme`), shared components, sign-in flow, security prompts, the macOS shell (`MacShell`), command palette, `RouteView` + `FeatureRegistry`, and the feature screens under `Features/`. |
 | `HubMac` | `apple/Apps/HubMac` | macOS 14+ app target. |
 | `HubMobile` | `apple/Apps/HubMobile` | iOS/iPadOS 17+ universal app target (Steps 4–5). |
+| `TailorsMobile` | `apple/Apps/TailorsMobile` + the HubMobile app file | "Tailors Hub", the workshop app: same code, built with `TAILORS` (`AppFlavor.tailors`). See `docs/TAILORS_HUB.md`. |
 | Tests | `apple/Tests/BethanyKitTests` | Gates, home path, sidebar parity, contract shapes, money, dates, deep links, renewal timing. |
 
 ## Build
@@ -25,6 +26,31 @@ open BethanyHub.xcodeproj           # select HubMac or HubMobile, set your team,
 ```
 
 Signing: set `DEVELOPMENT_TEAM` in Xcode or export it before `xcodegen`.
+
+**On your own iPhone/iPad with a free Apple ID (Personal Team):**
+`apple/scripts/personal-device.sh`. It generates `BethanyHubPersonal.xcodeproj`
+from `apple/project.personal.yml` (bundle id `ke.co.bethanyhouse.hub.test`,
+no push, no associated domains: the three things a Personal Team cannot sign)
+and opens it. Choose the **HubMobile** scheme (left half of the run
+destination; **HubMac** is the Mac app and lists every iPhone as "mismatched
+platform"), your device, your Personal Team, and Run. The install expires
+after 7 days; Run again. It uses the live Hub. The script fills in your
+Personal Team from the "Apple Development" certificate Xcode created, so
+regenerating does not lose it.
+
+**Setting up a Mac in one go:** `scripts/mac-setup.sh [branch]` installs
+XcodeGen and Codex (ChatGPT's coding agent) if missing, starts the sync below,
+generates and opens the Xcode project, and starts Codex in the folder. Safe to
+run again.
+
+**Keeping a Mac current with every change:** `scripts/mac-sync.sh --install`
+(or `--install <branch>` to follow a pull request's branch before it merges).
+Every 5 minutes it fetches from GitHub, fast-forwards, and regenerates the Xcode
+projects when `apple/` changed. It never overwrites local work: with edited
+tracked files, or local commits not on GitHub, it skips and says so in
+`~/Library/Logs/bethany-mac-sync.log`. `--uninstall` stops it. Any tool on the
+Mac that reads the folder (Xcode, ChatGPT's Codex, an editor) then sees the
+current code; `AGENTS.md` carries the same working rules as `CLAUDE.md`.
 Bundle id `ke.co.bethanyhouse.hub` is the same as the Expo shell's so the
 existing App Store Connect record carries over.
 

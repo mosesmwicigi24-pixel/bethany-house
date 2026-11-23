@@ -21,8 +21,8 @@ touching `android/` and keeps an unsigned debug APK as an artifact.
 ```sh
 cd android
 echo "sdk.dir=$ANDROID_HOME" > local.properties    # git-ignored
-./gradlew :core:testDebugUnitTest :app:testDebugUnitTest
-./gradlew :app:assembleDebug                       # app/build/outputs/apk/debug/app-debug.apk
+./gradlew :core:testDebugUnitTest :app:testHubDebugUnitTest   # two flavours: hub (Bethany Hub), tailors (Tailors Hub, docs/TAILORS_HUB.md)
+./gradlew :app:assembleDebug   # both apps: apk/hub/debug (Bethany Hub), apk/tailors/debug (Tailors Hub)
 ```
 
 Configuration, in `local.properties`, `-P` properties or environment
@@ -167,7 +167,7 @@ php artisan db:seed --class=CountriesSeeder --force
 php ../android/tools/live-hub-fixture.php       # refuses any database not ending in _e2e
 php artisan serve --port=8077 &
 cd ../android
-./gradlew :app:testDebugUnitTest --tests '*LiveRenderTest*' \
+./gradlew :app:testHubDebugUnitTest --tests '*LiveRenderTest*' \
   -PhubE2eUrl=http://127.0.0.1:8077 -PhubE2eToken="$(cat /tmp/hub-e2e-token.txt)"
 ```
 

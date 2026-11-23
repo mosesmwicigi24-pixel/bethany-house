@@ -25,6 +25,33 @@ A cycle is never re-run. A later cycle revisits an area only for a genuine highe
 
 ---
 
+## After the ten cycles — the native apps catch up (Nov 2026)
+
+The Android and Apple apps (`android/`, `apple/`, from #516 on) are separate
+ports of the console's screens. Server-side changes from the cycles reach them
+by themselves (rework endpoint, maker rule, own-jobs calendar, risk-ranked My
+Tasks, the `/auth/me` limiter). A sweep of their production screens against
+the cycles found what did not:
+
+| Cycle | Console rule | Native apps before | Now |
+|---|---|---|---|
+| 5 | Measurements in clergy-sheet order, gender as "For" | Alphabetical (`stringPairs` sorts keys) | `MeasurementSheet` on both platforms, same order and aliases as `productionUi.tsx` |
+| 10 | A failed inspection leads to "Send back for rework" | QC sheet closed; the rework button had to be found | Recording a fail opens the rework sheet (QC board and order page) |
+| 10 | The rework reason starts from the inspection note | Empty | Starts from the inspector's note, else the latest `QC: …` line in the order notes |
+| 8 | A tailor's calendar is her own jobs | "Earliest free slot" shown to tailors | Hidden for floor workers; "Your active orders" |
+| 8 | Unsent offline work at sign-out is not silent | Signed out silently | Asks first: the changes stay on this device and are sent the next time that person signs in here |
+
+**Checked and not a defect.** An earlier reading said a shared device could
+replay one person's offline taps or clock punches as the next person. It
+cannot: both apps keep each person's queue and cache in their own folder
+(`OfflineStore(userId:)`, `hub/user-<id>`), switched at every sign-in and
+sign-out, and a punch carries its own `recorded_at`, which the server keeps.
+
+**Tests.** Android `ProductionParityTest` (7) and Apple `MeasurementSheetTests`
+(8) write the sheet order out by hand. The Apple core was compiled and tested
+on Linux (Swift 6.0.3); the Apple screens build in Apple CI only. Android: 294
+unit and render tests pass, and the debug APK builds.
+
 ## Cycle 10 — A full working day (closed)
 
 **The question:** can one order go from idea to stock in a single day, every hand-off obvious, with nobody needing to be told where to click next?

@@ -59,7 +59,7 @@ class MainActivity : FragmentActivity() {
         intent.getStringExtra(EXTRA_ROUTE_PATH)?.let { p -> return Route.fromConsolePath(p.removePrefix("/admin")) }
         val data = intent.data ?: return null
         val path = when (data.scheme) {
-            "bethanyhub" -> "/" + (data.host ?: "") + (data.path ?: "")
+            "bethanyhub", "tailorshub" -> "/" + (data.host ?: "") + (data.path ?: "")
             else -> (data.path ?: "").removePrefix("/admin")
         }
         return Route.fromConsolePath(path.ifBlank { "/" })

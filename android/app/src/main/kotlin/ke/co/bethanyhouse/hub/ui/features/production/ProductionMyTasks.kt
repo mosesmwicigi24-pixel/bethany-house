@@ -245,11 +245,17 @@ private fun TaskOrderHeader(o: JsonElement?) {
                 }
             }
         }
-        val specs = o["specifications"].stringPairs + o["measurements"].stringPairs
-        if (specs.isNotEmpty()) {
+        // Measurements in the clergy sheet's order (MeasurementSheet), not alphabetical.
+        val measured = MeasurementSheet.of(o["measurements"])
+        val specs = o["specifications"].stringPairs + measured.body
+        if (specs.isNotEmpty() || measured.gender != null) {
             TextButton(onClick = { specsOpen = !specsOpen }) { Text(if (specsOpen) "Hide specs & measurements" else "Specs & measurements") }
-            if (specsOpen) specs.forEach { (k, v) -> DetailRow(k.humanized, v) }
+            if (specsOpen) {
+                measured.gender?.let { DetailRow("For", it.humanized) }
+                specs.forEach { (k, v) -> DetailRow(k.humanized, v) }
+            }
         }
+        // Notes keep their line breaks: a QC note and a rework reason are separate lines.
         o["notes"].str?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
     }
 }
