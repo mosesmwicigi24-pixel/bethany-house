@@ -222,25 +222,41 @@ class PublicPaymentController extends Controller
             return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Order not found']);
         }
 
-        $data = $request->all();
-        Log::info('PublicPayment M-Pesa callback', ['order_id' => $order->id, 'data' => $data]);
+        // A callback is a notice, never proof: anyone holding the link can
+        // post one. It only names the prompt; Safaricom's own answer about
+        // that prompt is what settles (security audit 2026-11-19).
+        $data              = ['Body' => ['stkCallback' => (array) $request->input('Body.stkCallback', [])]];
+        $checkoutRequestId = (string) ($data['Body']['stkCallback']['CheckoutRequestID'] ?? '');
+        Log::info('PublicPayment M-Pesa callback', [
+            'order_id'            => $order->id,
+            'checkout_request_id' => $checkoutRequestId,
+            'result_code'         => $data['Body']['stkCallback']['ResultCode'] ?? null,
+        ]);
+
+        if ($checkoutRequestId === '' || !\App\Services\MpesaService::isConfigured()) {
+            return response()->json(['ResultCode' => 1, 'ResultDesc' => 'Rejected'], 400);
+        }
 
         try {
-            $resultCode        = $data['Body']['stkCallback']['ResultCode'] ?? null;
-            $checkoutRequestId = $data['Body']['stkCallback']['CheckoutRequestID'] ?? null;
-
+            // Only a prompt still waiting — a code the customer typed in is
+            // held for approval and is not this door's to touch.
             $payment = Payment::where('order_id', $order->id)
                 ->where('provider_reference', $checkoutRequestId)
+                ->where('payment_method', 'mpesa')
+                ->where('status', 'pending')
+                ->where(fn ($q) => $q->whereNull('requires_approval')->orWhere('requires_approval', false))
                 ->first();
 
             if (!$payment) {
                 return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
             }
 
-            // Idempotency: Daraja can re-deliver a callback — never settle twice.
-            if ($payment->status === 'paid') {
+            $paid = \App\Services\MpesaService::promptWasPaid($checkoutRequestId);
+            if ($paid === null) {
+                Log::warning('PublicPayment M-Pesa callback: Safaricom gave no answer, payment left pending', ['payment_id' => $payment->id]);
                 return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
             }
+            $resultCode = $paid ? 0 : 1;
 
             DB::transaction(function () use ($payment, $order, $resultCode, $data) {
                 if ($resultCode === 0) {
@@ -847,23 +863,10 @@ class PublicPaymentController extends Controller
             && $order->payment_token_expires_at->isPast();
     }
 
+    /** M-Pesa's credentials — the one source (Setup → Payment methods). */
     private function mpesaConfig(): ?array
     {
-        $raw = DB::table('settings')->where('key', 'mpesa_config')->value('value');
-        if (!$raw) {
-            // Fall back to .env / config/services.php
-            $key    = config('services.mpesa.consumer_key');
-            $secret = config('services.mpesa.consumer_secret');
-            if (!$key) return null;
-            return [
-                'consumer_key'    => $key,
-                'consumer_secret' => $secret,
-                'passkey'         => config('services.mpesa.passkey'),
-                'shortcode'       => config('services.mpesa.shortcode'),
-                'environment'     => config('services.mpesa.environment', 'sandbox'),
-            ];
-        }
-        return json_decode($raw, true);
+        return \App\Services\MpesaService::credentials();
     }
 
     private function paystackConfig(): ?array

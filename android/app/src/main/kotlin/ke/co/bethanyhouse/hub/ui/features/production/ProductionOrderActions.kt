@@ -171,7 +171,7 @@ private val qcDefectTypes = listOf("stitching", "measurement", "fabric", "finish
  * order's batches, which persist.
  */
 @Composable
-internal fun QcSheet(order: ProductionOrderRecord, onDismiss: () -> Unit, onDone: () -> Unit) {
+internal fun QcSheet(order: ProductionOrderRecord, onDismiss: () -> Unit, onDone: (passed: Boolean, notes: String) -> Unit) {
     val env = LocalEnv.current
     var passed by remember { mutableStateOf(true) }
     var passedQty by remember { mutableStateOf(order.quantity.toString()) }
@@ -186,7 +186,7 @@ internal fun QcSheet(order: ProductionOrderRecord, onDismiss: () -> Unit, onDone
         )
         env.client.post("/v1/admin/production-orders/${order.id}/qc", body)
         env.toasts.show(if (passed) "QC passed" else "QC failed — recorded on the order", if (passed) StatusTone.SUCCESS else StatusTone.WARNING)
-        onDone()
+        onDone(passed, notes.trim())
     }) { error ->
         SegmentedTabs(listOf(true to "Passed", false to "Failed"), passed) { passed = it }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -206,10 +206,12 @@ internal fun QcSheet(order: ProductionOrderRecord, onDismiss: () -> Unit, onDone
 // ── Rework (POST …/rework {reason, stages: [{task_id, pieces?, assigned_to?}]}) ─
 
 @Composable
-internal fun ReworkSheet(order: ProductionOrderRecord, onDismiss: () -> Unit, onSaved: () -> Unit) {
+internal fun ReworkSheet(order: ProductionOrderRecord, onDismiss: () -> Unit, onSaved: () -> Unit, initialReason: String? = null) {
     val env = LocalEnv.current
     val people = remember { Lookup.assignable(env.client) }
-    var reason by remember { mutableStateOf("") }
+    // The inspector already wrote what failed: start from that note so it is
+    // not typed twice (console Production Cycle 10). It stays editable.
+    var reason by remember { mutableStateOf(initialReason?.takeIf { it.isNotBlank() } ?: lastQcNote(order.r.string("notes")) ?: "") }
     var picked by remember { mutableStateOf<Set<Int>>(emptySet()) }
     var pieces by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     var assignee by remember { mutableStateOf<Map<Int, Int?>>(emptyMap()) }
@@ -296,3 +298,12 @@ internal fun BatchesSheet(order: ProductionOrderRecord, onDismiss: () -> Unit, o
         Text("Total $sum of ${order.quantity}", style = MaterialTheme.typography.bodySmall, color = if (sum == order.quantity || rows.isEmpty()) Palette.success else Palette.danger)
     }
 }
+
+/**
+ * The latest inspection note on an order. The QC endpoint appends it to the
+ * order's notes as a line "QC: …" (the word "Passed" or "Failed" when the
+ * inspector wrote nothing, which is no reason at all).
+ */
+internal fun lastQcNote(notes: String?): String? =
+    notes?.lines()?.lastOrNull { it.startsWith("QC: ") }?.removePrefix("QC: ")?.trim()
+        ?.takeIf { it.isNotEmpty() && it != "Failed" && it != "Passed" }

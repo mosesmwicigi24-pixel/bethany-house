@@ -167,7 +167,7 @@ struct TwoFactorView: View {
         error = nil
         do {
             try await session.verifyTwoFactor(code: recovery ? nil : code, recoveryCode: recovery ? code : nil)
-        } catch let e as APIError { error = e } catch { error = APIError.transport(error.localizedDescription) }
+        } catch let e as APIError { error = e } catch { self.error = APIError.transport(error.localizedDescription) }
     }
 }
 
@@ -215,14 +215,14 @@ struct TwoFactorSetupView: View {
 
     private func begin() async {
         error = nil
-        do { setup = try await session.beginTwoFactorSetup() } catch let e as APIError { error = e } catch { error = APIError.transport(error.localizedDescription) }
+        do { setup = try await session.beginTwoFactorSetup() } catch let e as APIError { error = e } catch { self.error = APIError.transport(error.localizedDescription) }
     }
 
     private func confirm() async {
         busy = true
         defer { busy = false }
         error = nil
-        do { recoveryCodes = try await session.confirmTwoFactorSetup(code: code) } catch let e as APIError { error = e } catch { error = APIError.transport(error.localizedDescription) }
+        do { recoveryCodes = try await session.confirmTwoFactorSetup(code: code) } catch let e as APIError { error = e } catch { self.error = APIError.transport(error.localizedDescription) }
     }
 }
 

@@ -142,7 +142,7 @@ struct PaymentTransactionsView: View {
             }
             if let by = a["by_method"]?.array, !by.isEmpty {
                 SectionCard("By method") {
-                    DataTable(columns: [TableColumn("Method", "payment_method", .status), TableColumn("Count", "count", .int), TableColumn("Paid volume", "volume", .money, fixedCurrency: cur)], rows: jrows(a["by_method"]))
+                    DataTable(columns: [DataColumn("Method", "payment_method", .status), DataColumn("Count", "count", .int), DataColumn("Paid volume", "volume", .money, fixedCurrency: cur)], rows: jrows(a["by_method"]))
                 }
             }
         }

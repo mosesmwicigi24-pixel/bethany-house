@@ -34,7 +34,7 @@ class MpesaService
 
     public function __construct()
     {
-        $config = $this->loadConfig();
+        $config = self::loadConfig();
 
         $this->consumerKey    = $config['consumer_key'];
         $this->consumerSecret = $config['consumer_secret'];
@@ -59,7 +59,7 @@ class MpesaService
      * Legacy: also checks for a single 'mpesa_config' JSON blob for
      * backwards compatibility.
      */
-    private function loadConfig(): array
+    private static function loadConfig(): array
     {
         return Cache::remember('mpesa_config', 300, function () {
             // Primary: read individual settings rows (written by PaymentMethodController)
@@ -101,6 +101,59 @@ class MpesaService
                 'environment'     => config('services.mpesa.environment', 'sandbox'),
             ];
         });
+    }
+
+    /**
+     * The credentials M-Pesa runs on, or null when none are set. The ONE
+     * answer to "is M-Pesa set up" — Setup → Payment methods writes them,
+     * and every door (till, payment link, callbacks) reads them here.
+     */
+    public static function credentials(): ?array
+    {
+        $config = self::loadConfig();
+        foreach (['consumer_key', 'consumer_secret', 'passkey', 'shortcode'] as $needed) {
+            if (empty($config[$needed])) {
+                return null;
+            }
+        }
+
+        return $config + ['environment' => 'sandbox'];
+    }
+
+    public static function isConfigured(): bool
+    {
+        return self::credentials() !== null;
+    }
+
+    /**
+     * Did Safaricom take the money for this prompt? Asked of Safaricom
+     * itself — a callback is a notice that something happened, never proof
+     * of it (security audit 2026-11-19: both callback doors used to settle
+     * on whatever was posted to them).
+     *
+     *   true  — Safaricom confirms the prompt was paid
+     *   false — Safaricom says it was not (cancelled, timed out, declined)
+     *   null  — no answer yet (not set up, unreachable, still processing):
+     *           the payment stays as it is, for the verify button
+     */
+    public static function promptWasPaid(string $checkoutRequestId): ?bool
+    {
+        if ($checkoutRequestId === '' || !self::isConfigured()) {
+            return null;
+        }
+
+        try {
+            $result = (new self())->querySTK($checkoutRequestId);
+        } catch (\Throwable $e) {
+            Log::warning('M-Pesa prompt query gave no answer', ['error' => $e->getMessage()]);
+            return null;
+        }
+
+        if (!array_key_exists('ResultCode', $result) || $result['ResultCode'] === null || $result['ResultCode'] === '') {
+            return null;
+        }
+
+        return (string) $result['ResultCode'] === '0';
     }
 
     /**

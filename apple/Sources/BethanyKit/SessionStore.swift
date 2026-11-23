@@ -53,7 +53,8 @@ public final class SessionStore: SessionAuth {
     private static let tokenAccount = "bh_admin_token"
     private static let meCache = "bh_me_cache"
 
-    public init(baseURL: URL, keychain: Keychain = Keychain()) {
+    public init(baseURL: URL, keychain: Keychain = Keychain(), flavor: AppFlavor = .hub) {
+        self.flavor = flavor
         self.keychain = keychain
         self.device = DeviceIdentity.current(keychain: keychain)
         self.client = APIClient(baseURL: baseURL, device: device)
@@ -184,7 +185,11 @@ public final class SessionStore: SessionAuth {
         if let data = try? HubJSON.encoder.encode(me) { try? keychain.set(data, for: Self.meCache) }
     }
 
-    public var home: Route { HomePath.resolve(for: permissions) }
+    /// Which app this is; decides home and what may be shown (`AppFlavor`).
+    public let flavor: AppFlavor
+    public var home: Route { flavor.home(for: permissions) }
+    /// Signed in to an app this person may use (Tailors Hub needs production access).
+    public var mayUseApp: Bool { flavor.mayUse(permissions) }
 
     public func can(_ permission: String) -> Bool { permissions.can(permission) }
     public func allows(_ gate: NavGate) -> Bool { gate.allows(permissions) }
@@ -236,7 +241,7 @@ public final class SessionStore: SessionAuth {
     }
 
     /// Seconds until the next renewal attempt. Exposed for tests.
-    public static func renewalDelay(expiresAt: Date?, now: Date) -> TimeInterval {
+    nonisolated public static func renewalDelay(expiresAt: Date?, now: Date) -> TimeInterval {
         guard let expiresAt else { return 6 * 3600 }
         let remaining = expiresAt.timeIntervalSince(now)
         if remaining <= 0 { return 60 }

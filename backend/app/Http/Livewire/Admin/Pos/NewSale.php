@@ -125,11 +125,11 @@ class NewSale extends Component
             'name'         => $name,
             'variant_name' => $variantId ? '' : '',
             'sku'          => $sku,
-            // The customer is billed whole units (CustomerMoney).
-            'unit_price'   => \App\Support\CustomerMoney::whole((float) $unitPrice),
+            // A price keeps its cents (CustomerMoney::price).
+            'unit_price'   => \App\Support\CustomerMoney::price((float) $unitPrice),
             'qty'          => 1,
             'discount'     => 0,
-            'subtotal'     => \App\Support\CustomerMoney::whole((float) $unitPrice),
+            'subtotal'     => \App\Support\CustomerMoney::price((float) $unitPrice),
         ];
     }
 

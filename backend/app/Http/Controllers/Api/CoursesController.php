@@ -175,7 +175,7 @@ class CoursesController extends Controller
         $c->forceFill(['announced_at' => now()])->save();
         $who = $c->audience()->reject(fn (User $u) => $u->id === $c->created_by);   // the author knows
         if ($who->isEmpty()) return;
-        NotificationService::deliver($who, new InAppNotification(title: ($c->required ? 'Training to complete: ' : 'New training: ') . $c->title, body: $c->description ? \Illuminate\Support\Str::limit($c->description, 140) : 'Open it under Me › Training.', actionUrl: "/courses/{$c->id}", icon: 'star', data: ['course_id' => $c->id, 'required' => $c->required]));
+        NotificationService::deliver($who, new InAppNotification(title: ($c->required ? 'Training to complete: ' : 'New training: ') . $c->title, body: $c->description ? \Illuminate\Support\Str::limit($c->description, 140) : 'Open it under My Workday › Training.', actionUrl: "/courses/{$c->id}", icon: 'star', data: ['course_id' => $c->id, 'required' => $c->required]));
     }
 
     private function summary(Course $c, ?CourseProgress $p): array

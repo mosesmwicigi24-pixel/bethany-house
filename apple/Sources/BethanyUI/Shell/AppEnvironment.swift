@@ -24,10 +24,14 @@ public final class AppEnvironment {
         public var reverbHost: String?
         public var reverbPort: Int
         public var reverbScheme: String
+        /// Bethany Hub or Tailors Hub (`AppFlavor`).
+        public var flavor: AppFlavor
 
         /// Production defaults; a dev build points `hubURL` at a local stack.
         public init(hubURL: URL = URL(string: "https://hub.bethanyhouse.co.ke")!,
-                    reverbKey: String? = nil, reverbHost: String? = nil, reverbPort: Int = 443, reverbScheme: String = "wss") {
+                    reverbKey: String? = nil, reverbHost: String? = nil, reverbPort: Int = 443, reverbScheme: String = "wss",
+                    flavor: AppFlavor = .hub) {
+            self.flavor = flavor
             self.hubURL = hubURL
             self.reverbKey = reverbKey
             self.reverbHost = reverbHost ?? hubURL.host
@@ -40,12 +44,16 @@ public final class AppEnvironment {
 
     public init(config: Config = Config()) {
         self.config = config
-        self.session = SessionStore(baseURL: config.hubURL.appendingPathComponent("api"))
+        self.session = SessionStore(baseURL: config.hubURL.appendingPathComponent("api"), flavor: config.flavor)
         let kioskStore = KioskStore()
         self.kiosk = kioskStore
         self.kioskAPI = KioskAPI(baseURL: config.hubURL.appendingPathComponent("api"), store: kioskStore, device: session.device)
-        let push = PushRegistration(client: session.client, device: session.device)
-        session.pushRegistrar = push
+        // Push is Bethany Hub's only: the server sends to one app identity
+        // (APNS_BUNDLE_ID) and drops any other app's device token, so Tailors
+        // Hub does not register until the server can address it.
+        if config.flavor == .hub {
+            session.pushRegistrar = PushRegistration(client: session.client, device: session.device)
+        }
     }
 
     /// Console URL for a route, for sharing and for the bridge view.
@@ -79,6 +87,19 @@ public final class AppEnvironment {
     }
 
     public var unreadNotifications = 0
+    /// People requests waiting on this manager (leave, swaps, advances, timesheet fixes) — the sidebar badge.
+    public var peopleRequests = 0
+
+    /// The sidebar's counts, as the console's Sidebar and Topbar fetch them every minute:
+    /// GET notifications/unread-count and, for holders of attendance.view_team, GET people/requests/count.
+    /// Background requests: they do not count as activity for the idle lock.
+    public func refreshCounts() async {
+        let c = session.client
+        if let n = try? await c.get("/v1/admin/notifications/unread-count", background: true).json?["count"]?.int { unreadNotifications = n }
+        if session.can("attendance.view_team") {
+            if let n = try? await c.get("/v1/admin/people/requests/count", background: true).json?["count"]?.int { peopleRequests = n }
+        } else { peopleRequests = 0 }
+    }
 
     private func handleNotificationPushed(_ event: RealtimeClient.Event) {
         guard event.name == ".notification.pushed" || event.name == "notification.pushed" else { return }

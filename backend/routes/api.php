@@ -252,6 +252,12 @@ Route::prefix('v1')->group(function () {
         Route::get('/storefront/shipping/estimate', [\App\Http\Controllers\Api\StorefrontLeadController::class, 'shippingEstimate'])
             ->middleware('throttle:60,1');
 
+        // Buying patterns for the storefront — "frequently bought together"
+        // and best sellers, mined from recognised sales (HUB_CONTRACT §9).
+        // Published-product slugs only: no customer, count or amount.
+        Route::get('/storefront/insights', [\App\Http\Controllers\Api\StorefrontInsightsController::class, 'index'])
+            ->middleware('throttle:60,1');
+
         // Interest ledger — the cross-channel cart (HUB_CONTRACT §7). The
         // storefront upserts every Neema cart here keyed on its BH-XXXX token
         // (the one the WhatsApp handoff message carries); neema-ai reads the
@@ -263,6 +269,16 @@ Route::prefix('v1')->group(function () {
         Route::get('/storefront/interest-carts', [\App\Http\Controllers\Api\StorefrontInterestCartController::class, 'lookup'])
             ->middleware('throttle:60,1');
         Route::patch('/storefront/interest-carts/{token}', [\App\Http\Controllers\Api\StorefrontInterestCartController::class, 'transition'])
+            ->middleware('throttle:30,1');
+
+        // Product reviews for the storefront (HUB_CONTRACT §8): the rating
+        // summary and approved reviews out, moderated customer reviews in —
+        // keyed to the hub product by slug (a garment's variants share one
+        // rating). Same optional X-Storefront-Key gate as the leads bridge;
+        // nothing is public until approved in Customers → Reviews & Ratings.
+        Route::get('/storefront/products/{slug}/reviews', [\App\Http\Controllers\Api\StorefrontProductReviewController::class, 'index'])
+            ->middleware('throttle:120,1');
+        Route::post('/storefront/products/{slug}/reviews', [\App\Http\Controllers\Api\StorefrontProductReviewController::class, 'store'])
             ->middleware('throttle:30,1');
 
         // Passwordless "Find my orders": a one-time code (WhatsApp / email) then
@@ -1037,6 +1053,9 @@ Route::prefix('v1')->group(function () {
                     ->middleware('permission:orders.edit_items,sanctum');
                 Route::post('/{id}/items/{itemId}/production', [OrderController::class, 'raiseItemProduction'])
                     ->middleware('permission:production.raise_order,sanctum');
+                Route::get('/{id}/items/{itemId}/production-materials', [OrderController::class, 'productionMaterials'])
+                    ->whereNumber('id')->whereNumber('itemId')
+                    ->middleware('permission:production.raise_order,sanctum');
                 Route::post('/{id}/set-deposit',         [OrderController::class, 'setDeposit'])
                     ->middleware('permission:orders.set_deposit,sanctum');
                 Route::post('/{id}/update-currency',     [OrderController::class, 'updateCurrency'])
@@ -1506,6 +1525,11 @@ Route::prefix('v1')->group(function () {
                     // Payables: what is owed to suppliers, and paying it (not expenses).
                     Route::get('/payables',      [\App\Http\Controllers\Api\SupplierPaymentController::class, 'payables'])
                         ->middleware('permission:procurement.pay|reports.financial,sanctum');
+                    Route::get('/payables/orders', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'owedOrders'])
+                        ->middleware('permission:procurement.pay|reports.financial,sanctum');
+                    // Several orders marked paid at once: super admin (in the controller), re-confirmed.
+                    Route::post('/payments/bulk', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'bulk'])
+                        ->middleware(['permission:procurement.pay,sanctum', 'step.up']);
                     Route::get('/{id}/payments', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'index']);
                     Route::post('/{id}/payments', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'store'])
                         ->middleware('permission:procurement.pay,sanctum');
@@ -1514,6 +1538,9 @@ Route::prefix('v1')->group(function () {
                     Route::get('/{id}',          [PurchaseOrderController::class, 'show']);
                     Route::get('/{id}/audit-log',[PurchaseOrderController::class, 'auditLog']);
                     Route::post('/',             [PurchaseOrderController::class, 'store'])
+                        ->middleware('permission:procurement.create,sanctum');
+                    Route::post('/{id}/items/{itemId}/move', [PurchaseOrderController::class, 'moveItem'])
+                        ->whereNumber('id')->whereNumber('itemId')
                         ->middleware('permission:procurement.create,sanctum');
                     Route::post('/from-suggestions', [PurchaseOrderController::class, 'storeFromSuggestions'])
                         ->middleware('permission:procurement.create,sanctum');
@@ -1594,6 +1621,10 @@ Route::prefix('v1')->group(function () {
                         ->middleware('permission:production.manage_assignees,sanctum');
                     Route::post('/{id}/materials',        [ProductionController::class, 'issueMaterials'])
                         ->middleware('permission:production.manage_assignees,sanctum');
+                    // Where the job's materials come from: store or to buy.
+                    Route::get('/{id}/material-sourcing',  [ProductionController::class, 'materialSourcing'])->whereNumber('id');
+                    Route::post('/{id}/material-sourcing', [ProductionController::class, 'sourceMaterials'])->whereNumber('id')
+                        ->middleware('permission:production.raise_order|production.manage_assignees,sanctum');
                     Route::post('/{id}/qc',               [ProductionController::class, 'qualityCheck'])
                         ->middleware('permission:production.submit_qc,sanctum');
                     Route::post('/{id}/rework',           [ProductionController::class, 'rework'])

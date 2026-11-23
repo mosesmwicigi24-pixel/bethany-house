@@ -51,7 +51,7 @@ class Supplier extends Model
 
     public function materials()
     {
-        return $this->hasMany(Material::class);
+        return $this->hasMany(Material::class, 'preferred_supplier_id');
     }
 
     public function purchaseOrders()

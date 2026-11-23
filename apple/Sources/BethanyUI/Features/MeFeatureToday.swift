@@ -137,24 +137,31 @@ struct MeTodayView: View {
 
     // MARK: Team now (OverviewPage.tsx TeamNow, compact)
 
+    private func inNowRow(_ x: JSONValue) -> some View {
+        let outlet: String = x["outlet"]?.string.map { " · \($0)" } ?? ""
+        return HStack(spacing: 6) {
+            Text(x["person"]?["name"]?.string ?? "").lineLimit(1)
+            Text("· since \(MeFormat.time(x["since"]?.date))\(outlet)").foregroundStyle(Theme.textTertiary).lineLimit(1)
+            if x["on_break"]?.bool == true { StatusBadge("break", tone: .neutral) }
+            if let left = x["left_site_at"]?.date { StatusBadge("away since \(MeFormat.time(left))", tone: .warning) }
+            else if let n = x["flags"]?.array?.count, n > 0 { StatusBadge(MeFormat.plural(n, "note"), tone: .warning) }
+        }
+    }
+
     private func teamCard(_ o: JSONValue) -> some View {
         let now = o["now"] ?? .null
         let requests = o["requests"]?["count"]?.int ?? 0
+        // Split out so the compiler can type-check the card (Xcode 16 timed out on it whole).
+        let inCount: Int = now["in_count"]?.int ?? 0
+        let listed: Int = [now["late"], now["absent"], now["expected"], now["on_leave"]].reduce(0) { $0 + ($1?.array?.count ?? 0) }
+        let quiet = inCount + listed == 0
         return SectionCard {
             HStack {
                 Text("Your team now").font(Theme.Font.sectionTitle)
                 Spacer()
                 Button("Overview ›") { env.navigator.go(.peopleOverview) }.font(Theme.Font.caption)
             }
-            teamGroup("In now", tone: .success, rows: now["in"]?.array ?? []) { x in
-                HStack(spacing: 6) {
-                    Text(x["person"]?["name"]?.string ?? "").lineLimit(1)
-                    Text("· since \(MeFormat.time(x["since"]?.date))\(x["outlet"]?.string.map { " · \($0)" } ?? "")").foregroundStyle(Theme.textTertiary).lineLimit(1)
-                    if x["on_break"]?.bool == true { StatusBadge("break", tone: .neutral) }
-                    if let left = x["left_site_at"]?.date { StatusBadge("away since \(MeFormat.time(left))", tone: .warning) }
-                    else if let n = x["flags"]?.array?.count, n > 0 { StatusBadge(MeFormat.plural(n, "note"), tone: .warning) }
-                }
-            }
+            teamGroup("In now", tone: .success, rows: now["in"]?.array ?? []) { x in inNowRow(x) }
             teamGroup("Late", tone: .danger, rows: now["late"]?.array ?? []) { x in
                 HStack { Text("\(x["person"]?["name"]?.string ?? "") · shift \(x["shift"]?.string ?? "")").lineLimit(1); Spacer(); Text("\(x["minutes_late"]?.int ?? 0) min").foregroundStyle(Theme.Palette.danger).font(Theme.Font.caption) }
             }
@@ -167,7 +174,7 @@ struct MeTodayView: View {
             teamGroup("On leave", tone: .info, rows: now["on_leave"]?.array ?? []) { x in
                 Text("\(x["person"]?["name"]?.string ?? "") · \(x["type"]?.string ?? "leave") until \(x["until"]?.string ?? "")").lineLimit(1)
             }
-            if (now["in_count"]?.int ?? 0) + (now["late"]?.array?.count ?? 0) + (now["absent"]?.array?.count ?? 0) + (now["expected"]?.array?.count ?? 0) + (now["on_leave"]?.array?.count ?? 0) == 0 {
+            if quiet {
                 Text("Nobody is clocked in and nothing is rostered today.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
             }
             if requests > 0 {

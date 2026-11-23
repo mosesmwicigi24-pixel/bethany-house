@@ -682,6 +682,44 @@ class ProductionController extends Controller
     }
 
     // =========================================================================
+    // GET/POST /api/v1/admin/production-orders/{id}/material-sourcing
+    // =========================================================================
+
+    /**
+     * The job's materials and where each stands: reserved in the store, being
+     * bought, or still to be decided. No supplier and no price — who we buy
+     * from is procurement's to see (owner, 2026-11-19).
+     */
+    public function materialSourcing($id)
+    {
+        $order = ProductionOrder::findOrFail($id);
+
+        return response()->json(\App\Services\Production\MaterialSourcing::forOrder($order));
+    }
+
+    /**
+     * Decide where the job's materials come from — for jobs raised without
+     * the choice (a made-to-order line sold at the till), or to change it.
+     */
+    public function sourceMaterials(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'materials'               => 'required|array|min:1',
+            'materials.*.material_id' => 'required|integer|exists:materials,id',
+            'materials.*.from_store'  => 'nullable|numeric|min:0|decimal:0,2',
+            'materials.*.to_buy'      => 'nullable|numeric|min:0|decimal:0,2',
+        ]);
+
+        $order = ProductionOrder::findOrFail($id);
+
+        DB::transaction(function () use ($order, $validated, $request) {
+            \App\Services\Production\MaterialSourcing::source($this->lockOrder($order->id), $validated['materials'], $request->user());
+        });
+
+        return response()->json(['message' => 'Materials updated.'] + \App\Services\Production\MaterialSourcing::forOrder($order->fresh()));
+    }
+
+    // =========================================================================
     // POST /admin/production-orders/{id}/materials
     // Allocate and issue materials to a production order
     // =========================================================================
@@ -741,6 +779,8 @@ class ProductionController extends Controller
                     'allocated_at'       => $allocation->allocated_at ?? now(),
                     'allocated_by'       => $request->user()->id,
                 ]);
+                // What was held in the store for this job has now left it.
+                \App\Services\Production\MaterialSourcing::onIssued($allocation, (float) $entry['quantity']);
 
                 // Record material transaction using the actual schema
                 $inventory = MaterialInventory::where('material_id', $allocation->material_id)

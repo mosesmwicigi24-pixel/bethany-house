@@ -19,6 +19,23 @@ class FormTemplate extends Model
     public function outlet()      { return $this->belongsTo(Outlet::class); }
     public function submissions() { return $this->hasMany(FormSubmission::class); }
 
+    /**
+     * Does this form apply at $outlet?
+     *
+     * A form pinned to an outlet applies there only. A form for "every outlet"
+     * applies at every outlet for reports, but a daily CHECKLIST only at a
+     * physical shop (sales_channel 'pos'): opening the grille and counting the
+     * float mean nothing at the WhatsApp or online desk, which was being marked
+     * "missed" twice a day (owner, 2026-11-14). A desk that needs its own
+     * checklist gets one pinned to it.
+     */
+    public function appliesTo(Outlet $outlet): bool
+    {
+        if ($this->outlet_id) return (int) $this->outlet_id === (int) $outlet->id;
+        if ($this->kind !== 'checklist') return true;
+        return ($outlet->sales_channel ?? 'pos') === 'pos';
+    }
+
     /** Is this checklist due on $date (its weekdays, else the attendance working days)? */
     public function dueOn(\Carbon\Carbon $date): bool
     {

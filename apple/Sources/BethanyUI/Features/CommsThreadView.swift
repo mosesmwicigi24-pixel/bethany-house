@@ -16,6 +16,8 @@ final class ThreadStore {
     private(set) var state: Loadable<[ChatMessage]> = .idle
     var replyTo: ChatMessage?
     var editing: ChatMessage?
+    /// Text handed to the composer from outside it (the Assist rail's answer).
+    var insert: String?
     private let env: AppEnvironment
     private var tokens: [(String, UUID)] = []
     private var typingTimers: [String: Task<Void, Never>] = [:]
@@ -203,6 +205,7 @@ struct ThreadView: View {
     let channel: ChatChannel
     @State private var thread: ThreadStore?
     @State private var forwarding: ChatMessage?
+    @State private var assisting = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -227,6 +230,9 @@ struct ThreadView: View {
         }
         .onDisappear { Task { await thread?.stop() } }
         .sheet(item: $forwarding) { m in ForwardSheet(store: store, thread: thread, message: m) }
+        .sheet(isPresented: $assisting) {
+            if let thread { AssistSheet(channelId: channel.id, hasOrder: channel.contextType == "order", thread: thread) }
+        }
     }
 
     private var header: some View {
@@ -238,6 +244,11 @@ struct ThreadView: View {
                 else if !channel.isDM { Text("\(channel.memberCount) members").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
             }
             Spacer()
+            if store.attention.waitsOnMe(channel.id) {
+                AsyncButton(action: { await store.acknowledge(channel.id) }) { Label("Handled", systemImage: "checkmark.circle") }
+                    .help("Nothing here needs your reply.")
+            }
+            Button { assisting = true } label: { Label("Assist", systemImage: "sparkles") }
             if let r = channel.contextRoute { Button { env.navigator.go(r) } label: { Label("Open record", systemImage: "arrow.up.right.square") } }
             Button { store.showDetails.toggle() } label: { Image(systemName: "info.circle") }
         }
@@ -406,6 +417,11 @@ struct Composer: View {
                 Button { showEntities = true } label: { Image(systemName: "number") }.popover(isPresented: $showEntities) { EntityPicker { text += (text.isEmpty ? "" : " ") + $0 + " "; showEntities = false } }
                 TextField("Message…", text: $text, axis: .vertical)
                     .textFieldStyle(.roundedBorder).lineLimit(1...6).focused($focused)
+                    .onChange(of: thread.insert) { _, new in
+                        guard let new, !new.isEmpty else { return }
+                        text = text.isEmpty ? new : text + "\n" + new
+                        thread.insert = nil
+                    }
                     .onChange(of: text) { _, _ in Task { await thread.whisperTyping() } }
                     .onSubmit { Task { await send() } }
                 Button { Task { await send() } } label: { Image(systemName: "paperplane.fill") }
@@ -520,5 +536,72 @@ struct ForwardSheet: View {
         #if os(macOS)
         .frame(minWidth: 420, minHeight: 420)
         #endif
+    }
+}
+
+// MARK: - Assist (POST channels/{id}/assist; AssistRail.tsx)
+
+/// Four actions, one tap each; the answer goes into the composer, never sent
+/// on its own. The server answers 503 when no model key is set and 422 with
+/// a sentence when it cannot help; both are shown as they come.
+struct AssistSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    let channelId: Int
+    let hasOrder: Bool
+    let thread: ThreadStore
+    @State private var language = "en"
+    @State private var draft = ""
+    @State private var busy: ChannelAssist.Action?
+    @State private var answer: (text: String, options: [String])?
+    @State private var failure: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack {
+                Text("Assist").font(Theme.Font.sectionTitle)
+                Spacer()
+                Picker("Language", selection: $language) { Text("English").tag("en"); Text("Kiswahili").tag("sw") }.pickerStyle(.segmented).frame(maxWidth: 220)
+            }
+            TextField("Text to translate (optional for the other actions)", text: $draft, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(1...4)
+            ForEach(ChannelAssist.Action.allCases, id: \.self) { a in
+                if a == .draft {
+                    HStack {
+                        run(a, audience: "team", label: "Draft a message to the team")
+                        if hasOrder { run(a, audience: "customer", label: "Draft a message to the customer") }
+                    }
+                } else {
+                    run(a, audience: nil, label: a.title)
+                }
+            }
+            if let failure { Text(failure).font(Theme.Font.secondary).foregroundStyle(Theme.Palette.danger) }
+            if let answer {
+                if !answer.text.isEmpty {
+                    Text(answer.text).font(Theme.Font.body).textSelection(.enabled).padding(Theme.Space.s).background(Theme.card, in: RoundedRectangle(cornerRadius: 8))
+                    Button("Put in the message box") { thread.insert = answer.text; dismiss() }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                }
+                ForEach(answer.options, id: \.self) { o in
+                    Button(o) { thread.insert = o; dismiss() }.buttonStyle(.bordered)
+                }
+            }
+            HStack { Spacer(); Button("Close") { dismiss() } }
+        }
+        .padding(Theme.Space.xl).frame(minWidth: 420)
+    }
+
+    private func run(_ a: ChannelAssist.Action, audience: String?, label: String) -> some View {
+        Button {
+            Task {
+                busy = a; failure = nil; answer = nil
+                defer { busy = nil }
+                do {
+                    let r = try await env.session.client.post("/v1/admin/channels/\(channelId)/assist", json: ChannelAssist.body(a, language: language, draft: draft, audience: audience))
+                    answer = ChannelAssist.answer(r.json ?? .null)
+                } catch let e as APIError { failure = e.message } catch { failure = error.localizedDescription }
+            }
+        } label: {
+            HStack { if busy == a { ProgressView().controlSize(.small) }; Text(label) }
+        }
+        .disabled(busy != nil || !ChannelAssist.canRun(a, draft: draft))
     }
 }

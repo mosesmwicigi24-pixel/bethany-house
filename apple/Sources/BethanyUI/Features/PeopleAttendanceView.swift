@@ -7,19 +7,22 @@ import BethanyKit
 /// correction) and the clock-in kiosks.
 struct AttendanceView: View {
     @Environment(AppEnvironment.self) private var env
-    enum Tab: Hashable { case live, flagged, entries, kiosks }
+    enum Tab: Hashable { case live, flagged, entries, kiosks, pins }
     @State private var tab: Tab = .live
     @State private var version = 0
     @State private var openEntry: IDRef?
 
     var body: some View {
         Page("Attendance", subtitle: "Time clock oversight") {
-            Tabs(selection: $tab, items: [(.live, "In now"), (.flagged, "Flagged"), (.entries, "Entries")] + (env.session.can("attendance.manage") ? [(.kiosks, "Kiosks")] : []))
+            Tabs(selection: $tab, items: [(.live, "In now"), (.flagged, "Flagged"), (.entries, "Entries")]
+                 + (env.session.can("attendance.manage") ? [(.kiosks, "Kiosks")] : [])
+                 + (ClerkPins.isOffered(roles: env.session.me?.roleNames ?? [], isSuperAdmin: env.session.permissions.isSuperAdmin) ? [(.pins, "Clerk PINs")] : []))
             switch tab {
             case .live: liveBoard
             case .flagged: flagged
             case .entries: AttendanceEntriesList(openEntry: $openEntry, version: version)
             case .kiosks: KiosksPanel()
+            case .pins: ClerkPinsPanel()
             }
         }
         .sheet(item: $openEntry) { ref in
@@ -369,6 +372,31 @@ struct KioskSetupSheet: View {
             OutletChoice("Outlet", $outlet)
             Field("Tablet name", $name, placeholder: "Front door", error: e?.errors["name"]?.first)
             Text("You will be signed out of this device and the clock-in board opens. Staff need a terminal PIN (Profile › Security) to punch. You will be asked to confirm it is you.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+        }
+    }
+}
+
+// MARK: - Clerk PINs (GET users/role/pos_clerk; POST users/{id}/terminal-pin/reset; ClerkPinsPanel.tsx)
+
+struct ClerkPinsPanel: View {
+    @Environment(AppEnvironment.self) private var env
+    var body: some View {
+        let owner = env.session.permissions.isSuperAdmin
+        RemoteJSON("/v1/admin/users/role/pos_clerk", emptyTitle: "No clerks at your outlet.",
+                   isEmpty: { ClerkPins.rows($0, isSuperAdmin: owner, myOutletId: env.session.me?.outlet?.id).isEmpty }) { j, _ in
+            SectionCard("Clerk terminal PINs") {
+                Text("Clearing a PIN lets the clerk choose a new one. Nobody can see a PIN.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                ForEach(ClerkPins.rows(j, isSuperAdmin: owner, myOutletId: env.session.me?.outlet?.id)) { c in
+                    HStack {
+                        Text(c.name).font(Theme.Font.body)
+                        if let o = c.outletName { Text(o).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
+                        Spacer()
+                        ConfirmButton("Clear PIN", message: "\(c.name) will set a new PIN at their next till sign-in.", action: {
+                            do { let r = try await env.session.client.post("/v1/admin/users/\(c.id)/terminal-pin/reset"); toastResult(env, r, fallback: "PIN cleared") } catch { env.toasts.error(error) }
+                        }) { Text("Clear PIN") }
+                    }
+                }
+            }
         }
     }
 }

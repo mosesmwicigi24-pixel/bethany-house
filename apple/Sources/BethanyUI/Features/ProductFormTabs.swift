@@ -372,7 +372,7 @@ struct BomTab: View {
                 Text("Total \(fmtMoney(bom["total_cost"], currency: "KES")) · \(bom.int("items_count") ?? jrows(bom["items"]).count) items").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
             }
             if let n = bom.str("notes"), !n.isEmpty { Text(n).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
-            DataTable(columns: [TableColumn("Material", "material_name"), TableColumn("Code", "material_code"), TableColumn("Qty", "quantity", .number(3)), TableColumn("Unit", "unit_of_measure"), TableColumn("Unit cost", "cost_per_unit", .money, fixedCurrency: "KES"), TableColumn("Line cost", "line_cost", .money, fixedCurrency: "KES")],
+            DataTable(columns: [DataColumn("Material", "material_name"), DataColumn("Code", "material_code"), DataColumn("Qty", "quantity", .number(3)), DataColumn("Unit", "unit_of_measure"), DataColumn("Unit cost", "cost_per_unit", .money, fixedCurrency: "KES"), DataColumn("Line cost", "line_cost", .money, fixedCurrency: "KES")],
                       rows: jrows(bom["items"]).map { JRow(id: $0.id, json: flattenItem($0.json)) })
             HStack(spacing: Theme.Space.s) {
                 HStack(spacing: 4) { Text("Can we make").font(Theme.Font.caption); DecimalField("1", text: $feasibilityQty).frame(width: 60); Button("Check") { Task { await check(bid) } }.font(Theme.Font.caption) }
@@ -388,7 +388,7 @@ struct BomTab: View {
             }
             .font(Theme.Font.secondary)
             if let f = feasibility[bid], let short = f["shortfalls"]?.array, !short.isEmpty {
-                DataTable(columns: [TableColumn("Material", "material_name"), TableColumn("Required", "required", .number(2)), TableColumn("Available", "available", .number(2)), TableColumn("Short", "shortfall", .number(2)), TableColumn("UoM", "uom")], rows: jrows(f["shortfalls"]))
+                DataTable(columns: [DataColumn("Material", "material_name"), DataColumn("Required", "required", .number(2)), DataColumn("Available", "available", .number(2)), DataColumn("Short", "shortfall", .number(2)), DataColumn("UoM", "uom")], rows: jrows(f["shortfalls"]))
             }
         }
         .padding(Theme.Space.m).background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.Radius.field))

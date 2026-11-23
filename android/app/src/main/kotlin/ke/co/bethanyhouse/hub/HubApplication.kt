@@ -40,6 +40,10 @@ open class HubApplication : Application() {
      * registration simply never happens and the server's FCM sender stays idle.
      */
     private fun initFirebase() {
+        // Push is Bethany Hub's only for now: the FCM credentials belong to the
+        // Hub's app id. Without Firebase no token exists, so Tailors Hub never
+        // registers a device (PushRegistration needs a token).
+        if (BuildConfig.APP_FLAVOR != "HUB") return
         if (BuildConfig.FCM_PROJECT_ID.isBlank() || BuildConfig.FCM_APP_ID.isBlank() || BuildConfig.FCM_API_KEY.isBlank()) return
         val options = FirebaseOptions.Builder()
             .setProjectId(BuildConfig.FCM_PROJECT_ID)

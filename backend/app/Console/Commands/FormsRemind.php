@@ -26,12 +26,12 @@ class FormsRemind extends Command
         $auto = Automations::active('checklist_missed');
         $grace = (int) ($auto['threshold'] ?? 30);
         $today = today(); $now = now(); $n = 0;
-        $outlets = Outlet::where('is_active', true)->get(['id', 'name']);
+        $outlets = Outlet::where('is_active', true)->get(['id', 'name', 'sales_channel']);
         foreach (FormTemplate::where('active', true)->where('kind', 'checklist')->get() as $t) {
             if (!$t->dueOn($today) || !($due = $t->dueAt($today))) continue;
             if ($now->lt($due->copy()->addMinutes($grace))) continue;
             foreach ($outlets as $o) {
-                if ($t->outlet_id && $t->outlet_id !== $o->id) continue;
+                if (!$t->appliesTo($o)) continue;
                 if (FormSubmission::where('form_template_id', $t->id)->where('outlet_id', $o->id)->where('for_date', $today->toDateString())->exists()) continue;
                 $this->line("missed: {$t->name} at {$o->name} (due {$due->format('H:i')})");
                 $n++;

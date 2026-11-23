@@ -95,7 +95,7 @@ struct SalesReportView: View {
         ReportData("/v1/admin/reports/sales/ledger", query: w.dateParams()) { j in
             let cur = j["period"]?["currency"]?.string ?? "KES"
             SectionCard("Channels · sales = paid + balance, paid attributed to the order's period") {
-                DataTable(columns: [TableColumn("Channel", "label"), TableColumn("Orders", "orders", .int), TableColumn("Sales", "sales", .money, fixedCurrency: cur), TableColumn("Paid", "paid", .money, fixedCurrency: cur), TableColumn("Balance", "balance", .money, fixedCurrency: cur)], rows: jrows(j["channels"]))
+                DataTable(columns: [DataColumn("Channel", "label"), DataColumn("Orders", "orders", .int), DataColumn("Sales", "sales", .money, fixedCurrency: cur), DataColumn("Paid", "paid", .money, fixedCurrency: cur), DataColumn("Balance", "balance", .money, fixedCurrency: cur)], rows: jrows(j["channels"]))
             }
             if let r = j["reconciliation"] {
                 SectionCard("Reconciliation") {
@@ -120,7 +120,7 @@ struct SalesReportView: View {
     }
 
     private func bucketTable(_ v: JSONValue?, _ cur: String) -> some View {
-        DataTable(columns: [TableColumn("Period", "period"), TableColumn("Orders", "orders", .int), TableColumn("Sales", "sales", .money, fixedCurrency: cur), TableColumn("Paid", "paid", .money, fixedCurrency: cur), TableColumn("Balance", "balance", .money, fixedCurrency: cur)],
+        DataTable(columns: [DataColumn("Period", "period"), DataColumn("Orders", "orders", .int), DataColumn("Sales", "sales", .money, fixedCurrency: cur), DataColumn("Paid", "paid", .money, fixedCurrency: cur), DataColumn("Balance", "balance", .money, fixedCurrency: cur)],
                   rows: jrows(v).map { r in var o = r["total"]?.object ?? [:]; o["period"] = r["period"] ?? .null; return JRow(id: r.id, json: .object(o)) })
     }
 
@@ -137,7 +137,7 @@ struct SalesReportView: View {
                 AutoTable(rows: jrows(j["by_channel"]))
             }
             SectionCard("Orders, largest recoverable money first") {
-                DataTable(columns: [TableColumn("Order", "order_number"), TableColumn("Channel", "channel", .status), TableColumn("Customer", "customer_name"), TableColumn("Phone", "customer_phone"), TableColumn("Items", "item_count", .int), TableColumn("Age (days)", "age_days", .int), TableColumn("Total", "total_amount", .money, currencyKey: "currency_code"), TableColumn("KES", "total_kes", .money, fixedCurrency: "KES")], rows: jrows(j["orders"])) { r in
+                DataTable(columns: [DataColumn("Order", "order_number"), DataColumn("Channel", "channel", .status), DataColumn("Customer", "customer_name"), DataColumn("Phone", "customer_phone"), DataColumn("Items", "item_count", .int), DataColumn("Age (days)", "age_days", .int), DataColumn("Total", "total_amount", .money, currencyKey: "currency_code"), DataColumn("KES", "total_kes", .money, fixedCurrency: "KES")], rows: jrows(j["orders"])) { r in
                     if let id = r.int("id") { env.navigator.go(.order(id: id)) }
                 }
             }

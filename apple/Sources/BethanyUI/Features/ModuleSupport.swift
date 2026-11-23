@@ -543,3 +543,57 @@ struct ModuleSearchField: View {
 extension SessionStore {
     var canViewCost: Bool { can("products.view_cost") }
 }
+
+// MARK: - Record history (GET activity-logs/record/{type}/{id}; AuditParts.tsx RecordHistory)
+
+/// Every change to one record, newest first — the super admin's "History",
+/// collapsed until opened, twenty at a time.
+struct RecordHistorySection: View {
+    @Environment(AppEnvironment.self) private var env
+    let type: String
+    let id: Int?
+    @State private var open = false
+    @State private var page = 1
+
+    var body: some View {
+        if env.session.permissions.isSuperAdmin, let id {
+            SectionCard {
+                Button { open.toggle() } label: {
+                    HStack { Text("History").font(Theme.Font.sectionTitle); Spacer(); Image(systemName: open ? "chevron.up" : "chevron.down") }
+                }
+                .buttonStyle(.plain)
+                if open {
+                    RemoteJSON("/v1/admin/activity-logs/record/\(type)/\(id)", query: ["page": String(page), "per_page": "20"], emptyTitle: "No changes recorded",
+                               isEmpty: { RecordHistoryEntry.page($0).entries.isEmpty }) { j, _ in
+                        let p = RecordHistoryEntry.page(j)
+                        ForEach(p.entries) { e in entry(e) }
+                        if p.lastPage > 1 {
+                            HStack {
+                                Button("Newer") { page -= 1 }.disabled(p.page <= 1)
+                                Text("Page \(p.page) of \(p.lastPage)").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                                Button("Older") { page += 1 }.disabled(p.page >= p.lastPage)
+                            }
+                            .font(Theme.Font.secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func entry(_ e: RecordHistoryEntry) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                StatusBadge(e.action)
+                Text(e.who).font(Theme.Font.secondary)
+                DateText(e.createdAt).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                if let ip = e.ip { Text(ip).font(Theme.Font.mono).foregroundStyle(Theme.textTertiary) }
+            }
+            if !e.description.isEmpty { Text(e.description).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
+            ForEach(e.changes, id: \.field) { c in
+                Text("\(c.field.humanized): \(c.old) → \(c.new)").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+            }
+            Divider()
+        }
+    }
+}

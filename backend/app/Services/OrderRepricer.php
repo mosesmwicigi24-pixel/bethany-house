@@ -56,8 +56,8 @@ class OrderRepricer
                 $lineDiscount = $converted;
             }
 
-            // A repriced order is billed in whole units (CustomerMoney).
-            $unitPrice       = CustomerMoney::whole($unitPrice);
+            // Prices keep their cents; discounts and VAT on top are whole (CustomerMoney).
+            $unitPrice       = CustomerMoney::price($unitPrice);      // a price keeps its cents
             $lineDiscount    = CustomerMoney::whole($lineDiscount);
             $lineSubtotal    = max(0, ($unitPrice * (int) $item->quantity) - $lineDiscount);
             $oldLineSubtotal = max(0, ((float) $item->unit_price * (int) $item->quantity) - (float) $item->discount_amount);

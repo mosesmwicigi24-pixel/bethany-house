@@ -144,9 +144,9 @@ struct ExpenseDetailView: View {
     private func lineItems(_ items: [JSONValue], currency: String) -> some View {
         SectionCard("Line items") {
             DataTable(columns: [
-                TableColumn("Description", "description"), TableColumn("Qty", "quantity", .number(2)),
-                TableColumn("Unit price", "unit_price", .money, fixedCurrency: currency), TableColumn("Tax", "tax_amount", .money, fixedCurrency: currency),
-                TableColumn("Amount", "amount", .money, fixedCurrency: currency),
+                DataColumn("Description", "description"), DataColumn("Qty", "quantity", .number(2)),
+                DataColumn("Unit price", "unit_price", .money, fixedCurrency: currency), DataColumn("Tax", "tax_amount", .money, fixedCurrency: currency),
+                DataColumn("Amount", "amount", .money, fixedCurrency: currency),
             ], rows: items.enumerated().map { JRow(id: $0.offset, json: $0.element) })
         }
     }

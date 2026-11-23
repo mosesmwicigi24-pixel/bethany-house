@@ -40,6 +40,9 @@ class PurchaseOrder extends Model
         'supplier_invoice_number',
         'supplier_invoice_date',
         'supplier_invoice_amount',
+        // The supplier's open draft that production needs are added to
+        // (App\Services\Production\MaterialSourcing).
+        'collects_production_needs',
     ];
 
     protected $casts = [
@@ -52,9 +55,21 @@ class PurchaseOrder extends Model
         'supplier_invoice_date'   => 'date',
         'supplier_invoice_amount' => 'decimal:2',
         'revision'                => 'integer',
+        'collects_production_needs' => 'boolean',
         'approved_at' => 'datetime',
         'submitted_at' => 'datetime',
     ];
+
+    /** The next free PO number: PO-YYYYMMDD-0001, a random suffix on a clash. */
+    public static function nextNumber(): string
+    {
+        $number = 'PO-' . date('Ymd') . '-' . str_pad((string) (static::whereDate('created_at', today())->count() + 1), 4, '0', STR_PAD_LEFT);
+        while (static::where('po_number', $number)->exists()) {
+            $number = 'PO-' . date('Ymd') . '-' . strtoupper(\Illuminate\Support\Str::random(4));
+        }
+
+        return $number;
+    }
 
     protected static function boot()
     {

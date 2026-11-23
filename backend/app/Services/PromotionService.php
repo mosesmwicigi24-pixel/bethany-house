@@ -98,8 +98,8 @@ class PromotionService
     }
 
     /**
-     * The discounted unit price for a base amount under a promotion: a whole
-     * unit (CustomerMoney), never below 0, never above the base.
+     * The discounted unit price for a base amount under a promotion: a price
+     * to the cent (CustomerMoney::price), never below 0, never above the base.
      */
     public function discountedUnit(float $base, Promotion $promo): float
     {
@@ -110,7 +110,7 @@ class PromotionService
         $off = $promo->discount_type === 'percentage'
             ? $base * (min(max($value, 0), 100) / 100)
             : min(max($value, 0), $base); // fixed: never more than the price
-        return min($base, \App\Support\CustomerMoney::whole(max(0, $base - $off)));
+        return min($base, \App\Support\CustomerMoney::price(max(0, $base - $off)));
     }
 
     /**

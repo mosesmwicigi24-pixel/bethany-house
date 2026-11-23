@@ -182,7 +182,7 @@
                             </p>
                         </td>
                         <td class="px-5 py-3.5 text-sm">
-                            <p class="text-primary-500">{{ $review->user?->name ?? '-' }}</p>
+                            <p class="text-primary-500">{{ $review->user?->name ?? $review->author_name ?? '-' }}</p>
                             @if($review->is_verified_purchase)
                                 <span class="inline-flex items-center gap-1 text-[10px] font-semibold text-info-600 mt-0.5">
                                     <i class="bi bi-patch-check-fill"></i> Verified
@@ -312,8 +312,8 @@
                     {{-- Customer + meta --}}
                     <div class="grid grid-cols-2 gap-3">
                         @foreach([
-                            ['Customer',  $viewing->user?->name ?? '-'],
-                            ['Email',     $viewing->user?->email ?? '-'],
+                            ['Customer',  $viewing->user?->name ?? $viewing->author_name ?? '-'],
+                            ['Email',     $viewing->user?->email ?? $viewing->author_email ?? '-'],
                             ['Submitted', $viewing->created_at->format('d M Y, H:i')],
                             ['Order',     $viewing->order?->order_number ?? '-'],
                             ['Helpful',   $viewing->helpful_count . ' people'],

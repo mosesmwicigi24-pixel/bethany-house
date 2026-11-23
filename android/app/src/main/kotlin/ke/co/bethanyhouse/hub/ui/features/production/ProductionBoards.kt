@@ -167,6 +167,7 @@ internal fun QcScreen() {
     val list = remember { ProductionRecordList(scope, env.client, "/v1/admin/production-orders", mutableMapOf("status" to "qc_pending"), perPage = 100) }
     var inspecting by remember { mutableStateOf<Record?>(null) }
     var reworking by remember { mutableStateOf<Record?>(null) }
+    var reworkReason by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(tab) { list.query["status"] = tab; list.reload() }
 
     Page("Quality Control", subtitle = "Inspect finished work before it is stocked", refresh = { list.reload() }) {
@@ -195,8 +196,15 @@ internal fun QcScreen() {
             }
         }
     }
-    inspecting?.let { r -> QcSheet(ProductionOrderRecord(r), onDismiss = { inspecting = null }) { list.load() } }
-    reworking?.let { r -> ReworkSheet(ProductionOrderRecord(r), onDismiss = { reworking = null }) { list.load() } }
+    // A failed inspection leads straight to "Send back for rework", with the
+    // inspector's note as the reason (console Production Cycle 10).
+    inspecting?.let { r ->
+        QcSheet(ProductionOrderRecord(r), onDismiss = { inspecting = null; if (reworkReason != null) reworking = r }) { passed, notes ->
+            reworkReason = if (passed) null else notes
+            list.load()
+        }
+    }
+    reworking?.let { r -> ReworkSheet(ProductionOrderRecord(r), onDismiss = { reworking = null; reworkReason = null }, onSaved = { list.load() }, initialReason = reworkReason) }
 }
 
 // ── Calendar (GET /v1/admin/production/schedule + orders by due date) ────────
@@ -209,11 +217,15 @@ internal fun ProductionCalendarScreen() {
     var month by remember { mutableStateOf(HubDates.today().withDayOfMonth(1)) }
     LaunchedEffect(Unit) { schedule.load() }
 
-    Page("Production Calendar", subtitle = "Delivery promises against the floor's load", refresh = { schedule.reload() }) {
+    Page("Production Calendar", subtitle = if (env.session.current.permissions.isFloorWorker) "Your jobs by due date" else "Delivery promises against the floor's load", refresh = { schedule.reload() }) {
         LoadableView(schedule.state, retry = { schedule.load() }) { s ->
-            StatsRow(listOf(
-                Triple("Active orders", s["active_count"].str ?: "0", null),
-                Triple("Earliest free slot", s["earliest_free_slot"].str ?: "—", StatusTone.INFO),
+            // A floor worker's schedule holds only her own jobs (server, Production
+            // Cycle 8), so "earliest free slot" — a date-promising figure for
+            // whoever runs the floor — would mean nothing to her.
+            val floorWorker = env.session.current.permissions.isFloorWorker
+            StatsRow(listOfNotNull(
+                Triple(if (floorWorker) "Your active orders" else "Active orders", s["active_count"].str ?: "0", null),
+                if (floorWorker) null else Triple("Earliest free slot", s["earliest_free_slot"].str ?: "—", StatusTone.INFO),
             ))
             val byStage = s["by_stage"].obj ?: emptyMap()
             if (byStage.isNotEmpty()) SectionCard("Open work per stage") {

@@ -32,6 +32,8 @@ final class CostVisibility
     private const KEYS = [
         'cost_price', 'unit_cost', 'cost_per_unit', 'line_cost', 'total_cost',
         'cost_amount', 'average_cost', 'last_cost',
+        // BOM: where a material's cost came from, and how many lines have none.
+        'cost_source', 'uncosted_count',
     ];
 
     /** May this user see what things cost? */

@@ -168,8 +168,8 @@ struct ChannelDetailsPanel: View {
                         SectionCard("Thread") {
                             if let r = ch.contextRoute { Button { env.navigator.go(r) } label: { Label("Open the record", systemImage: "arrow.up.right.square") } }
                             AsyncButton("Hide from my list") {
-                                _ = try await env.session.client.post("/v1/admin/channels/\(ch.id)/dismiss")
-                                store.remove(ch.id); env.toasts.show("Hidden until the next message")
+                                try await store.hide(ch)
+                                env.toasts.show("Hidden — it'll reappear with a new message, or restore it from the list.")
                             }
                         }
                     } else {

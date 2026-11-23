@@ -21,9 +21,29 @@ struct CustomersReportView: View {
             SegmentedTabs(tabs: tabs, selection: $tab)
             let outlet: [String: String?] = ["outlet_id": w.outletId.map(String.init)]
             switch tab {
-            case "overview": ReportData("/v1/admin/reports/customers/summary", query: w.dateParams()) { j in
-                SectionCard("Customers in the period") { AutoTiles(json: j) ; AutoTable(rows: jrows(j["acquisition_trend"])) }
-            }
+            case "overview":
+                ReportData("/v1/admin/reports/customers/summary", query: w.dateParams()) { j in
+                    SectionCard("Customers in the period") { AutoTiles(json: j) ; AutoTable(rows: jrows(j["acquisition_trend"])) }
+                }
+                // Active and VIP customers, segments and spend brackets (CustomersReportPage.tsx analytics).
+                let range = w.range
+                let days = CustomerAnalytics.periodDays(from: range.0, to: range.1, calendar: ReportWindow.calendar)
+                ReportData("/v1/admin/reports/customers/analytics", query: (["period": String(days)] as [String: String?]).merging(outlet) { $1 }) { j in
+                    let a = CustomerAnalytics(json: j)
+                    SectionCard("Who they are · last \(days) day\(days == 1 ? "" : "s")") {
+                        TileGrid(minWidth: 150) {
+                            StatTile("Active customers", value: "\(a.activeCustomers)")
+                            StatTile("VIP customers", value: "\(a.vip)")
+                        }
+                        if a.segments.isEmpty { Text("No segment data for this period.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary) }
+                        ForEach(a.segments, id: \.name) { seg in DetailRow(seg.name, "\(seg.count)") }
+                    }
+                    if !a.spendBrackets.isEmpty {
+                        SectionCard("Spend brackets (customers)") {
+                            ForEach(a.spendBrackets, id: \.label) { b in DetailRow(b.label, "\(b.count)") }
+                        }
+                    }
+                }
             case "ltv": ReportData("/v1/admin/reports/customers/lifetime-value", query: w.dateParams(["limit": "50"])) { j in
                 SectionCard("Lifetime value · \(j["currency"]?.string ?? "KES")") { AutoTable(rows: jrows(j["customers"]), currency: j["currency"]?.string ?? "KES") { r in if let id = r.int("id") { env.navigator.go(.customer(id: id)) } } }
             }

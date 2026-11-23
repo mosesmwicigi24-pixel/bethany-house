@@ -326,9 +326,9 @@ struct ImprestTopupsList: View {
             if let data {
                 LoadableView(data.state, retry: { data.load() }, isEmpty: { ($0["data"]?.array ?? []).isEmpty }, empty: { EmptyState("No top-ups yet", symbol: "arrow.down.circle") }) { json in
                     DataTable(columns: [
-                        TableColumn("Requested", "created_at", .date), TableColumn("Status", "status", .status),
-                        TableColumn("Requested", "requested_amount", .money, fixedCurrency: cur), TableColumn("Sent", "sent_amount", .money, fixedCurrency: cur),
-                        TableColumn("Received", "received_amount", .money, fixedCurrency: cur), TableColumn("Method", "sent_method", .status), TableColumn("Reference", "sent_reference"),
+                        DataColumn("Requested", "created_at", .date), DataColumn("Status", "status", .status),
+                        DataColumn("Requested", "requested_amount", .money, fixedCurrency: cur), DataColumn("Sent", "sent_amount", .money, fixedCurrency: cur),
+                        DataColumn("Received", "received_amount", .money, fixedCurrency: cur), DataColumn("Method", "sent_method", .status), DataColumn("Reference", "sent_reference"),
                     ], rows: jrows(json["data"]))
                 }
             }

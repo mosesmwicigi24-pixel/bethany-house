@@ -40,6 +40,22 @@ android {
         manifestPlaceholders["mapsApiKey"] = prop("mapsApiKey")
     }
 
+    // Two apps from one codebase (owner, 2026-11-23). "hub" is Bethany Hub,
+    // unchanged; "tailors" is Tailors Hub, the workshop app. What each shows is
+    // core's AppFlavor; the flavour only sets the id, the name and APP_FLAVOR.
+    flavorDimensions += "app"
+    productFlavors {
+        create("hub") {
+            dimension = "app"
+            buildConfigField("String", "APP_FLAVOR", "\"HUB\"")
+        }
+        create("tailors") {
+            dimension = "app"
+            applicationId = "ke.co.bethanyhouse.tailors"
+            buildConfigField("String", "APP_FLAVOR", "\"TAILORS\"")
+        }
+    }
+
     signingConfigs {
         // Release signing comes from local.properties / CI secrets; never committed.
         create("release") {

@@ -467,10 +467,10 @@ class OrderLineEditor
                     'index'           => $index,
                     'line'            => $line,
                     'quantity'        => (int) $row['quantity'],
-                    // A figure sent now is billed as a whole unit
-                    // (CustomerMoney); one left out stays as it was booked.
+                    // A price typed now keeps its cents (CustomerMoney::price);
+                    // a discount is whole; one left out stays as it was booked.
                     'unit_price'      => array_key_exists('unit_price', $row) && $row['unit_price'] !== null
-                        ? \App\Support\CustomerMoney::whole((float) $row['unit_price'])
+                        ? \App\Support\CustomerMoney::price((float) $row['unit_price'])
                         : (float) $line->unit_price,
                     'discount_amount' => array_key_exists('discount_amount', $row) && $row['discount_amount'] !== null
                         ? \App\Support\CustomerMoney::whole((float) $row['discount_amount'])
@@ -672,7 +672,8 @@ class OrderLineEditor
             'variant_name'       => $variant?->variant_name,
             'sku'                => $variant?->sku ?? $product->sku,
             'quantity'           => (int) $row['quantity'],
-            'unit_price'         => \App\Support\CustomerMoney::whole((float) $unitPrice),
+            // A price, typed or from the catalogue, keeps its cents.
+            'unit_price'         => \App\Support\CustomerMoney::price((float) $unitPrice),
             'discount_amount'    => isset($row['discount_amount']) ? \App\Support\CustomerMoney::whole((float) $row['discount_amount']) : 0.0,
             'inventory_item_id'  => $inventory?->id,
         ];

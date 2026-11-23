@@ -52,9 +52,9 @@ class ProductPrice extends Model
     protected static function booted(): void
     {
         static::saving(function (self $price) {
-            // Every currency but the shop's own is saved as a whole unit
-            // (CustomerMoney::listPrice, owner 2026-10-30) — here, on the
-            // model, for the same reason as the sale rule below.
+            // Saved to the cent in every currency (CustomerMoney::listPrice,
+            // owner 2026-11-16) — here, on the model, for the same reason as
+            // the sale rule below.
             foreach (['regular_price', 'sale_price'] as $col) {
                 if ($price->{$col} !== null && $price->isDirty($col)) {
                     $price->{$col} = \App\Support\CustomerMoney::listPrice((float) $price->{$col}, (string) $price->currency_code);

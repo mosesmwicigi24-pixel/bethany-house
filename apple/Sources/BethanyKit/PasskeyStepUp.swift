@@ -81,14 +81,4 @@ public final class PasskeyStepUp: NSObject, ASAuthorizationControllerDelegate, A
     }
 }
 
-public extension Data {
-    init?(base64URL: String) {
-        var s = base64URL.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        while s.count % 4 != 0 { s += "=" }
-        self.init(base64Encoded: s)
-    }
-
-    var base64URL: String {
-        base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-    }
-}
+// `Data(base64URL:)` and `.base64URL` live in SecurityModels.swift (buildable everywhere).

@@ -81,11 +81,19 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) { SidebarFooter() }
+        .task {
+            // Every minute while the sidebar is up, as the console does.
+            while !Task.isCancelled {
+                await env.refreshCounts()
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+        }
     }
 
     private func badge(for route: Route) -> Int {
         switch route {
         case .notifications: return env.unreadNotifications
+        case .peopleRequests: return env.peopleRequests
         default: return 0
         }
     }
@@ -104,6 +112,7 @@ struct SidebarView: View {
 
 struct SidebarFooter: View {
     @Environment(AppEnvironment.self) private var env
+    @State private var unsent = 0
     var body: some View {
         VStack(spacing: 6) {
             if !env.connection.isOnline {
@@ -117,7 +126,7 @@ struct SidebarFooter: View {
                     Button(item.label) { env.navigator.go(item.route) }
                 }
                 Divider()
-                Button("Sign out") { Task { await env.session.signOut(); await env.sessionDidChange() } }
+                Button("Sign out") { Task { unsent = await env.requestSignOut() } }
             } label: {
                 HStack {
                     Image(systemName: "person.crop.circle.fill").foregroundStyle(Theme.Palette.brand)
@@ -133,6 +142,7 @@ struct SidebarFooter: View {
         }
         .padding(Theme.Space.m)
         .background(.bar)
+        .modifier(SignOutGuard(unsent: $unsent))
     }
 }
 

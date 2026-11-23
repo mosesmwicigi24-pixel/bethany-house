@@ -4,6 +4,8 @@ import BethanyUI
 import UserNotifications
 
 /// Bethany House Hub for iPhone and iPad (native apps programme, Steps 4–5).
+/// The same file builds Tailors Hub (target TailorsMobile, compiled with
+/// `TAILORS`): the workshop app, `AppFlavor.tailors`, without push.
 @main
 struct HubMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -18,7 +20,9 @@ struct HubMobileApp: App {
                 .task {
                     delegate.env = env
                     await env.start()
+                    #if !TAILORS
                     await delegate.requestPushAuthorization()
+                    #endif
                 }
                 .onOpenURL { url in
                     if let route = Route.from(consolePath: url.path) { env.navigator.go(route) }
@@ -75,11 +79,21 @@ enum HubConfig {
             reverbKey: envVars["REVERB_KEY"] ?? (Bundle.main.infoDictionary?["BHReverbKey"] as? String),
             reverbHost: envVars["REVERB_HOST"] ?? url.host,
             reverbPort: Int(envVars["REVERB_PORT"] ?? "") ?? 443,
-            reverbScheme: envVars["REVERB_SCHEME"] ?? "wss"
+            reverbScheme: envVars["REVERB_SCHEME"] ?? "wss",
+            flavor: flavor
         )
+    }
+
+    static var flavor: AppFlavor {
+        #if TAILORS
+        return .tailors
+        #else
+        return .hub
+        #endif
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var env: AppEnvironment?
 
@@ -106,12 +120,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         NSLog("APNs registration failed: \(error.localizedDescription)")
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .badge]
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let payload = PushPayload(userInfo: response.notification.request.content.userInfo)
-        if let route = payload.route { await MainActor.run { env?.navigator.go(route) } }
+        if let route = payload.route { await MainActor.run { self.env?.navigator.go(route) } }
     }
 }

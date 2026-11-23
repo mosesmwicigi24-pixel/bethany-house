@@ -646,3 +646,101 @@ struct RaiseProductionSheet: View {
         }
     }
 }
+
+// MARK: Bill in — POST /orders/{id}/bill-currency {currency_code, reason?} (OrderDetailPage.tsx BillCurrencyControl)
+
+/// "Bill in" the customer's own currency or USD. Before payment: anyone who
+/// edits orders. After it: the super admin, with a reason (the server checks
+/// both and asks for step-up). Each payment keeps the currency it was paid in.
+struct BillCurrencyControl: View {
+    @Environment(AppEnvironment.self) private var env
+    let order: Record
+    let pick: (String) -> Void
+    @State private var ownSaleCurrency: String?
+    @State private var loaded = false
+
+    var body: some View {
+        let current = order.string("currency_code") ?? ""
+        let choices = OrderBilling.billCurrencyChoices(ownSaleCurrency: ownSaleCurrency)
+        Group {
+            if loaded, OrderBilling.offersBillCurrency(order.json, ownSaleCurrency: ownSaleCurrency, permissions: env.session.permissions) {
+                Menu {
+                    ForEach(choices, id: \.self) { c in
+                        Button(c == current ? "\(c) (now)" : "Bill in \(c)") { if c != current { pick(c) } }.disabled(c == current)
+                    }
+                } label: { Label("Bill in \(current)", systemImage: "dollarsign.arrow.circlepath") }
+                .font(Theme.Font.secondary)
+            }
+        }
+        .task(id: order.string("customer_country_code")) {
+            guard order["is_international"]?.bool == true, let code = order.string("customer_country_code"), !code.isEmpty else { loaded = true; return }
+            // sale_currency per country — the same list the console reads.
+            if let r = try? await env.session.client.get("/v1/countries") {
+                ownSaleCurrency = r.json?.salesRecords.first { $0.string("code") == code }?.string("sale_currency")
+            }
+            loaded = true
+        }
+    }
+}
+
+struct BillCurrencySheet: View {
+    @Environment(AppEnvironment.self) private var env
+    let order: Record
+    let currency: String
+    let onDone: () -> Void
+    let onCancel: () -> Void
+    @State private var reason = ""
+
+    var body: some View {
+        let started = OrderBilling.paymentStarted(order.json)
+        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        SheetFrame(title: "Bill in \(currency)", submitLabel: "Apply — bill in \(currency)",
+                   canSubmit: !started || why.count >= OrderBilling.billCurrencyReasonMinimum,
+                   onCancel: onCancel, onSubmit: {
+            var payload: [String: JSONValue] = ["currency_code": .string(currency)]
+            if started { payload["reason"] = .string(why) }
+            let r = try await env.session.client.post("/v1/admin/orders/\(order.id)/bill-currency", json: .object(payload))
+            env.toasts.show(r.json?["message"]?.string ?? "Billed in \(currency) now.")
+            onDone()
+        }) {
+            DetailRow("Now", order.string("currency_code"))
+            DetailRow("Becomes", currency)
+            if started {
+                Text("Payment has started. Each payment keeps the currency it was paid in and counts its share of the order in \(currency).")
+                    .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                TextField("Reason (kept in the audit trail)", text: $reason).textFieldStyle(.roundedBorder)
+            } else {
+                Text("The Hub re-prices the order in \(currency) from the price list.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+}
+
+// MARK: Delete a payment (owner) — POST /orders/{id}/payments/{p}/remove {reason} (OrderDetailPage.tsx DeletePaymentModal)
+
+struct DeletePaymentSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    let order: Record
+    let payment: Record
+    let onDone: () -> Void
+    let onCancel: () -> Void
+    @State private var reason = ""
+
+    var body: some View {
+        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        SheetFrame(title: "Delete this payment (owner)", submitLabel: "Delete payment",
+                   canSubmit: why.count >= OrderBilling.deleteReasonMinimum, destructive: true,
+                   onCancel: onCancel, onSubmit: {
+            let r = try await env.session.client.post("/v1/admin/orders/\(order.id)/payments/\(payment.id)/remove", json: .object(["reason": .string(why)]))
+            env.toasts.show(r.json?["message"]?.string ?? "Payment deleted.")
+            onDone()
+        }) {
+            DetailRow("Payment", payment.string("payment_number") ?? "—")
+            DetailRow("Amount") { MoneyText(payment.money("amount", currency: payment.string("currency_code") ?? order.string("currency_code"))) }
+            DetailRow("Method", (payment.string("payment_method") ?? "").humanized.uppercased())
+            Text("It stops counting everywhere — the balance, reports and cash — and the order's balance is worked out again. The record stays behind \u{201C}Show deleted\u{201D} with your reason, for the audit trail. You will be asked to confirm it is you.")
+                .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+            TextField("Why is it deleted? (e.g. Customer never sent it; recorded in error)", text: $reason).textFieldStyle(.roundedBorder)
+        }
+    }
+}

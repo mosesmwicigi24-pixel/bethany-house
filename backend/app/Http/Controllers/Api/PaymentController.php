@@ -563,11 +563,14 @@ class PaymentController extends Controller
             $redirectUrl = $order->payment_token
                 ? url("/pay/{$order->payment_token}?status=returned")
                 : config('services.flutterwave.redirect_url');
+            // The reference we hand Flutterwave is the one we keep: its
+            // webhook is matched on it, whole.
+            $txRef = $order->order_number . '-' . time();
 
             $response = Http::withToken($secretKey)
                 ->timeout(15)
                 ->post('https://api.flutterwave.com/v3/payments', [
-                    'tx_ref'          => $order->order_number . '-' . time(),
+                    'tx_ref'          => $txRef,
                     'amount'          => (float) $order->total_amount,
                     'currency'        => $order->currency_code,
                     'redirect_url'    => $redirectUrl,
@@ -595,7 +598,7 @@ class PaymentController extends Controller
                 'amount'             => $order->total_amount,
                 'currency_code'      => $order->currency_code,
                 'status'             => 'pending',
-                'provider_reference' => $data['tx_ref'] ?? $order->order_number,
+                'provider_reference' => $txRef,
                 'tax_inclusive'      => $order->prices_include_tax ?? true,
             ]);
 
@@ -622,84 +625,69 @@ class PaymentController extends Controller
      */
     public function mpesaCallback(Request $request)
     {
-        $data = $request->all();
-        Log::info('M-Pesa Callback received', $data);
+        // A callback is a notice, never proof: anyone can post one. It only
+        // tells us WHICH prompt to ask Safaricom about; what Safaricom
+        // answers is what settles (security audit 2026-11-19).
+        $callback          = (array) $request->input('Body.stkCallback', []);
+        $checkoutRequestId = (string) ($callback['CheckoutRequestID'] ?? '');
+
+        Log::info('M-Pesa callback received', [
+            'checkout_request_id' => $checkoutRequestId,
+            'result_code'         => $callback['ResultCode'] ?? null,
+        ]);
+
+        if ($checkoutRequestId === '') {
+            return response()->json(['message' => 'Invalid callback data'], 400);
+        }
+
+        // Not set up ⇒ no prompt was ever ours to hear about.
+        if (!MpesaService::isConfigured()) {
+            return response()->json(['message' => 'M-Pesa is not configured'], 400);
+        }
 
         try {
-            $resultCode        = $data['Body']['stkCallback']['ResultCode'] ?? null;
-            $checkoutRequestId = $data['Body']['stkCallback']['CheckoutRequestID'] ?? null;
-
-            if (!$checkoutRequestId) {
-                return response()->json(['message' => 'Invalid callback data'], 400);
-            }
-
-            $payment = Payment::where('provider_reference', $checkoutRequestId)->first();
+            // Only a prompt still waiting: a settled or held payment is not
+            // this door's to touch.
+            $payment = Payment::where('provider_reference', $checkoutRequestId)
+                ->where('payment_method', 'mpesa')
+                ->where('status', 'pending')
+                ->where(fn ($q) => $q->whereNull('requires_approval')->orWhere('requires_approval', false))
+                ->first();
 
             if (!$payment) {
-                Log::warning('mpesaCallback: payment not found', [
-                    'checkout_request_id' => $checkoutRequestId,
-                ]);
                 return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
             }
 
-            if ($resultCode === 0) {
-                $meta           = $data['Body']['stkCallback']['CallbackMetadata']['Item'] ?? [];
-                $receipt        = collect($meta)->firstWhere('Name', 'MpesaReceiptNumber')['Value'] ?? null;
+            $paid = MpesaService::promptWasPaid($checkoutRequestId);
 
-                DB::transaction(function () use ($payment, $receipt, $data) {
-                    $payment->update([
-                        'status'             => 'paid',
-                        'provider_reference' => $receipt ?? $payment->provider_reference,
-                        'paid_at'            => now(),
-                    ]);
+            if ($paid === null) {
+                // No answer: it stays pending for the verify button.
+                Log::warning('M-Pesa callback: Safaricom gave no answer, payment left pending', ['payment_id' => $payment->id]);
+                return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
+            }
 
-                    $order = $payment->order;
-                    $order->refresh();
-                    $order->syncPaymentStatus();
-                    $order->refresh();
+            if ($paid) {
+                $receipt = collect($callback['CallbackMetadata']['Item'] ?? [])
+                    ->firstWhere('Name', 'MpesaReceiptNumber')['Value'] ?? null;
+                $receipt = is_string($receipt) && preg_match('/^[A-Z0-9]{8,12}$/', $receipt) ? $receipt : null;
 
-                    // Quote-originated invoice → issue receipt + commit stock (no-op otherwise).
-                    $this->settleReceipt($order, $payment);
-
-                    if ($order->payment_status === 'paid' && $order->status === 'pending') {
-                        $order->update(['status' => 'processing']);
-                    }
-                });
-
-                $order = $payment->fresh()->order;
-
-                // ── Notifications & audit ─────────────────────────────────────
-                NotificationService::paymentReceived(
-                    $payment->id,
-                    $payment->payment_number,
-                    $order->id,
-                    $order->order_number,
-                    (float) $payment->amount,
-                    $order->currency_code,
-                    'mpesa'
-                );
-
-                ActivityLogService::log('mpesa_payment_confirmed', $order, [
-                    'payment_id'   => $payment->id,
-                    'receipt'      => $receipt,
-                    'amount'       => $payment->amount,
-                    'via'          => 'daraja_callback',
-                ]);
-
+                $order = $payment->order;
+                DB::transaction(fn () => $this->applyMpesaSettlement($payment, $order, $receipt));
+                $this->announceMpesaSettlement($payment, $order, $receipt, 'daraja_callback_stk_query');
             } else {
                 $payment->update(['status' => 'failed']);
 
                 ActivityLogService::log('mpesa_payment_failed', $payment->order, [
                     'payment_id'  => $payment->id,
-                    'result_code' => $resultCode,
-                    'result_desc' => $data['Body']['stkCallback']['ResultDesc'] ?? 'Unknown',
+                    'result_code' => $callback['ResultCode'] ?? null,
+                    'result_desc' => $callback['ResultDesc'] ?? 'Unknown',
                 ]);
             }
 
             return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
 
         } catch (\Exception $e) {
-            Log::error('M-Pesa callback error', ['error' => $e->getMessage(), 'data' => $data]);
+            Log::error('M-Pesa callback error', ['error' => $e->getMessage(), 'checkout_request_id' => $checkoutRequestId]);
             return response()->json(['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
         }
     }
@@ -1207,11 +1195,17 @@ class PaymentController extends Controller
      */
     public function flutterwaveWebhook(Request $request)
     {
-        $secretHash = config('services.flutterwave.secret_hash');
-        $signature  = $request->header('verif-hash');
+        // The hash Flutterwave sends back is the one set on its dashboard and
+        // here. With none set there is nothing to compare against, so nothing
+        // is trusted: an absent header used to "match" an absent secret, and
+        // anyone could mark a payment paid (security audit 2026-11-19, PAY-01).
+        $secretHash = (string) config('services.flutterwave.secret_hash');
+        $signature  = (string) $request->header('verif-hash');
 
-        if ($signature !== $secretHash) {
-            Log::warning('Invalid Flutterwave webhook signature');
+        if ($secretHash === '' || $signature === '' || !hash_equals($secretHash, $signature)) {
+            Log::warning('Flutterwave webhook refused', [
+                'reason' => $secretHash === '' ? 'no secret hash configured' : 'bad signature',
+            ]);
             return response()->json(['message' => 'Invalid signature'], 400);
         }
 
@@ -1222,19 +1216,48 @@ class PaymentController extends Controller
             if (($data['event'] ?? '') === 'charge.completed' &&
                 ($data['data']['status'] ?? '') === 'successful') {
 
-                $txRef   = $data['data']['tx_ref'];
-                $flwRef  = $data['data']['flw_ref'];
-                $payment = Payment::where('provider_reference', 'LIKE', "%{$txRef}%")->first();
+                $txRef  = (string) ($data['data']['tx_ref'] ?? '');
+                $flwRef = (string) ($data['data']['flw_ref'] ?? '');
+                if ($txRef === '') {
+                    return response()->json(['message' => 'OK']);
+                }
+
+                // The reference we handed Flutterwave, whole — a fragment
+                // used to match any payment that merely contained it — and
+                // only a Flutterwave payment.
+                $payment = Payment::where('provider_reference', $txRef)
+                    ->where('payment_method', 'card_flutterwave')
+                    ->first();
 
                 if (!$payment) {
                     Log::warning('Flutterwave webhook: payment not found', ['tx_ref' => $txRef]);
                     return response()->json(['message' => 'OK']);
                 }
 
+                // A notice can be delivered twice — never settle twice.
+                if ($payment->status === 'paid') {
+                    return response()->json(['message' => 'Webhook processed']);
+                }
+
+                // What was charged must cover what was asked, in the same
+                // currency; anything else is held for a person to look at.
+                $charged  = (float) ($data['data']['amount'] ?? 0);
+                $currency = strtoupper((string) ($data['data']['currency'] ?? ''));
+                $expected = strtoupper((string) ($payment->currency_code ?: $payment->order?->currency_code));
+                if ($charged + 0.001 < (float) $payment->amount || ($expected !== '' && $currency !== $expected)) {
+                    $payment->update([
+                        'requires_approval' => true,
+                        'approval_status'   => 'pending_review',
+                        'notes'             => trim(($payment->notes ?? '') . " [system] Flutterwave reported {$currency} {$charged}; expected {$expected} {$payment->amount}; held for review."),
+                    ]);
+                    Log::warning('Flutterwave webhook: amount or currency mismatch', ['payment_id' => $payment->id]);
+                    return response()->json(['message' => 'Webhook processed']);
+                }
+
                 DB::transaction(function () use ($payment, $flwRef) {
                     $payment->update([
                         'status'             => 'paid',
-                        'provider_reference' => $flwRef,
+                        'provider_reference' => $flwRef !== '' ? $flwRef : $payment->provider_reference,
                         'paid_at'            => now(),
                     ]);
 

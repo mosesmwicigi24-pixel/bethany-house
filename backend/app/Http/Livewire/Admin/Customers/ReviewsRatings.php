@@ -113,6 +113,8 @@ class ReviewsRatings extends Component
             ->when($this->search, fn($q) =>
                 $q->where('title', 'ilike', "%{$this->search}%")
                   ->orWhere('review', 'ilike', "%{$this->search}%")
+                  ->orWhere('author_name', 'ilike', "%{$this->search}%")   // storefront reviewers have no user row
+                  ->orWhere('author_email', 'ilike', "%{$this->search}%")
                   ->orWhereHas('user', fn($uq) =>
                       $uq->whereRaw("first_name || ' ' || last_name ILIKE ?", ["%{$this->search}%"])
                          ->orWhere('email', 'ilike', "%{$this->search}%")

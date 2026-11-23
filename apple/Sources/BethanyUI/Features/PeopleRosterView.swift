@@ -186,7 +186,8 @@ struct RosterGrid: View {
                     .buttonStyle(.plain).foregroundStyle(Theme.textTertiary)
             }
         }
-        .frame(width: 150, minHeight: 44, alignment: .topLeading)
+        .frame(width: 150)
+        .frame(minHeight: 44, alignment: .topLeading)
         .padding(3)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 8))
     }

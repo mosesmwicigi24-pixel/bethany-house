@@ -6,13 +6,13 @@
  *   - converted from the price list the currency is priced from
  *     (currencies.priced_from — the rand from USD) when that row has a price,
  *   - else from the default (KES) price,
- *   - to the nearest whole unit, halves up (owner, 2026-10-30): R3,231,
- *     not R3,230.77 — a price typed on a product is never rounded;
+ *   - to the cent (owner, 2026-11-16: "no rounding off"): R3,230.77, and
+ *     a price typed on a product is never rounded;
  *   - null when it can't be stated: a currency still at the blank default
  *     rate of 1.0 is unconfigured, not a peg, and must never copy the
  *     shilling figure under another label.
  */
-import { whole } from "./customerMoney";
+import { price } from "./customerMoney";
 
 export interface CurrencyRow {
     code: string;
@@ -47,7 +47,7 @@ export function convertPrice(amount: number, from: string, to: string, currencie
  * The automatic price of `code`, given the other rows' current amounts.
  * amounts: currency → price (null/0 = no price).
  */
-const wholeOrNull = (v: number | null) => (v === null ? null : whole(v));
+const wholeOrNull = (v: number | null) => (v === null ? null : price(v));   // a price keeps its cents
 
 export function autoPrice(code: string, amounts: Record<string, number | null | undefined>, currencies: CurrencyRow[]): number | null {
     const base = baseOf(currencies);

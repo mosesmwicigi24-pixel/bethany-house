@@ -44,7 +44,7 @@ struct AutoTable: View {
     var currency: String? = nil
     var onTap: ((JRow) -> Void)? = nil
 
-    private var columns: [TableColumn] {
+    private var columns: [DataColumn] {
         guard let first = rows.first?.json.object else { return [] }
         let keys = first.keys.sorted { a, b in
             func rank(_ k: String) -> Int { ["name", "label", "title", "ref", "product_name", "customer", "date", "month", "week", "period"].firstIndex(of: k) ?? 50 }
@@ -54,12 +54,12 @@ struct AutoTable: View {
             guard !hide.contains(k) else { return nil }
             let v = first[k]
             if v?.array != nil || (v?.object != nil) { return nil }
-            if isMoneyKey(k) && (v?.double != nil || v?.isNull == true) { return TableColumn(k.humanized, k, .money, fixedCurrency: currency) }
-            if k.contains("pct") || k.contains("percent") || k.hasSuffix("_rate") { return TableColumn(k.humanized, k, .pct) }
-            if case .number(let n)? = v { return TableColumn(k.humanized, k, n == n.rounded() ? .int : .number(2)) }
-            if k == "status" || k == "severity" || k == "tier" { return TableColumn(k.humanized, k, .status) }
-            if k.hasSuffix("_at") || k == "date" || k.hasSuffix("_date") { return TableColumn(k.humanized, k, .date) }
-            return TableColumn(k.humanized, k, .text)
+            if isMoneyKey(k) && (v?.double != nil || v?.isNull == true) { return DataColumn(k.humanized, k, .money, fixedCurrency: currency) }
+            if k.contains("pct") || k.contains("percent") || k.hasSuffix("_rate") { return DataColumn(k.humanized, k, .pct) }
+            if case .number(let n)? = v { return DataColumn(k.humanized, k, n == n.rounded() ? .int : .number(2)) }
+            if k == "status" || k == "severity" || k == "tier" { return DataColumn(k.humanized, k, .status) }
+            if k.hasSuffix("_at") || k == "date" || k.hasSuffix("_date") { return DataColumn(k.humanized, k, .date) }
+            return DataColumn(k.humanized, k, .text)
         }
     }
 
@@ -265,7 +265,7 @@ struct PerformanceReportView: View {
                     StatTile("Orders", value: t?["orders"]?.string ?? "0")
                     StatTile("Collected", value: fmtMoney(t?["collected"], currency: "KES"), hint: "money truth, by payment date")
                 }
-                let cols = [TableColumn("Name", "name"), TableColumn("Sold", "sold", .money, fixedCurrency: "KES"), TableColumn("Previous", "sold_previous", .money, fixedCurrency: "KES"), TableColumn("Orders", "orders", .int), TableColumn("Prev orders", "orders_previous", .int), TableColumn("Avg order", "aov", .money, fixedCurrency: "KES"), TableColumn("Buyers", "buyers", .int), TableColumn("Collected", "collected", .money, fixedCurrency: "KES"), TableColumn("Unconfirmed carts", "unconfirmed_carts", .int), TableColumn("Unconfirmed value", "unconfirmed_value", .money, fixedCurrency: "KES")]
+                let cols = [DataColumn("Name", "name"), DataColumn("Sold", "sold", .money, fixedCurrency: "KES"), DataColumn("Previous", "sold_previous", .money, fixedCurrency: "KES"), DataColumn("Orders", "orders", .int), DataColumn("Prev orders", "orders_previous", .int), DataColumn("Avg order", "aov", .money, fixedCurrency: "KES"), DataColumn("Buyers", "buyers", .int), DataColumn("Collected", "collected", .money, fixedCurrency: "KES"), DataColumn("Unconfirmed carts", "unconfirmed_carts", .int), DataColumn("Unconfirmed value", "unconfirmed_value", .money, fixedCurrency: "KES")]
                 SectionCard("Outlets") { BarsChart(points: chartPoints(json["outlets"], label: "name", y: "sold")); DataTable(columns: cols, rows: jrows(json["outlets"])) }
                 SectionCard("Salespeople") { DataTable(columns: cols, rows: jrows(json["salespeople"])) }
                 BasisCaption("Previous period: \(json["period"]?["previous_start"]?.string?.prefix(10) ?? "") – \(json["period"]?["previous_end"]?.string?.prefix(10) ?? ""), like for like.")
@@ -301,8 +301,8 @@ struct ExplorerReportView: View {
             .font(Theme.Font.secondary)
             ReportData("/v1/admin/reports/explorer", query: query(w)) { json in
                 let measures = json["measures"]?.array?.compactMap(\.string) ?? []
-                let cols = [TableColumn(json["dimensions"]?[json["dimension"]?.string ?? by]?["label"]?.string ?? by.humanized, "label")] + measures.map { m in
-                    ["sold", "aov", "collected", "line_value"].contains(m) ? TableColumn(m.humanized + " (KES)", m, .money, fixedCurrency: "KES") : TableColumn(m.humanized, m, .int)
+                let cols = [DataColumn(json["dimensions"]?[json["dimension"]?.string ?? by]?["label"]?.string ?? by.humanized, "label")] + measures.map { m in
+                    ["sold", "aov", "collected", "line_value"].contains(m) ? DataColumn(m.humanized + " (KES)", m, .money, fixedCurrency: "KES") : DataColumn(m.humanized, m, .int)
                 }
                 SectionCard("\(json["row_count"]?.int ?? 0) rows (limit \(json["row_limit"]?.int ?? 0)) · level: \(json["level"]?.string ?? "")") {
                     if measures.contains("sold") { BarsChart(points: chartPoints(json["rows"], label: "label", y: "sold")) }

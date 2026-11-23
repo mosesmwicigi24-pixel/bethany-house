@@ -40,6 +40,11 @@ struct PosAPI {
         return (r.json?["data"]?.array ?? []).compactMap(PosProduct.init(json:))
     }
 
+    /// GET pos/suggestions — "Usually bought together" for the cart's products. Advisory.
+    func suggestions(productIds: [Int]) async throws -> JSONValue {
+        try await client.get("\(Self.base)/suggestions", query: TillSuggestion.query(productIds)).json ?? .null
+    }
+
     func searchProducts(_ q: String, outletId: Int, currency: String?) async throws -> [PosProduct] {
         let r = try await client.get("\(Self.base)/products/search", query: ["q": q, "outlet_id": String(outletId), "currency": currency])
         return (r.json?["data"]?.array ?? []).compactMap(PosProduct.init(json:))

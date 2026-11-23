@@ -225,26 +225,59 @@ export default function PaymentMethodsPage() {
     );
     const configFields: Record<
         string,
-        { key: string; label: string; secret?: boolean }[]
+        {
+            key: string;
+            label: string;
+            secret?: boolean;
+            hint?: string;
+            options?: { value: string; label: string }[];
+        }[]
     > = {
         mpesa: [
-            { key: "consumer_key", label: "Consumer Key", secret: true },
-            { key: "consumer_secret", label: "Consumer Secret", secret: true },
-            { key: "shortcode", label: "Shortcode" },
-            { key: "passkey", label: "Passkey", secret: true },
-            { key: "environment", label: "Environment (sandbox/production)" },
+            {
+                key: "account_name",
+                label: "Business name",
+                hint: "The name registered on the paybill or till, as Safaricom shows it.",
+            },
+            {
+                key: "shortcode",
+                label: "Shortcode (paybill or till number)",
+            },
+            {
+                key: "consumer_key",
+                label: "Consumer key",
+                secret: true,
+                hint: "From your app on the Safaricom Daraja portal.",
+            },
+            { key: "consumer_secret", label: "Consumer secret", secret: true },
+            {
+                key: "passkey",
+                label: "Passkey",
+                secret: true,
+                hint: "The Lipa na M-Pesa Online passkey Safaricom sent you.",
+            },
+            {
+                key: "environment",
+                label: "Environment",
+                options: [
+                    { value: "sandbox", label: "Sandbox (testing)" },
+                    { value: "production", label: "Production (real money)" },
+                ],
+            },
         ],
         paystack: [
-            { key: "public_key", label: "Public Key" },
-            { key: "secret_key", label: "Secret Key", secret: true },
+            { key: "public_key", label: "Public key" },
+            { key: "secret_key", label: "Secret key", secret: true },
         ],
         flutterwave: [
-            { key: "public_key", label: "Public Key" },
-            { key: "secret_key", label: "Secret Key", secret: true },
-            { key: "encryption_key", label: "Encryption Key", secret: true },
+            { key: "public_key", label: "Public key" },
+            { key: "secret_key", label: "Secret key", secret: true },
+            { key: "encryption_key", label: "Encryption key", secret: true },
         ],
         cash: [],
     };
+    const configSet: Record<string, boolean> =
+        (configuring as any)?.config_set ?? {};
 
     const openCreate = () => {
         reset(DEFAULTS);
@@ -692,26 +725,68 @@ export default function PaymentMethodsPage() {
                             <line x1="12" y1="9" x2="12" y2="13" />
                             <line x1="12" y1="17" x2="12.01" y2="17" />
                         </svg>
-                        Credentials are stored encrypted. Never share them. Use
-                        sandbox keys for development.
+                        A saved key is never shown again. Leave a key blank
+                        to keep the one that is saved; type a new one to
+                        replace it.
                     </p>
                     {(configFields[configuring?.code ?? ""] ?? []).map(
                         (field) => (
-                            <Field key={field.key} label={field.label}>
-                                <FieldInput
-                                    className="input font-mono text-xs"
-                                    type={field.secret ? "password" : "text"}
-                                    value={configValues[field.key] ?? ""}
-                                    onChange={(e) =>
-                                        setConfigValues((prev) => ({
-                                            ...prev,
-                                            [field.key]: e.target.value,
-                                        }))
-                                    }
-                                    placeholder={
-                                        field.secret ? "••••••••••••" : ""
-                                    }
-                                />
+                            <Field
+                                key={field.key}
+                                label={field.label}
+                                hint={
+                                    field.secret && configSet[field.key]
+                                        ? "Saved. Leave blank to keep it."
+                                        : field.hint
+                                }
+                            >
+                                {field.options ? (
+                                    <FieldSelect
+                                        className="input text-sm"
+                                        value={configValues[field.key] ?? ""}
+                                        onChange={(e) =>
+                                            setConfigValues((prev) => ({
+                                                ...prev,
+                                                [field.key]: e.target.value,
+                                            }))
+                                        }
+                                    >
+                                        <option value="">Choose…</option>
+                                        {field.options.map((o) => (
+                                            <option
+                                                key={o.value}
+                                                value={o.value}
+                                            >
+                                                {o.label}
+                                            </option>
+                                        ))}
+                                    </FieldSelect>
+                                ) : (
+                                    <FieldInput
+                                        className="input font-mono text-xs"
+                                        type={
+                                            field.secret ? "password" : "text"
+                                        }
+                                        autoComplete={
+                                            field.secret
+                                                ? "new-password"
+                                                : "off"
+                                        }
+                                        value={configValues[field.key] ?? ""}
+                                        onChange={(e) =>
+                                            setConfigValues((prev) => ({
+                                                ...prev,
+                                                [field.key]: e.target.value,
+                                            }))
+                                        }
+                                        placeholder={
+                                            field.secret &&
+                                            configSet[field.key]
+                                                ? "•••••••• saved"
+                                                : ""
+                                        }
+                                    />
+                                )}
                             </Field>
                         ),
                     )}

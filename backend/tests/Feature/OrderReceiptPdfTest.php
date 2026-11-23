@@ -105,6 +105,36 @@ class OrderReceiptPdfTest extends TestCase
         $this->assertStringContainsString("Receipt-{$o->order_number}.pdf", (string) $res->headers->get('Content-Disposition'));
     }
 
+    public function test_the_receipt_carries_the_customer_terms_including_the_14_day_repair_rule(): void
+    {
+        // Management notice, 2026-11-19: repairs and alterations only for
+        // items bought from Bethany House, within 14 days of receiving them.
+        $this->person('admin');
+        $o = $this->order(50_000);
+        $this->pay($o, 5_000);
+        [, $html] = $this->receipt($o);
+
+        $this->assertStringContainsString('Repairs and alterations: only for items bought from Bethany House, within 14 days of receiving the item, subject to assessment. None are accepted after 14 days.', $html);
+        $this->assertStringContainsString('not exchangeable unless within 7 days', $html);
+        foreach (\App\Support\CustomerTerms::receipt() as $term) {
+            $this->assertStringContainsString(htmlspecialchars($term), $html);
+        }
+    }
+
+    public function test_invoices_and_quotations_carry_the_14_day_repair_rule(): void
+    {
+        // Owner, 2026-11-19: the repair term prints on quotations and invoices too.
+        $rule = 'within 14 days of receiving the item, subject to assessment. None are accepted after 14 days.';
+        $this->person('admin');
+        [, $invoice] = $this->invoice($this->order(9_000));
+        $this->assertStringContainsString('Standard terms', $invoice);
+        $this->assertStringContainsString($rule, $invoice);
+
+        $quotation = \App\Services\PdfService::quotation(['quotation_number' => 'QUO-1', 'status' => 'sent', 'items' => [], 'currency_code' => 'KES']);
+        $this->assertStringContainsString('Standard terms', $quotation);
+        $this->assertStringContainsString($rule, $quotation);
+    }
+
     public function test_a_settled_order_says_paid_in_full(): void
     {
         $this->person('admin');
