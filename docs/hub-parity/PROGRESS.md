@@ -65,8 +65,10 @@ Still open:
   server-side — UNKNOWN — NEEDS VERIFICATION.
 - Android has its own offline store and sign-out guard; none of these fixes is
   ported there yet.
-- Tailors Hub scope: commit 4eb0ecfd widens Apple's Tailors Hub to People,
-  employee files, payroll, advances and the staff workday screens. The owner's
-  approved scope (2026-11-23) excluded these. Android still has the approved
-  list. Awaiting the owner's decision; `docs/TAILORS_HUB.md` is out of date
-  until then.
+- ~~Tailors Hub scope~~ decided by the owner (2026-11-23): the workshop app
+  for everyone; the own-workday screens stay (advances, checklists, handbook,
+  to sign, to-dos, colleagues added); People administration, employee files
+  and team payroll removed from Tailors Hub on both platforms, whatever the
+  person's permissions. `AppFlavorTests` / `AppFlavorTest` pin a manager with
+  HR and payroll rights. Today (`.me`) is left out: not in the owner's list.
+  Tailor and manager experiences still need a run on a device.

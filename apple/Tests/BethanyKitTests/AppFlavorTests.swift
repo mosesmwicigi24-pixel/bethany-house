@@ -26,13 +26,11 @@ final class AppFlavorTests: XCTestCase {
         XCTAssertTrue(AppFlavor.hub.mayUse(cashier))
     }
 
-    func testTailorsHubAllowsWorkshopWorkdayAndPeopleRoutes() {
+    func testTailorsHubIsTheWorkshopAndTheirOwnWorkday() {
         let shown: [Route] = [
             .productionMyTasks, .productionOrders, .productionOrder(id: 7), .wip, .qc, .productionCalendar,
-            .clock, .myShifts, .myLeave, .myTimesheet, .myPayslips,
-            .me, .forms, .handbook(), .handbook(id: 2), .sign(), .sign(id: 3),
-            .todos, .colleagues, .myAdvances,
-            .peopleOverview, .peopleRequests, .attendance, .formsManage, .roster, .timesheets, .leave, .people(), .people(id: 5), .payroll,
+            .clock, .myShifts, .myLeave, .myTimesheet, .myPayslips, .myAdvances,
+            .forms, .handbook(), .handbook(id: 2), .sign(), .sign(id: 3), .todos, .colleagues,
             .comms(), .comms(channelId: 3), .updates(), .updates(id: 2), .courses(), .courses(id: 4), .profile,
         ]
         for r in shown { XCTAssertTrue(AppFlavor.tailors.allows(r), "\(r) should be in Tailors Hub") }
@@ -40,7 +38,10 @@ final class AppFlavorTests: XCTestCase {
             .dashboard, .pos, .orders(), .order(id: 1), .customers, .customer(id: 1), .balances, .tills,
             .bom, .stockLevels, .materials, .purchaseOrders, .expenses, .paymentTransactions,
             .report(.finance), .report(.production), .users, .roles,
-            .approvals, .notifications, .downloads, .myDownloads,
+            .approvals, .notifications, .downloads, .myDownloads, .me,
+            // People administration, employee files and team payroll stay in Bethany Hub (owner, 2026-11-23).
+            .peopleOverview, .peopleRequests, .attendance, .formsManage, .roster, .timesheets, .leave,
+            .people(), .people(id: 5), .payroll,
         ]
         for r in hidden {
             XCTAssertFalse(AppFlavor.tailors.allows(r), "\(r) must not be in Tailors Hub")
@@ -61,8 +62,9 @@ final class AppFlavorTests: XCTestCase {
         let labels = AppFlavor.tailors.groups(for: owner).flatMap { g in g.items.map { "\(g.label)/\($0.label)" } }
         XCTAssertEqual(labels, [
             "Workspace/Messages",
-            "My Workday/Today", "My Workday/Updates", "My Workday/Checklists", "My Workday/Handbook", "My Workday/Training", "My Workday/To sign", "My Workday/To-dos", "My Workday/Colleagues", "My Workday/Clock in", "My Workday/My shifts", "My Workday/My leave", "My Workday/My hours", "My Workday/My payslips", "My Workday/My advances",
-            "People/Overview", "People/Requests", "People/Attendance", "People/Checklists", "People/Roster", "People/Timesheets", "People/Leave", "People/Employee files", "People/Payroll",
+            "My Workday/Updates", "My Workday/Checklists", "My Workday/Handbook", "My Workday/Training", "My Workday/To sign",
+            "My Workday/To-dos", "My Workday/Colleagues", "My Workday/Clock in", "My Workday/My shifts", "My Workday/My leave",
+            "My Workday/My hours", "My Workday/My payslips", "My Workday/My advances",
             "Production/My Tasks", "Production/Production Orders", "Production/Work In Progress", "Production/Quality Control", "Production/Calendar",
         ])
         XCTAssertEqual(AppFlavor.tailors.userMenu.map(\.label), ["My profile"])
@@ -70,15 +72,22 @@ final class AppFlavorTests: XCTestCase {
         XCTAssertFalse(AppFlavor.tailors.searchable(for: owner).contains { $0.route == .pos })
     }
 
-    func testPeopleManagementMenuFollowsHubPermissions() {
-        let workerGroups = AppFlavor.tailors.groups(for: tailor)
-        XCTAssertFalse(workerGroups.contains { $0.label == "People" })
-        let managerItems = AppFlavor.tailors.groups(for: person("production.worker", "attendance.view_team"))
-            .first { $0.label == "People" }?.items.map(\.route) ?? []
-        XCTAssertTrue(managerItems.contains(.peopleOverview))
-        XCTAssertTrue(managerItems.contains(.roster))
-        XCTAssertFalse(managerItems.contains(.people()))
-        XCTAssertFalse(managerItems.contains(.payroll))
+    /// A production manager who may also run HR and payroll in Bethany Hub
+    /// gets the workshop tools in Tailors Hub, never People or payroll.
+    func testWiderHubPermissionsDoNotTurnTailorsHubIntoTheHub() {
+        let manager = person("production.view", "production.manage_assignees", "production.confirm_order", "production.approve_qc",
+                             "attendance.view_team", "hr.view", "payroll.view", "forms.manage")
+        let groups = AppFlavor.tailors.groups(for: manager)
+        XCTAssertFalse(groups.contains { $0.label == "People" })
+        let routes = groups.flatMap(\.items).map(\.route)
+        XCTAssertTrue(routes.contains(.productionOrders))
+        XCTAssertTrue(routes.contains(.wip))
+        XCTAssertTrue(routes.contains(.qc))
+        XCTAssertTrue(routes.contains(.myPayslips), "their own payslips stay")
+        for r: Route in [.payroll, .people(), .peopleOverview, .roster, .timesheets, .leave, .formsManage] {
+            XCTAssertFalse(AppFlavor.tailors.allows(r), "\(r)")
+        }
+        XCTAssertTrue(AppFlavor.hub.groups(for: manager).contains { $0.label == "People" }, "Bethany Hub still has People for them")
     }
 
     func testATailorsTabsAreHerTasksCalendarMessagesAndClock() {
