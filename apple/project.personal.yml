@@ -10,6 +10,8 @@
 #   - no associated domains (Hub links do not open the app; passkey step-up
 #     falls back to the password)
 # It still talks to the live Hub: everything done in it is real.
+# Tailors Hub needs no cut-down entitlements (it has no push or associated
+# domains); only its bundle id gets the same .test suffix.
 # Writes BethanyHubPersonal.xcodeproj (git-ignored); project.yml is unchanged.
 include:
   - project.yml
@@ -21,3 +23,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub.test
+  TailorsMobile:
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.tailors.test

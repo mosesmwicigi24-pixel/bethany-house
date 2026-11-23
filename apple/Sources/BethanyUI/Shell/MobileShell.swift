@@ -16,7 +16,9 @@ public struct MobileShell: View {
 
     public var body: some View {
         Group {
-            if sizeClass == .regular {
+            if !env.session.mayUseApp {
+                WorkshopOnlyView()
+            } else if sizeClass == .regular {
                 PadShell()
             } else {
                 PhoneShell()
@@ -36,7 +38,7 @@ struct PhoneShell: View {
     @State private var moreRoute: Route?
 
     var body: some View {
-        let tabs = NavCatalogue.phoneTabs(for: env.session.permissions, home: env.session.home)
+        let tabs = env.session.flavor.phoneTabs(for: env.session.permissions, home: env.session.home)
         TabView(selection: $tab) {
             ForEach(Array(tabs.enumerated()), id: \.offset) { i, item in
                 NavigationStack(path: pathBinding(i)) {
@@ -77,7 +79,7 @@ struct MoreList: View {
     @State private var unsent = 0
     var body: some View {
         List {
-            ForEach(NavCatalogue.groups.compactMap { $0.visible(for: env.session.permissions) }) { group in
+            ForEach(env.session.flavor.groups(for: env.session.permissions)) { group in
                 Section(group.label) {
                     ForEach(group.items) { item in
                         NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) }
@@ -87,7 +89,7 @@ struct MoreList: View {
             }
             .task { await env.refreshCounts() }
             Section {
-                ForEach(NavCatalogue.userMenu) { item in NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) } }
+                ForEach(env.session.flavor.userMenu) { item in NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) } }
                 Button(role: .destructive) { Task { unsent = await env.requestSignOut() } } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
             } header: {
                 Text(env.session.me?.name ?? "")
@@ -108,7 +110,7 @@ struct PadShell: View {
         @Bindable var nav = env.navigator
         NavigationSplitView(columnVisibility: $visibility) {
             List(selection: $nav.selection) {
-                ForEach(NavCatalogue.groups.compactMap { $0.visible(for: env.session.permissions) }) { group in
+                ForEach(env.session.flavor.groups(for: env.session.permissions)) { group in
                     Section(group.label) {
                         ForEach(group.items) { item in
                             NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) }
@@ -124,11 +126,11 @@ struct PadShell: View {
                     try? await Task.sleep(nanoseconds: 60_000_000_000)
                 }
             }
-            .navigationTitle("Hub")
+            .navigationTitle(env.session.flavor == .tailors ? "Workshop" : "Hub")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        ForEach(NavCatalogue.userMenu) { item in Button(item.label) { env.navigator.go(item.route) } }
+                        ForEach(env.session.flavor.userMenu) { item in Button(item.label) { env.navigator.go(item.route) } }
                         Divider()
                         Button("Sign out", role: .destructive) { Task { unsent = await env.requestSignOut() } }
                     } label: { Image(systemName: "person.crop.circle") }
@@ -140,9 +142,12 @@ struct PadShell: View {
                     .id(nav.selection)
                     .navigationDestination(for: Route.self) { RouteView($0) }
                     .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button { env.navigator.searchPresented = true } label: { Image(systemName: "magnifyingglass") }
-                                .keyboardShortcut("k", modifiers: [.command])
+                        // Search reaches orders, customers and products: Bethany Hub's only.
+                        if env.session.flavor == .hub {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button { env.navigator.searchPresented = true } label: { Image(systemName: "magnifyingglass") }
+                                    .keyboardShortcut("k", modifiers: [.command])
+                            }
                         }
                     }
             }

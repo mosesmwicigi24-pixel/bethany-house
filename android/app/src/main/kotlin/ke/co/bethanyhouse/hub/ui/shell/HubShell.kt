@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
@@ -63,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.core.layout.WindowWidthSizeClass
 import ke.co.bethanyhouse.hub.LocalEnv
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.NavCatalogue
 import ke.co.bethanyhouse.hub.core.NavItem
 import ke.co.bethanyhouse.hub.core.Route
@@ -86,6 +88,7 @@ fun HubShell() {
     val nav = env.navigator
     val snapshot by env.session.snapshot.collectAsStateWithLifecycle()
     val width = currentWindowAdaptiveInfo().windowSizeClass.windowWidthSizeClass
+    if (!snapshot.mayUseApp) { WorkshopOnlyScreen(); return }
     LaunchedEffect(snapshot.home) { if (nav.selection == null) nav.selection = snapshot.home }
     LaunchedEffect(Unit) { env.unreadNotifications = 0 }
 
@@ -124,7 +127,7 @@ private fun PhoneShell() {
     val env = LocalEnv.current
     val nav = env.navigator
     val s = env.session.current
-    val tabs = NavCatalogue.phoneTabs(s.permissions, s.home)
+    val tabs = s.flavor.phoneTabs(s.permissions, s.home)
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     LaunchedEffect(nav.drawerOpen) { if (nav.drawerOpen) drawer.open() else drawer.close() }
@@ -161,7 +164,7 @@ private fun RailShell() {
     val env = LocalEnv.current
     val nav = env.navigator
     val s = env.session.current
-    val tabs = NavCatalogue.phoneTabs(s.permissions, s.home)
+    val tabs = s.flavor.phoneTabs(s.permissions, s.home)
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     LaunchedEffect(nav.drawerOpen) { if (nav.drawerOpen) drawer.open() else drawer.close() }
@@ -181,7 +184,7 @@ private fun RailShell() {
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { nav.searchPresented = true }) { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White) }
+                if (s.flavor == AppFlavor.HUB) IconButton(onClick = { nav.searchPresented = true }) { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White) }
             }
             Scaffold(containerColor = MaterialTheme.hub.canvas, topBar = { HubTopBar(showMenu = false, onMenu = {}) }) { padding -> CurrentScreen(Modifier.padding(padding)) }
         }
@@ -200,7 +203,8 @@ private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit) {
     val env = LocalEnv.current
     val nav = env.navigator
     val route = nav.current
-    val title = route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: "Hub"
+    val flavor = env.session.current.flavor
+    val title = route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
     TopAppBar(
         title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
@@ -208,9 +212,12 @@ private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit) {
             else if (showMenu) IconButton(onClick = onMenu) { Icon(Icons.Default.Menu, contentDescription = "Menu") }
         },
         actions = {
-            IconButton(onClick = { nav.searchPresented = true }) { Icon(Icons.Default.Search, contentDescription = "Search") }
-            BadgedBox(badge = { if (env.unreadNotifications > 0) Badge { Text(env.unreadNotifications.toString()) } }) {
-                IconButton(onClick = { nav.go(Route.Notifications) }) { Icon(Icons.Default.Notifications, contentDescription = "Notifications") }
+            // Search (orders, customers, products) and the notifications page are Bethany Hub's only.
+            if (flavor == AppFlavor.HUB) {
+                IconButton(onClick = { nav.searchPresented = true }) { Icon(Icons.Default.Search, contentDescription = "Search") }
+                BadgedBox(badge = { if (env.unreadNotifications > 0) Badge { Text(env.unreadNotifications.toString()) } }) {
+                    IconButton(onClick = { nav.go(Route.Notifications) }) { Icon(Icons.Default.Notifications, contentDescription = "Notifications") }
+                }
             }
             if (env.pendingCount > 0) Text("${env.pendingCount} queued", style = MaterialTheme.typography.labelSmall, color = Palette.amber, modifier = Modifier.padding(end = 8.dp))
         },
@@ -225,7 +232,7 @@ private fun SidebarContent() {
     val nav = env.navigator
     val s = env.session.current
     val scope = rememberCoroutineScope()
-    val groups = NavCatalogue.groups.mapNotNull { it.visible(s.permissions) }
+    val groups = s.flavor.groups(s.permissions)
     val dim = Color(0xFFB7C0D3)
     // Changes saved offline wait in this person's own store on the device and
     // are sent the next time they sign in here; never under someone else.
@@ -250,9 +257,9 @@ private fun SidebarContent() {
     )
     Column(Modifier.fillMaxHeight()) {
         Row(Modifier.padding(Space.l), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(32.dp).padding(end = 0.dp).background(Palette.brand, MaterialTheme.shapes.extraSmall).padding(6.dp), contentAlignment = Alignment.Center) { Text("BH", style = MaterialTheme.typography.labelSmall, color = Color.White) }
+            Box(Modifier.width(32.dp).padding(end = 0.dp).background(Palette.brand, MaterialTheme.shapes.extraSmall).padding(6.dp), contentAlignment = Alignment.Center) { Text(if (s.flavor == AppFlavor.TAILORS) "TH" else "BH", style = MaterialTheme.typography.labelSmall, color = Color.White) }
             Spacer(Modifier.width(Space.m))
-            Column { Text("Bethany House", style = MaterialTheme.typography.titleSmall, color = Color.White); Text(s.me?.outlet?.name ?: "Hub", style = MaterialTheme.typography.labelSmall, color = dim) }
+            Column { Text(if (s.flavor == AppFlavor.TAILORS) "Tailors Hub" else "Bethany House", style = MaterialTheme.typography.titleSmall, color = Color.White); Text(s.me?.outlet?.name ?: "Hub", style = MaterialTheme.typography.labelSmall, color = dim) }
         }
         LazyColumn(Modifier.weight(1f)) {
             groups.forEach { group ->
@@ -260,7 +267,7 @@ private fun SidebarContent() {
                 items(group.items) { item -> SidebarRow(item, selected = nav.selection == item.route) { nav.go(item.route) } }
             }
             item { HorizontalDivider(color = Palette.navBorder, modifier = Modifier.padding(vertical = Space.s)) }
-            items(NavCatalogue.userMenu) { item -> SidebarRow(item, selected = nav.selection == item.route) { nav.go(item.route) } }
+            items(s.flavor.userMenu) { item -> SidebarRow(item, selected = nav.selection == item.route) { nav.go(item.route) } }
             item {
                 ListItem(
                     headlineContent = { Text("Sign out", color = Color(0xFFFCA5A5)) },
@@ -271,6 +278,21 @@ private fun SidebarContent() {
             }
         }
         Text("${s.me?.name ?: ""} · ${s.me?.roleNames?.joinToString() ?: ""}", style = MaterialTheme.typography.labelSmall, color = dim, maxLines = 2, modifier = Modifier.padding(Space.l))
+    }
+}
+
+/** Signed in to Tailors Hub without production access. */
+@Composable
+private fun WorkshopOnlyScreen() {
+    val env = LocalEnv.current
+    val scope = rememberCoroutineScope()
+    Box(Modifier.fillMaxSize().background(MaterialTheme.hub.canvas)) {
+        ke.co.bethanyhouse.hub.ui.components.EmptyState(
+            title = "Tailors Hub is for the workshop",
+            message = "Your account has no production work. Sign in to Bethany Hub instead; it has everything your role opens.",
+            icon = Icons.Default.ContentCut,
+            actionLabel = "Sign out",
+        ) { scope.launch { env.session.signOut() } }
     }
 }
 
