@@ -282,6 +282,7 @@ export default function ProductsListPage() {
     const { can } = usePermissions();
     const canCreate = can("products.create");
     const canImport = can("products.import");
+    const canEdit = can("products.edit");
     const canDelete = can("products.delete");
 
     const params: Record<string, string> = {
@@ -361,6 +362,15 @@ export default function ProductsListPage() {
                     </p>
                 </div>
                 <div className="flex gap-2 shrink-0">
+                    {canEdit && (
+                        <button
+                            onClick={() => navigate("/catalogue/products/clips")}
+                            className="btn-secondary btn-sm"
+                            title="Upload many product clips at once"
+                        >
+                            ▶ Clips
+                        </button>
+                    )}
                     {canImport && (
                         <button
                             onClick={() => setImportOpen(true)}
