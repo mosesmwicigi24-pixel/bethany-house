@@ -426,6 +426,25 @@ The console's "Adjust price" step of 0.01 needs nothing natively: Apple never
 rounded a typed unit price, and no Swift code rounds prices to whole units
 (the #573 "prices keep two decimals" half).
 
+### Slice D: BOM cost and product media (#563), branch `apple/parity-bom-media`
+
+- **BOM cost source**: each saved BOM line says where its cost came from —
+  "last bought 3 Oct · PO-OLD-1" or "set by Super Admin, 21 Nov" (Nairobi
+  day) — and the total adds "+ N materials without a cost". A material with
+  no cost shows "No cost · set" for `inventory.adjust` (the cost is set on the
+  material, PUT `inventory/materials/{id}` `{unit_cost}`; a change past the
+  threshold comes back as a proposal and is said so), else "No cost on
+  record". `BethanyKit/BomCost.swift`, `BomCostTests` (4) on a real GET
+  `products/8/bom` from the scratch Hub: fabric bought on PO-OLD-1, buttons
+  set by hand (CHG-1), lining uncosted; total 2.5 × 400 + 8 × 6 = 1,048.
+- **Product media**: the "video but no photos" notice; a clip's type is
+  checked (MP4, MOV, M4V, WebM) and a clip longer than 6 s is flagged before
+  upload (`backend/config/video.php` `max_seconds`); an upload progress bar
+  with a percentage (`APIClient.Request.uploadProgress`, a
+  `URLSessionTaskDelegate` on `data(for:delegate:)`); a tile-sized preview of
+  the clip and "Open the clip"; photos and clips can be dropped on their
+  sections. The raw clip URL is no longer printed.
+
 ## 2026-11-20 — Parity re-check after #563–#577
 
 Fifteen commits landed on `main` after the last parity merge (#562). Each
