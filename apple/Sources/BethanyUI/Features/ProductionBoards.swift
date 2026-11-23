@@ -170,6 +170,7 @@ struct QCView: View {
 struct ProductionCalendarView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.currentRoutePath) private var currentRoutePath
+    @Environment(\.colorScheme) private var colorScheme
     @State private var schedule: Resource<JSONValue>?
     @State private var month = Date()
     @State private var selectedDay: Date?
@@ -230,9 +231,13 @@ struct ProductionCalendarView: View {
     }
 
     private func summaryTile(_ title: String, value: String, icon: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon).font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
-            Text(value).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(tint)
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon).font(.caption.weight(.semibold)).foregroundStyle(tint)
+                .frame(width: 28, height: 28).background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(value).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(Theme.text)
+                Text(title).font(.caption).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
         .padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
@@ -254,11 +259,14 @@ struct ProductionCalendarView: View {
         formatter.dateFormat = "LLLL yyyy"
         return SectionCard {
             HStack {
-                Button { changeMonth(-1) } label: { Image(systemName: "chevron.left").frame(width: 44, height: 44) }.accessibilityLabel("Previous month")
+                Button { changeMonth(-1) } label: { Image(systemName: "chevron.left").font(.caption.weight(.semibold)).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Previous month")
                 Spacer()
-                Text(formatter.string(from: start)).font(.headline)
+                VStack(spacing: 3) {
+                    Text(formatter.string(from: start)).font(.headline)
+                    Text("Production deadlines").font(.caption2).foregroundStyle(Theme.textSecondary)
+                }
                 Spacer()
-                Button { changeMonth(1) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("Next month")
+                Button { changeMonth(1) } label: { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Next month")
             }.buttonStyle(.plain)
             HStack(spacing: 12) {
                 Button("Today") { month = Date(); selectedDay = Date() }
@@ -277,20 +285,28 @@ struct ProductionCalendarView: View {
                     if let date = cal.date(byAdding: .day, value: day - 1, to: start) {
                         let count = byDay[HubDates.dayString(date)]?.count ?? 0
                         let selected = selectedDay.map { cal.isDate($0, inSameDayAs: date) } ?? false
+                        let today = cal.isDateInToday(date)
+                        let accent = colorScheme == .dark ? Theme.Palette.brandTint : Theme.Palette.brandDeep
                         Button { selectedDay = date } label: {
                             VStack(spacing: 2) {
                                 Text("\(day)").font(.subheadline.weight(selected ? .semibold : .regular)).monospacedDigit()
-                                Circle().fill(count > 0 ? (selected ? Color.white : Theme.Palette.brandDeep) : .clear).frame(width: 5, height: 5)
+                                Circle().fill(count > 0 ? (selected ? (colorScheme == .dark ? Color.black : Color.white) : accent) : .clear).frame(width: 5, height: 5)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .foregroundStyle(selected ? Color.white : Theme.text)
-                            .background(selected ? Theme.Palette.brandDeep : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                            .frame(width: 38, height: 38)
+                            .foregroundStyle(selected ? (colorScheme == .dark ? Color.black : Color.white) : Theme.text)
+                            .background(selected ? accent : Color.clear, in: RoundedRectangle(cornerRadius: 11))
+                            .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(today && !selected ? accent.opacity(0.55) : .clear, lineWidth: 1))
+                            .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(date.formatted(date: .complete, time: .omitted)), \(count) due orders")
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                     }
                 }
             }
+            Label("Dot marks a production deadline", systemImage: "circle.fill")
+                .font(.caption2).foregroundStyle(Theme.textSecondary)
+                .labelStyle(CalendarLegendStyle())
             Divider().padding(.vertical, 4)
             HStack {
                 if let selectedDay {
@@ -332,6 +348,9 @@ struct ProductionCalendarView: View {
                 Text(order["product_name"]?.string ?? "Production order").font(.subheadline.weight(.semibold))
                 Text(order["order_number"]?.string ?? "").font(.caption).foregroundStyle(Theme.textSecondary)
                 if let date = order["due_date"]?.date { HStack(spacing: 3) { Text("Due"); DateText(date, style: .date) }.font(.caption).foregroundStyle(Theme.textSecondary) }
+                if let quantity = order["quantity"]?.int, quantity > 0 {
+                    Text("\(quantity) \(quantity == 1 ? "piece" : "pieces")").font(.caption).foregroundStyle(Theme.textSecondary)
+                }
             }
             Spacer(minLength: 4)
             if let progress = order["completion_percentage"]?.int { Text("\(progress)%").font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(Theme.textSecondary) }
@@ -376,6 +395,15 @@ struct ProductionCalendarView: View {
                     DetailRow(data["stage_names"]?[key]?.string ?? "Stage \(key)", byStage[key]?.string)
                 }
             }
+        }
+    }
+}
+
+private struct CalendarLegendStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon.font(.system(size: 5)).foregroundStyle(Theme.Palette.brandDeep)
+            configuration.title
         }
     }
 }
