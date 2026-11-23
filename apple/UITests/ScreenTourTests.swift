@@ -149,7 +149,14 @@ final class ScreenTourTests: XCTestCase {
 
     @MainActor
     private func snap(_ app: XCUIApplication, _ name: String) {
+        #if os(iOS)
+        // The whole screen, which follows the device's orientation: the app's
+        // own shot came out sideways in landscape (tour run 9), showing only a
+        // square of the window with a black band beside it.
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        #else
         let shot = XCTAttachment(screenshot: app.screenshot())
+        #endif
         shot.name = name
         shot.lifetime = .keepAlways
         add(shot)
