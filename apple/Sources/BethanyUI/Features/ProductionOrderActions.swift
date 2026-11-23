@@ -297,7 +297,7 @@ struct CompleteAndStockSheet: View {
     @State private var finalQty: String
     @State private var error: APIError?
 
-    init(order: ProductionOrderRecord, onDone: @escaping (_ passed: Bool, _ notes: String) -> Void) {
+    init(order: ProductionOrderRecord, onDone: @escaping () -> Void) {
         self.order = order
         self.onDone = onDone
         _finalQty = State(initialValue: String(order.quantity))
