@@ -2,6 +2,8 @@
 
 ### Production calendar — 24 November 2026, Codex
 
+- Restyled open-stage workload rows with relevant existing production icons and task-count badges. Checked four fictional stage types on iPhone 17 Pro; an empty `by_stage` response still hides the section.
+- Reordered the production-order page so its status and actions come first, followed by stages, work instructions (notes, measurements, specifications and preferences), batches/materials, administrative details and thread. Verified the section sequence with a fictional order in the simulator. No Hub data or permission logic changed.
 - Refined calendar styling with quieter summary tiles, a today outline, selected-day contrast for light and dark appearance, a deadline legend and piece counts where provided. iPhone simulator build and sample date selection checked; dark appearance and larger text remain unverified.
 - Redesigned `ProductionBoards.swift` with a selectable month grid, due-order agenda, past-due summary and open-stage workload. Existing schedule data is scoped by the server. Tapping a card uses the permission-scoped production-order search and exact order number to resolve its ID; if lookup fails the app reports it.
 - On an iPhone 17 Pro simulator with a fictional Hub, selecting 24 November filtered the agenda to one order; tapping the sample card opened the matching order and Back returned to the calendar. No live data was changed.

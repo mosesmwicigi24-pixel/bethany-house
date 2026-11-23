@@ -27,6 +27,7 @@ struct ProductionOrderDetailView: View {
                     header(o)
                     actions(o)
                     tasks(o)
+                    workInstructions(o)
                     if !o.batches.isEmpty || canEdit(o) { batchesSection(o) }
                     MaterialSourcingPanel(orderId: orderId, closed: ["completed", "cancelled"].contains(o.status ?? ""))
                     if !o.allocations.isEmpty || r["material_requirements"]?.array?.isEmpty == false { materials(o) }
@@ -207,6 +208,34 @@ struct ProductionOrderDetailView: View {
         }
     }
 
+    @ViewBuilder private func workInstructions(_ o: ProductionOrderRecord) -> some View {
+        let measurements = MeasurementSheet.of(o.r["measurements"])
+        let notes = o.r.string("notes")
+        let specifications = o.r["specifications"]?.stringPairs ?? []
+        let preferences = o.r["customer_preferences"]?.stringPairs ?? []
+        if notes?.isEmpty == false || measurements.gender != nil || !measurements.body.isEmpty || !specifications.isEmpty || !preferences.isEmpty {
+            SectionCard("Work instructions") {
+                if let notes, !notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Notes", systemImage: "text.alignleft").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
+                        Text(notes).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(12).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
+                }
+                if measurements.gender != nil || !measurements.body.isEmpty {
+                    Text("Measurements").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        .accessibilityAddTraits(.isHeader)
+                    WorkshopMeasurements(measurements: measurements)
+                }
+                ForEach([("Specifications", specifications), ("Preferences", preferences)], id: \.0) { title, pairs in
+                    if !pairs.isEmpty {
+                        Text(title).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).textCase(.uppercase).padding(.top, 4)
+                        ForEach(pairs, id: \.0) { key, value in DetailRow(key.humanized, value) }
+                    }
+                }
+            }
+        }
+    }
+
     private func details(_ o: ProductionOrderRecord) -> some View {
         SectionCard("Details") {
             detailLine("Outlet", icon: "building.2") { Text(o.r["outlet"]?["name"]?.string ?? "—") }
@@ -214,27 +243,8 @@ struct ProductionOrderDetailView: View {
             detailLine("Created", icon: "calendar") { DateText(o.r.date("created_at")) }
             detailLine("Fitting", icon: "calendar.badge.clock") { DateText(o.r.date("fitting_date"), style: .date) }
             detailLine("Collection", icon: "bag") { DateText(o.r.date("collection_date"), style: .date) }
-            if let n = o.r.string("notes"), !n.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Notes", systemImage: "text.alignleft").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
-                    Text(n).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
-                }.padding(12).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
-            }
             if let sale = o.r["customer_order"]?["order_number"]?.string, let sid = o.r.int("customer_order_id") {
                 HStack { Text("Sales order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(sale) { env.navigator.push(.order(id: sid)) } }
-            }
-            let measurements = MeasurementSheet.of(o.r["measurements"])
-            if measurements.gender != nil || !measurements.body.isEmpty {
-                Text("Measurements").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                    .accessibilityAddTraits(.isHeader)
-                WorkshopMeasurements(measurements: measurements)
-            }
-            ForEach([("Specifications", "specifications"), ("Preferences", "customer_preferences")], id: \.0) { title, key in
-                let pairs = o.r[key]?.stringPairs ?? []
-                if !pairs.isEmpty {
-                    Text(title).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).textCase(.uppercase).padding(.top, 4)
-                    ForEach(pairs, id: \.0) { k, v in DetailRow(k.humanized, v) }
-                }
             }
         }
     }
