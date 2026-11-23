@@ -159,7 +159,7 @@ let homeSlots: [HomeSlot] = [
     HomeSlot(key: "home_promo", placement: "homepage", label: "Promo Strips", hint: "The two mid-page offer bands."),
     HomeSlot(key: "shop_hero", placement: "shop", label: "Shop Page Hero", hint: "The banner across the top of the /shop page."),
     HomeSlot(key: "home_category", placement: "homepage", label: "Category Tiles", hint: "The “Shop by category” cards."),
-    HomeSlot(key: "home_testimonial", placement: "homepage", label: "Testimonials", hint: "The “Loved at the altar” quotes."),
+    HomeSlot(key: "home_testimonial", placement: "homepage", label: "Customer Reviews", hint: "Genuine reviews only — the customer's name, their words exactly as they posted them, and their star rating. The storefront shows the first six, in this order."),
     HomeSlot(key: "home_pillar", placement: "homepage", label: "Why Bethany Pillars", hint: "The four value pillars."),
     HomeSlot(key: "home_newsletter", placement: "homepage", label: "Newsletter", hint: "The “Grace in every detail” sign-up block."),
 ]
@@ -232,6 +232,7 @@ struct BannerSlotCard: View {
                     if let img = b.string("image_url"), !img.isEmpty { SignedImage(source: img, maxHeight: 60).frame(width: 90) }
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(b.int("sort_order") ?? 0). \(b.string("title") ?? "(no title)")").font(Theme.Font.body)
+                        if slot.key == reviewSlot, let n = BannerDraft.rating(b["styles"]) { Text("\(String(repeating: "★", count: n)) · \(b["styles"]?["eyebrow"]?.string ?? "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                         if let s = b.string("subtitle") { Text(s).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).lineLimit(2) }
                         if let l = b.string("link_url") { Text("\(b.string("link_text") ?? "Link") → \(l)").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
                     }
@@ -251,20 +252,37 @@ struct BannerSlotCard: View {
     }
 }
 
+/// A customer review is a block too (console HomeContentPage, #572): title = the
+/// reviewer's name, subtitle = the review, styles.rating = stars (1–5),
+/// styles.eyebrow = where it was posted. The storefront skips a review with no
+/// valid rating (docs/HUB_STOREFRONT_ENDPOINTS.md).
+let reviewSlot = "home_testimonial"
+
 struct BannerDraft: Identifiable {
     var id: Int?
+    /// Stars for a review, "" when unset.
+    var rating = ""
     var position: String
     var placement: String
     var sortOrder: String
     var title = ""; var subtitle = ""; var linkUrl = ""; var linkText = ""; var eyebrow = ""; var theme = ""; var active = true; var openNew = false
     var styles: JSONValue = .object([:])
     var image: LocalFile?
-    init(position: String, placement: String, sortOrder: Int) { self.position = position; self.placement = placement; self.sortOrder = String(sortOrder) }
+    init(position: String, placement: String, sortOrder: Int) {
+        self.position = position; self.placement = placement; self.sortOrder = String(sortOrder)
+        if position == reviewSlot { eyebrow = "Google review"; rating = "5" }
+    }
+    /// A stored rating, only when it is a whole 1–5.
+    static func rating(_ styles: JSONValue?) -> Int? {
+        guard let d = styles?["rating"]?.double, d >= 1, d <= 5, d == d.rounded() else { return nil }
+        return Int(d)
+    }
     init(record b: Record, placement: String) {
         id = b.int("id"); position = b.string("position") ?? ""; self.placement = b.string("placement") ?? placement; sortOrder = b["sort_order"]?.string ?? "0"
         title = b.string("title") ?? ""; subtitle = b.string("subtitle") ?? ""; linkUrl = b.string("link_url") ?? ""; linkText = b.string("link_text") ?? ""
         styles = b["styles"] ?? .object([:]); eyebrow = styles["eyebrow"]?.string ?? styles["icon"]?.string ?? ""; theme = styles["theme"]?.string ?? ""
         active = b["is_active"]?.bool ?? true; openNew = b["open_in_new_tab"]?.bool ?? false
+        rating = Self.rating(styles).map(String.init) ?? ""
     }
 }
 
@@ -280,6 +298,7 @@ struct BannerSheet: View {
             var st = draft.styles.object ?? [:]
             let isProduct = draft.placement.hasPrefix("product:")
             if isProduct { st["eyebrow"] = J.sOpt(draft.eyebrow); st["icon"] = J.sOpt(draft.eyebrow) } else { st["eyebrow"] = J.sOpt(draft.eyebrow); st["theme"] = J.sOpt(draft.theme) }
+            if draft.position == reviewSlot { st["rating"] = Int(draft.rating).map { JSONValue.number(Double($0)) } }
             let body = J.obj([("position", .string(draft.position)), ("placement", .string(draft.placement)), ("sort_order", J.typed(draft.sortOrder)), ("title", J.s(draft.title)), ("subtitle", J.s(draft.subtitle)),
                 ("link_url", isProduct ? nil : J.s(draft.linkUrl)), ("link_text", isProduct ? nil : J.s(draft.linkText)), ("is_active", .bool(draft.active)), ("open_in_new_tab", isProduct ? nil : .bool(draft.openNew)), ("styles", .object(st))])
             let r: APIClient.Response
@@ -291,14 +310,22 @@ struct BannerSheet: View {
         }) { e in
             OptionPicker("Slot", $draft.position, options: slots.map { ($0.key, $0.label) })
             Field("Position (order, 1 = first)", $draft.sortOrder, error: e?.errors["sort_order"]?.first)
+            if draft.position == reviewSlot {
+                Text("Enter a real review exactly as the customer posted it — their spelling, their words. Never write or tidy one up.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                Field("Customer's name (as it appears on their review)", $draft.title, error: e?.errors["title"]?.first)
+                OptionPicker("Stars", $draft.rating, options: ["5", "4", "3", "2", "1"].map { ($0, "\(String(repeating: "★", count: Int($0)!)) (\($0))") })
+                Field("Their review (word for word, up to 2,000 characters)", $draft.subtitle, error: e?.errors["subtitle"]?.first, multiline: true)
+                Field("Where it was posted (shown under the name)", $draft.eyebrow)
+            } else {
             Field(draft.position == "product_pillar" ? "Icon (emoji)" : "Eyebrow", $draft.eyebrow)
             Field("Headline / title", $draft.title, error: e?.errors["title"]?.first)
             Field("Text / subtitle", $draft.subtitle, multiline: true)
-            if !draft.placement.hasPrefix("product:") {
+            }
+            if !draft.placement.hasPrefix("product:") && draft.position != reviewSlot {
                 Field("Link URL", $draft.linkUrl); Field("Link text", $draft.linkText); Field("Theme", $draft.theme)
                 ToggleRow("Open link in a new tab", $draft.openNew)
             }
-            HStack { AttachFileButton(label: draft.image?.name ?? "Choose image (jpeg/png/webp ≤5MB)") { draft.image = $0 } }
+            if draft.position != reviewSlot { HStack { AttachFileButton(label: draft.image?.name ?? "Choose image (jpeg/png/webp ≤5MB)") { draft.image = $0 } } }
             ToggleRow("Active", $draft.active)
         }
     }
