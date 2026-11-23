@@ -42,6 +42,8 @@ struct MaterialsView: View {
                     ModuleRowCard(action: { selected = m }) {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack { Text(m.string("name") ?? "Material").font(Theme.Font.body.weight(.semibold)); StatusBadge(m.string("stock_status"), tone: stockTone(m.string("stock_status"))); if m["is_active"]?.bool == false { StatusBadge("inactive", tone: .neutral) } }
+                            // Production jobs waiting to buy it with no supplier to order from (procurement only, #573).
+                            if let n = m["needs_supplier"]?.double, n > 0 { StatusBadge("\(quantityText(m["needs_supplier"])) \(m.string("unit_of_measure") ?? "") to buy · set a supplier", tone: .amber) }
                             Text([m.string("code"), m.string("category")].compactMap { $0 }.joined(separator: " · ")).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                             HStack {
                                 Text("\(quantityText(m["total_stock"])) \(m.string("unit_of_measure") ?? "") on hand · reorder at \(quantityText(m["reorder_point"]))").font(Theme.Font.secondary).monospacedDigit()
@@ -90,7 +92,12 @@ struct MaterialFormSheet: View {
     @State private var unitCost: String
     @State private var reorder: String
     @State private var active: Bool
+    /// "Bought from" (#573): procurement sees and sets it; production needs go onto this supplier's draft.
+    @State private var supplierId: Int?
+    @State private var suppliers: [Record] = []
     @State private var error: APIError?
+    private var canSetSupplier: Bool { material != nil && env.session.can("procurement.create") }
+    private var savedSupplierId: Int? { material?["preferred_supplier"]?["id"]?.int }
 
     init(material: Record?, onSaved: @escaping () -> Void) {
         self.material = material
@@ -103,6 +110,7 @@ struct MaterialFormSheet: View {
         _unitCost = State(initialValue: material?["unit_cost"]?.string ?? "")
         _reorder = State(initialValue: material?["reorder_point"]?.string ?? "")
         _active = State(initialValue: material?["is_active"]?.bool ?? true)
+        _supplierId = State(initialValue: material?["preferred_supplier"]?["id"]?.int)
     }
 
     private var valid: Bool { !code.isEmpty && !name.isEmpty && !uom.isEmpty && (material != nil || !env.session.canViewCost || JSONValue.decimal(unitCost) != nil) }
@@ -122,15 +130,30 @@ struct MaterialFormSheet: View {
                 }
                 ModuleField("Reorder point", error: error?.errors["reorder_point"]?.first) { TextField("0", text: $reorder).textFieldStyle(.roundedBorder) }
             }
+            if canSetSupplier {
+                ModuleField("Bought from", error: error?.errors["preferred_supplier_id"]?.first) {
+                    Picker("Bought from", selection: $supplierId) {
+                        Text("No supplier set (last supplier used, if any)").tag(Int?.none)
+                        ForEach(suppliers) { s in Text(s.string("name") ?? "").tag(s.int("id")) }
+                    }
+                }
+                Text((material?["needs_supplier"]?.double ?? 0) > 0
+                     ? "Production jobs are waiting to buy \(quantityText(material?["needs_supplier"])) \(material?.string("unit_of_measure") ?? ""). Choosing a supplier adds it to their draft purchase order."
+                     : "Production needs for this material go onto this supplier's open draft purchase order. Only procurement sees this.")
+                    .font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            }
             if env.session.canViewCost, material != nil { Text("A unit-cost change past 5% comes back as a proposal for approval rather than applying at once.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
             Toggle("Active", isOn: $active)
         }
+        .task { if canSetSupplier { suppliers = (try? await env.session.client.get("/v1/admin/suppliers", query: ["per_page": "200"]).json?["data"]?.array?.map(Record.init(json:))) ?? [] } }
     }
 
     private func submit() async {
         var body: [String: JSONValue] = ["code": .string(code), "name": .string(name), "description": .str(description), "category": .str(category), "unit_of_measure": .string(uom), "is_active": .bool(active)]
         if let rp = JSONValue.decimal(reorder) { body["reorder_point"] = rp }
         if env.session.canViewCost, let uc = JSONValue.decimal(unitCost) { body["unit_cost"] = uc }
+        // Sent only when changed: the server refuses the field without procurement.create.
+        if canSetSupplier, supplierId != savedSupplierId { body["preferred_supplier_id"] = supplierId.map { .number(Double($0)) } ?? .null }
         do {
             let r: APIClient.Response
             if let m = material { r = try await env.session.client.put("/v1/admin/inventory/materials/\(m.id)", json: .object(body)) }

@@ -28,6 +28,7 @@ struct ProductionOrderDetailView: View {
                     actions(o)
                     tasks(o)
                     if !o.batches.isEmpty || canEdit(o) { batchesSection(o) }
+                    MaterialSourcingPanel(orderId: orderId, closed: ["completed", "cancelled"].contains(o.status ?? ""))
                     if !o.allocations.isEmpty || r["material_requirements"]?.array?.isEmpty == false { materials(o) }
                     details(o)
                     ProductionMessagesSection(orderId: orderId)
