@@ -2,7 +2,7 @@
 
 ### In progress — 23 November 2026, Codex
 
-- Refining the Apple production-order Details and Thread UI in `ProductionOrderDetail.swift`; preserving existing Hub APIs and permissions. Claude has claimed Android offline files separately.
+- Refining the Apple production-order Details and Thread UI in `ProductionOrderDetail.swift`, and reviewing the time-clock UI in `MeFeatureClock.swift` against the Hub; preserving existing Hub APIs and permissions. Claude has claimed Android offline files separately.
 
 ### iPhone simulator review — 23 November 2026
 
