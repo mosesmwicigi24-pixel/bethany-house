@@ -87,7 +87,7 @@ struct PurchaseOrdersView: View {
                 HStack(spacing: Theme.Space.s) {
                     ModuleSearchField(text: $search, placeholder: "PO number") { Task { await reload() } }
                     Picker("Status", selection: $status) { Text("Any status").tag(""); ForEach(POStatus.all, id: \.self) { Text($0.humanized).tag($0) } }.frame(maxWidth: 180)
-                    if let suppliers { LookupPicker(label: "Supplier", lookup: suppliers, selection: $supplierId).frame(maxWidth: 200) }
+                    if let suppliers { LookupPicker(label: "Supplier", lookup: suppliers, selection: $supplierId, none: "All suppliers").frame(maxWidth: 200) }
                     if env.session.can("procurement.pay") || env.session.can("reports.financial") { Button { showPayables = true } label: { Label("Payables", systemImage: "banknote") } }
                     if env.session.can("procurement.create") { Button { showCreate = true } label: { Label("New", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) }
                 }

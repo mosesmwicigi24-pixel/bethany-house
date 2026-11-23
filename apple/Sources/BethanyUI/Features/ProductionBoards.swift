@@ -23,7 +23,7 @@ struct WIPBoardView: View {
         Page("Work In Progress", subtitle: "Live view of orders moving through the floor") {
             HStack {
                 if env.session.can("production.manage_assignees"), let people {
-                    LookupPicker(label: "Everyone", lookup: people, selection: $personId).frame(maxWidth: 260)
+                    LookupPicker(label: "Person", lookup: people, selection: $personId, none: "Everyone").frame(maxWidth: 260)
                         .onChange(of: personId) { _, id in Task { await loadPerson(id) } }
                 }
                 Spacer()
@@ -264,7 +264,7 @@ struct BomView: View {
         Page("Bill of Materials", subtitle: "What each garment is made of") {
             if let products {
                 HStack {
-                    LookupPicker(label: "Product", lookup: products, selection: $productId).frame(maxWidth: 360)
+                    LookupPicker(label: "Product", lookup: products, selection: $productId, none: "Choose a product").frame(maxWidth: 360)
                     Spacer()
                     if let pid = productId, env.session.can("bom.edit") {
                         Button { editing = BomEdit(productId: pid, bom: nil) } label: { Label("New version", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)

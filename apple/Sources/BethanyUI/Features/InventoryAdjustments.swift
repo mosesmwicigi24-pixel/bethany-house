@@ -43,7 +43,7 @@ struct AdjustmentsView: View {
                 HStack(spacing: Theme.Space.s) {
                     ModuleSearchField(text: $search, placeholder: "SKU or product") { Task { await reload() } }
                     Picker("Status", selection: $status) { Text("Any status").tag(""); Text("Awaiting approval").tag("pending_approval"); Text("Approved").tag("approved"); Text("Rejected").tag("rejected") }.frame(maxWidth: 190)
-                    if let outlets { LookupPicker(label: "Outlet", lookup: outlets, selection: $outletId).frame(maxWidth: 180) }
+                    if let outlets { LookupPicker(label: "Outlet", lookup: outlets, selection: $outletId, none: "All outlets").frame(maxWidth: 180) }
                     if env.session.can("inventory.adjust") { Button { showNew = true } label: { Label("New", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) }
                 }
                 RecordListView(list, emptyTitle: "No adjustments match", emptySymbol: "slider.horizontal.3") { r in
