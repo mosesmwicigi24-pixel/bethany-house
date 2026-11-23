@@ -114,6 +114,7 @@ struct ShippingView: View {
             RemoteJSON("/v1/admin/shipping/zones", version: version) { zj, reload in
                 let zones = zj.listRecords
                 HStack { Text("Zones").font(Theme.Font.sectionTitle); Spacer(); if canEdit { Button { zone = ZoneDraft() } label: { Label("New zone", systemImage: "plus") } } }
+                if zones.isEmpty { EmptyState("No zones yet", message: "A zone groups the countries one set of delivery prices applies to.", symbol: "map") }
                 ForEach(zones) { z in
                     SupportListRow(z.string("name") ?? "", subtitle: "\(z.string("description") ?? "") · \((z["countries"]?.array ?? []).compactMap(\.string).joined(separator: ", "))") {
                         HStack {
@@ -127,6 +128,7 @@ struct ShippingView: View {
                 }
                 RemoteJSON("/v1/admin/shipping/methods", version: version) { mj, reloadM in
                     HStack { Text("Methods").font(Theme.Font.sectionTitle); Spacer(); if canEdit { Button { method = MethodDraft(zoneId: zones.first?.int("id")) } label: { Label("New method", systemImage: "plus") } } }
+                    if mj.listRecords.isEmpty { EmptyState("No delivery methods yet", message: zones.isEmpty ? "Add a zone first; each method prices delivery in one zone." : "A method prices delivery in a zone: flat, percentage or free.", symbol: "shippingbox") }
                     ForEach(mj.listRecords) { m in
                         SupportListRow("\(m.string("name") ?? "") · \(m.string("zone_name") ?? zones.first { $0.int("id") == m.int("shipping_zone_id") }?.string("name") ?? "zone \(m.int("shipping_zone_id") ?? 0)")", subtitle: "\(m.string("cost_type")?.humanized ?? "") \(m.string("cost_type") == "free" ? "" : (m["flat_rate"]?.string ?? ""))\(m.string("cost_type") == "percentage" ? "%" : "")\(m["min_order_amount"]?.string.map { " · min order \($0)" } ?? "") · \(m.string("delivery_time") ?? "")") {
                             HStack {
