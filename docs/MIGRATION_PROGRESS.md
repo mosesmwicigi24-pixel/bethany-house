@@ -390,6 +390,88 @@ builds (#561's log, `sort -u`). Every one is fixed at its cause, not hidden:
 
 Verification is the Apple CI build's warning count on this branch.
 
+### Slice C: material sourcing (#573), branch `apple/parity-material-sourcing`
+
+- `BethanyKit/MaterialSourcing.swift` mirrors the console's
+  `components/production/MaterialSourcing.tsx`: default (store when it has
+  enough, else buy), split (starts at what is free, short of the whole need),
+  the three refusals ("Only 1 m free in the store.", "Enter how much comes
+  from the store.", "Less than 16 pcs, or choose From store."), the payload,
+  the "On raising: …" summary, the raise toast, and the job's state (status,
+  what is outstanding, free + what the job already holds, the current
+  decision as choices). `MaterialSourcingTests` (6) on real answers from the
+  scratch Hub, seeded as backend `MaterialSourcingTest` (2 shirts = 5 m fabric
+  + 16 buttons; store 1 m and 120).
+- **Send to production** (`RaiseProductionSheet`): GET
+  `orders/{id}/items/{itemId}/production-materials`, a From store / To buy /
+  Split row per material, `materials` sent with the raise; blocked while
+  loading or when a row is refused; the console's empty-BOM and load-failure
+  wording. Scratch Hub: fabric 1 + 4, buttons 16 + 0 was accepted, answer
+  `materials_status: "waiting"`.
+- **Production job**: "Where the materials come from" panel (GET/POST
+  `production-orders/{id}/material-sourcing`), status chip, per-material
+  issued / reserved / being bought / not yet sourced; "Choose sources" /
+  "Change" for `production.raise_order` or `production.manage_assignees`
+  while the job is open. Scratch Hub refused 5 m from store with "White
+  cotton fabric: only 0 m free in the store."
+- **Purchase order lines**: the job and customer order a material line was
+  raised for, "job cancelled", and "Move to another supplier" on a draft for
+  `procurement.create` (POST `…/items/{itemId}/move`), then opens the order
+  the line joined. Scratch Hub: "Line moved to PO-20261121-0002."
+- **Raw materials**: "N m to buy · set a supplier" on the list
+  (`needs_supplier`, sent to procurement only) and "Bought from" on edit for
+  `procurement.create`, sent only when changed.
+
+The console's "Adjust price" step of 0.01 needs nothing natively: Apple never
+rounded a typed unit price, and no Swift code rounds prices to whole units
+(the #573 "prices keep two decimals" half).
+
+### Slice D: BOM cost and product media (#563), branch `apple/parity-bom-media`
+
+- **BOM cost source**: each saved BOM line says where its cost came from —
+  "last bought 3 Oct · PO-OLD-1" or "set by Super Admin, 21 Nov" (Nairobi
+  day) — and the total adds "+ N materials without a cost". A material with
+  no cost shows "No cost · set" for `inventory.adjust` (the cost is set on the
+  material, PUT `inventory/materials/{id}` `{unit_cost}`; a change past the
+  threshold comes back as a proposal and is said so), else "No cost on
+  record". `BethanyKit/BomCost.swift`, `BomCostTests` (4) on a real GET
+  `products/8/bom` from the scratch Hub: fabric bought on PO-OLD-1, buttons
+  set by hand (CHG-1), lining uncosted; total 2.5 × 400 + 8 × 6 = 1,048.
+- **Product media**: the "video but no photos" notice; a clip's type is
+  checked (MP4, MOV, M4V, WebM) and a clip longer than 6 s is flagged before
+  upload (`backend/config/video.php` `max_seconds`); an upload progress bar
+  with a percentage (`APIClient.Request.uploadProgress`, a
+  `URLSessionTaskDelegate` on `data(for:delegate:)`); a tile-sized preview of
+  the clip and "Open the clip"; photos and clips can be dropped on their
+  sections. The raw clip URL is no longer printed.
+
+### Slice B: quotation pricing (#566), branch `apple/parity-quote-pricing`
+
+The money-path gap: the native picker showed a product's KES base price and
+left the unit price to be typed, so on a USD quotation "22,000" could be
+entered under a dollar label — the defect #566 fixed in the console.
+
+- `BethanyKit/QuotePricing.swift`: a picked product's line is priced by
+  POST /quotations/reprice `{from: "KES", to: <quote currency>}` with the
+  search's KES base price (sale, else list); the line takes the server's
+  answer; `kept` lines are flagged "No USD price on the hub — type it."; a
+  failed request sets 0 and flags it. `QuotePricingTests` (5) on real
+  answers from the scratch Hub: product 4 → USD 171.50 (its own USD price,
+  not 22,000); KES 10 → USD 0.10 (cents kept); ZMW converted at 0.14
+  (22,000 → 3,080, worked by hand). The `kept` fixture is the controller's
+  shape, not captured (every scratch currency has a pricing rate).
+- Quotation builder: Save waits while lines are pricing; the currency picker
+  and "Add products" are disabled while repricing; the unit-price field names
+  the currency.
+- `QuotationProductPicker`: tick several, "Add N to the quotation", "on the
+  quote" tag, no prices shown — the console's `ProductMultiPicker`. The
+  order-items picker is unchanged.
+
+Not ported, on purpose: the console's live "subtotal + shipping" on the form
+(native keeps "computed by the server when saved" — no client money
+arithmetic), and typing a product name on a free line to pick a product (the
+picker covers it).
+
 ## 2026-11-20 — Parity re-check after #563–#577
 
 Fifteen commits landed on `main` after the last parity merge (#562). Each
@@ -451,82 +533,41 @@ the React console; outside this migration's scope as the console defines it.
 Checks: Linux kit tests (62 in the scratch package, incl. the 4 new) pass;
 `swiftc -parse` on every edited UI file; the macOS build and full kit suite
 are Apple CI's.
-### Slice B: quotation pricing (#566), branch `apple/parity-quote-pricing`
 
-The money-path gap: the native picker showed a product's KES base price and
-left the unit price to be typed, so on a USD quotation "22,000" could be
-entered under a dollar label — the defect #566 fixed in the console.
+### 2026-11-23 — screen tour on Mac and iPad (branch `apple/ui-tour`)
 
-- `BethanyKit/QuotePricing.swift`: a picked product's line is priced by
-  POST /quotations/reprice `{from: "KES", to: <quote currency>}` with the
-  search's KES base price (sale, else list); the line takes the server's
-  answer; `kept` lines are flagged "No USD price on the hub — type it."; a
-  failed request sets 0 and flags it. `QuotePricingTests` (5) on real
-  answers from the scratch Hub: product 4 → USD 171.50 (its own USD price,
-  not 22,000); KES 10 → USD 0.10 (cents kept); ZMW converted at 0.14
-  (22,000 → 3,080, worked by hand). The `kept` fixture is the controller's
-  shape, not captured (every scratch currency has a pricing rate).
-- Quotation builder: Save waits while lines are pricing; the currency picker
-  and "Add products" are disabled while repricing; the unit-price field names
-  the currency.
-- `QuotationProductPicker`: tick several, "Add N to the quotation", "on the
-  quote" tag, no prices shown — the console's `ProductMultiPicker`. The
-  order-items picker is unchanged.
+A UI test (`apple/UITests/ScreenTourTests.swift`, CI job "UI tour" in
+`.github/workflows/apple-ui.yml`) signs in to a throwaway Hub seeded with test
+data only (`apple/UITests/Fixtures`), opens all 100 sidebar screens and four
+record pages on macOS and on an iPad Pro 13" simulator, keeps a screenshot of
+each, and fails on "Something went wrong", "Can't reach Bethany House", a
+sign-out or a screen the app did not open. It never presses a button that
+changes a record. The test Hub runs PHP 8.3, as production (`backend/Dockerfile`).
 
-Not ported, on purpose: the console's live "subtotal + shipping" on the form
-(native keeps "computed by the server when saved" — no client money
-arithmetic), and typing a product name on a free line to pick a product (the
-picker covers it).
-### Slice C: material sourcing (#573), branch `apple/parity-material-sourcing`
+Evidence: tour run 45261956629 (2026-11-23), both jobs green; every
+screenshot reviewed by eye.
 
-- `BethanyKit/MaterialSourcing.swift` mirrors the console's
-  `components/production/MaterialSourcing.tsx`: default (store when it has
-  enough, else buy), split (starts at what is free, short of the whole need),
-  the three refusals ("Only 1 m free in the store.", "Enter how much comes
-  from the store.", "Less than 16 pcs, or choose From store."), the payload,
-  the "On raising: …" summary, the raise toast, and the job's state (status,
-  what is outstanding, free + what the job already holds, the current
-  decision as choices). `MaterialSourcingTests` (6) on real answers from the
-  scratch Hub, seeded as backend `MaterialSourcingTest` (2 shirts = 5 m fabric
-  + 16 buttons; store 1 m and 120).
-- **Send to production** (`RaiseProductionSheet`): GET
-  `orders/{id}/items/{itemId}/production-materials`, a From store / To buy /
-  Split row per material, `materials` sent with the raise; blocked while
-  loading or when a row is refused; the console's empty-BOM and load-failure
-  wording. Scratch Hub: fabric 1 + 4, buttons 16 + 0 was accepted, answer
-  `materials_status: "waiting"`.
-- **Production job**: "Where the materials come from" panel (GET/POST
-  `production-orders/{id}/material-sourcing`), status chip, per-material
-  issued / reserved / being bought / not yet sourced; "Choose sources" /
-  "Change" for `production.raise_order` or `production.manage_assignees`
-  while the job is open. Scratch Hub refused 5 m from store with "White
-  cotton fabric: only 0 m free in the store."
-- **Purchase order lines**: the job and customer order a material line was
-  raised for, "job cancelled", and "Move to another supplier" on a draft for
-  `procurement.create` (POST `…/items/{itemId}/move`), then opens the order
-  the line joined. Scratch Hub: "Line moved to PO-20261121-0002."
-- **Raw materials**: "N m to buy · set a supplier" on the list
-  (`needs_supplier`, sent to procurement only) and "Bought from" on edit for
-  `procurement.create`, sent only when changed.
+Found by the tour and fixed (Apple code only; Laravel unchanged):
+- A request racing a token renewal signed the person out.
+- Records opened from another section (a production order from Sales, a
+  product from a purchase order) showed the list, or a blank page on the
+  iPad. The navigator now shows the section first and opens the record once
+  its stack is on screen; the outgoing stack's last write is ignored.
+- Order channels read POS / Web / Chat (by source) / Quoted, as the console's
+  `OrderRow.tsx` (`OrderChannelLabel`, with tests).
+- Low Stock Alerts: product 3 and material 3 shared a row identity, so one
+  item showed twice and another not at all.
+- Clock in showed "(kCLErrorDomain error 1.)"; location failures now read as
+  words, and "denied" shows the existing Settings notice (with tests).
+- Filter pickers said "—" on the iPad (label hidden); they now say "All
+  outlets", "All suppliers", "Everyone", "Choose a product".
+- Empty Countries, Shipping and Production stages pages say why they are empty;
+  the calendar's earliest-free-slot tile no longer truncates.
 
-The console's "Adjust price" step of 0.01 needs nothing natively: Apple never
-rounded a typed unit price, and no Swift code rounds prices to whole units
-(the #573 "prices keep two decimals" half).
-### Slice D: BOM cost and product media (#563), branch `apple/parity-bom-media`
+Checked and correct by design: Balances lists only part-paid or deposit till
+orders (Laravel `outstandingBalances`); P&L COGS shows KES 0 and discloses "3
+lines without a cost snapshot".
 
-- **BOM cost source**: each saved BOM line says where its cost came from —
-  "last bought 3 Oct · PO-OLD-1" or "set by Super Admin, 21 Nov" (Nairobi
-  day) — and the total adds "+ N materials without a cost". A material with
-  no cost shows "No cost · set" for `inventory.adjust` (the cost is set on the
-  material, PUT `inventory/materials/{id}` `{unit_cost}`; a change past the
-  threshold comes back as a proposal and is said so), else "No cost on
-  record". `BethanyKit/BomCost.swift`, `BomCostTests` (4) on a real GET
-  `products/8/bom` from the scratch Hub: fabric bought on PO-OLD-1, buttons
-  set by hand (CHG-1), lining uncosted; total 2.5 × 400 + 8 × 6 = 1,048.
-- **Product media**: the "video but no photos" notice; a clip's type is
-  checked (MP4, MOV, M4V, WebM) and a clip longer than 6 s is flagged before
-  upload (`backend/config/video.php` `max_seconds`); an upload progress bar
-  with a percentage (`APIClient.Request.uploadProgress`, a
-  `URLSessionTaskDelegate` on `data(for:delegate:)`); a tile-sized preview of
-  the clip and "Open the clip"; photos and clips can be dropped on their
-  sections. The raw clip URL is no longer printed.
+Not proven: two record jumps within a second on the iPad once left the detail
+column blank (tour run 12, caused by a repeated key in the test). A person is
+unlikely to do this; check by tapping two notifications quickly on an iPad.

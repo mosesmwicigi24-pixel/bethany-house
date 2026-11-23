@@ -22,7 +22,7 @@ public struct CommandPalette: View {
     }
 
     private var pages: [NavItem] {
-        let all = NavCatalogue.groups.compactMap { $0.visible(for: env.session.permissions) }.flatMap(\.items) + NavCatalogue.userMenu
+        let all = env.session.flavor.groups(for: env.session.permissions).flatMap(\.items) + env.session.flavor.userMenu
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return Array(all.prefix(12)) }
         return all.filter { $0.label.lowercased().contains(q) }

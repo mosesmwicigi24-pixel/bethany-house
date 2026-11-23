@@ -20,7 +20,19 @@ import ke.co.bethanyhouse.hub.ui.features.Features
 @Composable
 fun RouteScreen(route: Route) {
     val env = LocalEnv.current
-    val gate = NavCatalogue.item(route)?.gate
+    val flavor = env.session.current.flavor
+    if (!flavor.allows(route)) {
+        // Tailors Hub does not carry this screen (reached by a link, a push tap
+        // or a button inside another screen). Never the website fallback.
+        EmptyState(
+            title = "This page is in Bethany Hub",
+            message = "${flavor.appName} has the workshop, your time and pay, and messages. Open Bethany Hub for everything else.",
+            icon = Icons.Default.Lock,
+            actionLabel = "Go home",
+        ) { env.navigator.go(env.session.current.home) }
+        return
+    }
+    val gate = NavCatalogue.gate(route)
     if (gate != null && !env.session.current.allows(gate)) {
         EmptyState(
             title = "You don't have access to this page",

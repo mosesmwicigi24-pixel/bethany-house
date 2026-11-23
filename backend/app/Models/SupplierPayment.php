@@ -15,7 +15,12 @@ class SupplierPayment extends Model
     /** 'im_bank' = paid from the business's I&M Bank account (owner,
      *  2026-11-14), so the bank is on the record rather than in a note;
      *  'bank_transfer' stays for any other bank. */
-    public const METHODS = ['mpesa', 'cash', 'im_bank', 'bank_transfer', 'cheque', 'card', 'other'];
+    public const METHODS = ['mpesa', 'cash', 'im_bank', 'bank_transfer', 'cheque', 'card', 'other', self::PRE_RECORDS];
+
+    /** Paid before the hub kept supplier payments (owner, 2026-11-23): the
+     *  order really was paid, how is no longer on record. Says so, rather
+     *  than a made-up M-PESA or bank reference. Needs no reference. */
+    public const PRE_RECORDS = 'pre_records';
 
     /** Methods that leave a trail the reference must name. */
     public const NEEDS_REFERENCE = ['im_bank', 'bank_transfer', 'mpesa', 'cheque', 'card'];

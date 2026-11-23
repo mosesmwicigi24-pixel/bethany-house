@@ -10,6 +10,7 @@ struct NewSpaceSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     let store: CommsStore
+    let open: (Int) -> Void
     @State private var name = ""
     @State private var desc = ""
     @State private var isPrivate = false
@@ -23,7 +24,7 @@ struct NewSpaceSheet: View {
             let r = try await env.session.client.post("/v1/admin/channels", json: J.obj([
                 ("name", .string(name)), ("description", J.sOpt(desc)), ("is_private", .bool(isPrivate)), ("member_ids", J.ints(Array(members))),
             ]))
-            if let c = r.json?["channel"] { let ch = ChatChannel(json: c); store.upsert(ch); store.selectedId = ch.id }
+            if let c = r.json?["channel"] { let ch = ChatChannel(json: c); store.upsert(ch); open(ch.id) }
             env.toasts.show("Space created")
         }) { e in
             Field("Name", $name, placeholder: "Front counter", error: e?.errors["name"]?.first)
@@ -82,6 +83,7 @@ struct NewDMSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     let store: CommsStore
+    let open: (Int) -> Void
     @State private var staff: [StaffOption] = []
     @State private var filter = ""
 
@@ -105,9 +107,6 @@ struct NewDMSheet: View {
         .task { staff = (try? await fetchStaffOptions(env)) ?? [] }
     }
 
-    private func open(_ id: Int) {
-        if LayoutProbe.isWide { store.selectedId = id } else { env.navigator.push(.comms(channelId: id)) }
-    }
 }
 
 // MARK: - Details column (GET /channels/{id}; PATCH; members; DELETE; dismiss)

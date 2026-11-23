@@ -74,6 +74,9 @@ const ProductsPage = lazy(
 const ProductFormPage = lazy(
     () => import("@/pages/catalogue/products/ProductFormPage"),
 );
+const BulkClipsPage = lazy(
+    () => import("@/pages/catalogue/products/BulkClipsPage"),
+);
 
 // --- Inventory -────────────────────────────────────────────────────────
 const StockLevelsPage = lazy(() => import("@/pages/inventory/StockLevelsPage"));
@@ -1311,6 +1314,16 @@ export default function App() {
                                 <ProtectedRoute permission="products.create">
                                 <Suspense fallback={<PageLoader />}>
                                     <ProductFormPage />
+                                </Suspense>
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/catalogue/products/clips"
+                            element={
+                                <ProtectedRoute permission="products.edit">
+                                <Suspense fallback={<PageLoader />}>
+                                    <BulkClipsPage />
                                 </Suspense>
                                 </ProtectedRoute>
                             }

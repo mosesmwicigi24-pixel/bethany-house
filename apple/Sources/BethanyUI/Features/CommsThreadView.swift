@@ -201,8 +201,10 @@ final class ThreadStore {
 
 struct ThreadView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @Bindable var store: CommsStore
     let channel: ChatChannel
+    let isWide: Bool
     @State private var thread: ThreadStore?
     @State private var forwarding: ChatMessage?
     @State private var assisting = false
@@ -216,8 +218,10 @@ struct ThreadView: View {
                 if !thread.typing.isEmpty {
                     Text("\(thread.typing.joined(separator: ", ")) \(thread.typing.count == 1 ? "is" : "are") typing…").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary).padding(.horizontal, Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Divider()
-                Composer(thread: thread)
+                if thread.state.value != nil {
+                    Divider()
+                    Composer(thread: thread)
+                }
             } else {
                 LoadingSkeleton()
             }
@@ -226,7 +230,7 @@ struct ThreadView: View {
             let t = ThreadStore(env: env, channelId: channel.id)
             thread = t
             await t.load()
-            store.markRead(channel.id)
+            if thread?.state.value != nil { store.markRead(channel.id) }
         }
         .onDisappear { Task { await thread?.stop() } }
         .sheet(item: $forwarding) { m in ForwardSheet(store: store, thread: thread, message: m) }
@@ -236,23 +240,55 @@ struct ThreadView: View {
     }
 
     private var header: some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: channel.symbol).foregroundStyle(Theme.Palette.brandDeep)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(channel.name).font(Theme.Font.sectionTitle).lineLimit(1)
-                if let d = channel.description, !d.isEmpty { Text(d).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).lineLimit(1) }
-                else if !channel.isDM { Text("\(channel.memberCount) members").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Image(systemName: channel.symbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.Palette.brandDeep)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.Palette.brand.opacity(0.10), in: RoundedRectangle(cornerRadius: 9))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    if let label = channel.contextLabel {
+                        Text(label).font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
+                    }
+                    Text(channel.name).font(.headline).accessibilityAddTraits(.isHeader)
+                    if let description = channel.description, !description.isEmpty {
+                        Text(description).font(.caption).foregroundStyle(Theme.textSecondary)
+                    }
+                    if !channel.isDM {
+                        Text(channel.memberCount == 1 ? "1 member" : "\(channel.memberCount) members")
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
-            if store.attention.waitsOnMe(channel.id) {
-                AsyncButton(action: { await store.acknowledge(channel.id) }) { Label("Handled", systemImage: "checkmark.circle") }
+            HStack(spacing: 10) {
+                if let route = channel.contextRoute, env.session.flavor.allows(route),
+                   NavCatalogue.item(for: route).map({ env.session.allows($0.gate) }) ?? true {
+                    Button {
+                        if let currentRoutePath { currentRoutePath.wrappedValue.append(route) }
+                        else { env.navigator.go(route) }
+                    } label: { Label("Open record", systemImage: "arrow.up.right.square") }
+                }
+                if store.attention.waitsOnMe(channel.id) {
+                    AsyncButton(action: { await store.acknowledge(channel.id) }) {
+                        Label("Handled", systemImage: "checkmark.circle")
+                    }
                     .help("Nothing here needs your reply.")
+                }
+                Spacer(minLength: 0)
+                Button { assisting = true } label: { Label("Assist", systemImage: "sparkles").labelStyle(.iconOnly) }
+                    .accessibilityLabel("Assist")
+                if isWide {
+                    Button { store.showDetails.toggle() } label: { Image(systemName: "info.circle") }
+                        .accessibilityLabel("Conversation details")
+                }
             }
-            Button { assisting = true } label: { Label("Assist", systemImage: "sparkles") }
-            if let r = channel.contextRoute { Button { env.navigator.go(r) } label: { Label("Open record", systemImage: "arrow.up.right.square") } }
-            Button { store.showDetails.toggle() } label: { Image(systemName: "info.circle") }
+            .font(.subheadline)
         }
         .padding(Theme.Space.m)
+        .background(Theme.card)
     }
 }
 
@@ -265,7 +301,17 @@ struct MessagesList: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                     if thread.hasMore { Button("Load earlier messages") { Task { await thread.loadOlder() } }.font(Theme.Font.caption).frame(maxWidth: .infinity) }
-                    if case .failed(let e, nil) = thread.state { ErrorState(e, retry: { Task { await thread.load() } }) }
+                    if thread.messages.isEmpty {
+                        switch thread.state {
+                        case .idle, .loading:
+                            ProgressView().frame(maxWidth: .infinity).padding()
+                        case .loaded:
+                            EmptyState("No messages yet", message: "Messages for this conversation will appear here.", symbol: "bubble.left")
+                                .frame(maxWidth: .infinity)
+                        case .failed(let error, _):
+                            ErrorState(error, retry: { Task { await thread.load() } })
+                        }
+                    }
                     ForEach(thread.messages) { m in
                         MessageRow(thread: thread, message: m, forward: { forwarding = m }).id(m.id)
                     }

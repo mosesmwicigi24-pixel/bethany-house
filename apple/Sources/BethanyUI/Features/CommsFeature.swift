@@ -3,7 +3,7 @@ import BethanyKit
 
 /// Messages (Phase 3 channels): spaces, DMs and order/production threads.
 /// macOS and iPad show three columns (channels | thread | details); iPhone
-/// stacks them through the navigator (`.comms(channelId:)`).
+/// opens conversations in the active tab's navigation stack.
 @MainActor
 public enum CommsFeature {
     public static func register() {
@@ -32,6 +32,13 @@ struct ChatChannel: Identifiable, Hashable, Sendable {
     var memberCount: Int { json["members"]?.int ?? members.count }
     var isDM: Bool { type == "dm" }
     var isContext: Bool { contextType != nil }
+    var contextLabel: String? {
+        switch contextType {
+        case "production_order": return "Production order"
+        case "order": return "Sales order"
+        default: return nil
+        }
+    }
     var symbol: String { isDM ? "person" : (isContext ? (contextType == "order" ? "bag" : "hammer") : (isPrivate ? "lock" : "number")) }
     var contextRoute: Route? {
         guard let cid = contextId else { return nil }
@@ -221,6 +228,7 @@ struct CommsView: View {
     @Environment(AppEnvironment.self) private var env
     let initialChannelId: Int?
     @State private var store: CommsStore?
+    @State private var channelError: APIError?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var hSize
     #endif
@@ -238,10 +246,10 @@ struct CommsView: View {
             if let store {
                 if isWide {
                     HStack(spacing: 0) {
-                        ChannelListView(store: store).frame(width: 300)
+                        ChannelListView(store: store, isWide: true).frame(width: 300)
                         Divider()
                         if let ch = store.selected {
-                            ThreadView(store: store, channel: ch).id(ch.id)
+                            ThreadView(store: store, channel: ch, isWide: true).id(ch.id)
                             if store.showDetails {
                                 Divider()
                                 ChannelDetailsPanel(store: store, channel: ch).frame(width: 300)
@@ -250,30 +258,50 @@ struct CommsView: View {
                             EmptyState("Pick a conversation", message: "Spaces, direct messages and order threads are on the left.", symbol: "bubble.left.and.bubble.right")
                         }
                     }
-                } else if let ch = store.selected, initialChannelId != nil {
-                    ThreadView(store: store, channel: ch).id(ch.id)
+                } else if initialChannelId != nil {
+                    if let ch = store.selected {
+                        ThreadView(store: store, channel: ch, isWide: false).id(ch.id)
+                    } else if let channelError {
+                        ErrorState(channelError, retry: { Task { await load() } })
+                    } else {
+                        LoadingSkeleton()
+                    }
                 } else {
-                    ChannelListView(store: store)
+                    ChannelListView(store: store, isWide: false)
                 }
             } else {
                 LoadingSkeleton()
             }
         }
         .background(Theme.canvas)
-        .navigationTitle(store?.selected.map { isWide ? "Messages" : $0.name } ?? "Messages")
-        .task {
-            if store == nil {
-                let s = CommsStore(env: env)
-                s.selectedId = initialChannelId
-                store = s
-                await s.load()
-                if s.selected == nil, let id = initialChannelId, let j = try? await env.session.client.json("/v1/admin/channels/\(id)")["channel"] {
-                    s.upsert(ChatChannel(json: j))
+        .navigationTitle(initialChannelId == nil || isWide ? "Messages" : "Conversation")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .task(id: initialChannelId) { await load() }
+        .onDisappear { Task { await store?.stop() } }
+    }
+
+    private func load() async {
+        let s = store ?? CommsStore(env: env)
+        store = s
+        channelError = nil
+        if let initialChannelId { s.selectedId = initialChannelId }
+        await s.load()
+        if s.selected == nil, let id = initialChannelId {
+            do {
+                let json = try await env.session.client.json("/v1/admin/channels/\(id)")
+                guard let channel = json["channel"], channel["id"]?.int == id else {
+                    channelError = .transport("The Hub did not return this conversation.")
+                    return
                 }
+                s.upsert(ChatChannel(json: channel))
+            } catch let error as APIError {
+                channelError = error
+            } catch {
+                channelError = .transport(error.localizedDescription)
             }
         }
-        .onDisappear { Task { await store?.stop() } }
-        .onChange(of: initialChannelId) { _, new in store?.selectedId = new }
     }
 }
 
@@ -281,7 +309,9 @@ struct CommsView: View {
 
 struct ChannelListView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @Bindable var store: CommsStore
+    let isWide: Bool
     @State private var query = ""
     @State private var hits: [JSONValue] = []
     @State private var searching = false
@@ -305,7 +335,7 @@ struct ChannelListView: View {
                 searchResults
             } else {
                 LoadableView(store.state, retry: { Task { await store.load() } }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No conversations yet", message: "Start a space or message a colleague.", symbol: "bubble.left") }) { _ in
-                    List(selection: $store.selectedId) {
+                    List(selection: isWide ? $store.selectedId : nil) {
                         noticesSection
                         section("Spaces", store.spaces)
                         section("Direct messages", store.dms)
@@ -322,12 +352,16 @@ struct ChannelListView: View {
                             }
                         }
                     }
+                    #if os(iOS)
+                    .listStyle(.insetGrouped)
+                    #else
                     .listStyle(.sidebar)
+                    #endif
                 }
             }
         }
-        .sheet(isPresented: $newSpace) { NewSpaceSheet(store: store) }
-        .sheet(isPresented: $newDM) { NewDMSheet(store: store) }
+        .sheet(isPresented: $newSpace) { NewSpaceSheet(store: store, open: open) }
+        .sheet(isPresented: $newDM) { NewDMSheet(store: store, open: open) }
         .sheet(isPresented: $quickReplies) { QuickRepliesSheet() }
         .refreshable { await store.load() }
     }
@@ -367,7 +401,9 @@ struct ChannelListView: View {
         if !list.isEmpty {
             Section(title) {
                 ForEach(list) { ch in
-                    Button { open(ch.id) } label: { ChannelRow(channel: ch) }
+                    Button { open(ch.id) } label: {
+                        ChannelRow(channel: ch, showsDisclosure: !isWide)
+                    }
                         .buttonStyle(.plain)
                         .tag(ch.id)
                 }
@@ -400,30 +436,53 @@ struct ChannelListView: View {
     }
 
     private func open(_ id: Int) {
-        if LayoutProbe.isWide { store.selectedId = id } else { env.navigator.push(.comms(channelId: id)) }
+        if isWide {
+            store.selectedId = id
+        } else if let currentRoutePath {
+            currentRoutePath.wrappedValue.append(.comms(channelId: id))
+        } else {
+            env.navigator.push(.comms(channelId: id))
+        }
     }
 }
 
 struct ChannelRow: View {
     let channel: ChatChannel
+    var showsDisclosure = false
     var body: some View {
         HStack(spacing: Theme.Space.s) {
             if channel.isDM { Avatar(name: channel.name, size: 30) } else {
-                Image(systemName: channel.symbol).frame(width: 30, height: 30).background(Theme.Palette.neutralSoft, in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(Theme.Palette.neutral)
+                Image(systemName: channel.symbol)
+                    .font(.subheadline)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.Palette.brand.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(Theme.Palette.brandDeep)
+                    .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(channel.name).font(channel.unread > 0 ? Theme.Font.body.weight(.semibold) : Theme.Font.body).lineLimit(1)
+                Text(channel.name).font(.subheadline.weight(.semibold))
+                if channel.isContext, let description = channel.description, !description.isEmpty {
+                    Text(description).font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                }
                 if let lm = channel.lastMessage {
-                    Text("\(lm["user_name"]?.string.map { "\($0): " } ?? "")\(ChatMessage(json: ["body": .string(lm["body"]?.string ?? "")]).parsed.text)").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                    let preview = ChatMessage(json: ["body": .string(lm["body"]?.string ?? "")]).parsed.text
+                    Text(preview.isEmpty ? "Message with attachment or link" : "\(lm["user_name"]?.string.map { "\($0): " } ?? "")\(preview)")
+                        .font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                } else {
+                    Text("No messages yet").font(.caption).foregroundStyle(Theme.textSecondary)
                 }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                DateText(channel.lastActivity, style: .relative)
+                if let lastActivity = channel.lastActivity { DateText(lastActivity, style: .relative) }
                 if channel.unread > 0 { Text("\(channel.unread)").font(Theme.Font.caption).foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2).background(Theme.Palette.brand, in: Capsule()) }
             }
+            if showsDisclosure {
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textTertiary).accessibilityHidden(true)
+            }
         }
-        .padding(.vertical, 2)
+        .frame(minHeight: Theme.tapTarget)
         .contentShape(Rectangle())
     }
 }
