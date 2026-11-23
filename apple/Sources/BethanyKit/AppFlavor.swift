@@ -5,8 +5,9 @@ import Foundation
 /// - `hub` "Bethany Hub": the whole Hub, every screen a person's permissions open.
 /// - `tailors` "Tailors Hub": the workshop app for everyone who uses it
 ///   (owner, 2026-11-23): production work and the management tools a
-///   person's permissions open, plus their own workday. People
-///   administration, employee files and team payroll stay in Bethany Hub.
+///   person's permissions open, their own workday, and People
+///   administration, employee files and team payroll for those whose Hub
+///   permissions already open them.
 ///   Signing in needs production access; anyone else is sent to Bethany Hub.
 ///
 /// What a flavour hides is presentation only. The API enforces every
@@ -56,14 +57,18 @@ public enum TailorsHub {
     /// the management screens each person's permissions open; the person's
     /// own workday (clock, shifts, leave, hours, payslips, advances, updates,
     /// training, checklists, handbook, documents to sign, to-dos,
-    /// colleagues); messages; profile. Wider Hub permissions never turn it
-    /// into the full Hub: People administration, employee files and team
-    /// payroll stay in Bethany Hub, whatever the person may do there.
+    /// colleagues); messages; profile; and, restored by the owner the same
+    /// day, People administration, employee files and team payroll for those
+    /// whose Hub permissions open them (each keeps its own gate:
+    /// attendance.view_team, forms.manage, hr.view, payroll.view; details
+    /// inherit via `NavCatalogue.gate(for:)`). Nothing that sells, buys,
+    /// counts stock or reports the business's money.
     public static func allows(_ route: Route) -> Bool {
         switch route {
         case .productionMyTasks, .productionOrders, .productionOrder, .wip, .qc, .productionCalendar,
              .forms, .handbook, .sign, .todos, .colleagues,
              .clock, .myShifts, .myLeave, .myTimesheet, .myPayslips, .myAdvances,
+             .peopleOverview, .peopleRequests, .attendance, .formsManage, .roster, .timesheets, .leave, .people, .payroll,
              .comms, .updates, .courses, .profile:
             return true
         default:

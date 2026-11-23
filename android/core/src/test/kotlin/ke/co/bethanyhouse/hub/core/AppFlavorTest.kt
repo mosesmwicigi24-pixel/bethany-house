@@ -2,6 +2,7 @@ package ke.co.bethanyhouse.hub.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,12 +32,15 @@ class AppFlavorTest {
         assertTrue(AppFlavor.HUB.mayUse(cashier))
     }
 
-    @Test fun tailorsHubIsTheWorkshopAndTheirOwnWorkday() {
+    @Test fun tailorsHubIsTheWorkshopTheirWorkdayAndPermittedPeopleAdmin() {
         val shown = listOf(
             Route.ProductionMyTasks, Route.ProductionOrders, Route.ProductionOrder(7), Route.Wip, Route.Qc, Route.ProductionCalendar,
             Route.Clock, Route.MyShifts, Route.MyLeave, Route.MyTimesheet, Route.MyPayslips, Route.MyAdvances,
             Route.Forms, Route.Handbook(), Route.Handbook(2), Route.Sign(), Route.Sign(3), Route.Todos, Route.Colleagues,
             Route.Comms(), Route.Comms(3), Route.Updates(), Route.Updates(2), Route.Courses(), Route.Courses(4), Route.Profile,
+            // Restored (owner, 2026-11-23), each still behind its own Hub permission.
+            Route.PeopleOverview, Route.PeopleRequests, Route.Attendance, Route.FormsManage, Route.Roster, Route.Timesheets, Route.Leave,
+            Route.People(), Route.People(5), Route.Payroll,
         )
         shown.forEach { assertTrue("$it should be in Tailors Hub", AppFlavor.TAILORS.allows(it)) }
         val hidden = listOf(
@@ -44,25 +48,41 @@ class AppFlavorTest {
             Route.Bom, Route.StockLevels, Route.Materials, Route.PurchaseOrders, Route.Expenses, Route.PaymentTransactions,
             Route.Report(Route.ReportPage.FINANCE), Route.Report(Route.ReportPage.PRODUCTION), Route.Users, Route.Roles,
             Route.Approvals, Route.Notifications, Route.Downloads, Route.MyDownloads, Route.Me,
-            // People administration, employee files and team payroll stay in Bethany Hub (owner, 2026-11-23).
-            Route.PeopleOverview, Route.PeopleRequests, Route.Attendance, Route.FormsManage, Route.Roster, Route.Timesheets, Route.Leave,
-            Route.People(), Route.People(5), Route.Payroll,
         )
         hidden.forEach { assertFalse("$it must not be in Tailors Hub", AppFlavor.TAILORS.allows(it)) }
         hidden.forEach { assertTrue("Bethany Hub keeps $it", AppFlavor.HUB.allows(it)) }
     }
 
-    /** A production manager who may also run HR and payroll in Bethany Hub gets the workshop tools in Tailors Hub, never People or payroll. */
-    @Test fun widerHubPermissionsDoNotTurnTailorsHubIntoTheHub() {
-        val manager = person("production.view", "production.manage_assignees", "production.confirm_order", "production.approve_qc",
+    /** People administration, employee files and team payroll follow each person's existing Hub permissions. */
+    @Test fun peopleAdminFollowsEachPersonsHubPermissions() {
+        val hrManager = person("production.view", "production.manage_assignees", "production.confirm_order",
             "attendance.view_team", "hr.view", "payroll.view", "forms.manage")
-        val groups = AppFlavor.TAILORS.groups(manager)
-        assertFalse(groups.any { it.label == "People" })
-        val routes = groups.flatMap { it.items }.map { it.route }
-        assertTrue(routes.containsAll(listOf(Route.ProductionOrders, Route.Wip, Route.Qc, Route.MyPayslips)))
-        listOf(Route.Payroll, Route.People(), Route.PeopleOverview, Route.Roster, Route.Timesheets, Route.Leave, Route.FormsManage)
-            .forEach { assertFalse("$it", AppFlavor.TAILORS.allows(it)) }
-        assertTrue("Bethany Hub still has People for them", AppFlavor.HUB.groups(manager).any { it.label == "People" })
+        val teamLead = person("production.view", "production.manage_assignees", "attendance.view_team")
+        fun people(p: PermissionSet) = AppFlavor.TAILORS.groups(p).firstOrNull { it.label == "People" }?.items?.map { it.label } ?: emptyList()
+        assertEquals(listOf("Overview", "Requests", "Attendance", "Checklists", "Roster", "Timesheets", "Leave", "Employee files", "Payroll"), people(hrManager))
+        assertEquals("no checklist management, employee files or payroll without forms.manage, hr.view, payroll.view",
+            listOf("Overview", "Requests", "Attendance", "Roster", "Timesheets", "Leave"), people(teamLead))
+        assertEquals("a tailor without management rights sees no People", emptyList<String>(), people(tailor))
+    }
+
+    /** One employee's file is not a menu item; it needs its list's gate (hr.view), also by direct link. */
+    @Test fun anEmployeeFileNeedsHrViewEvenByDirectLink() {
+        val file = Route.fromConsolePath("/people/5")
+        assertEquals(Route.People(5), file)
+        assertEquals(NavGate.perm("hr.view"), NavCatalogue.gate(file!!))
+        assertEquals(NavGate.perm("hr.view"), NavCatalogue.gate(Route.People()))
+        assertEquals(NavGate.perm("payroll.view"), NavCatalogue.gate(Route.Payroll))
+        assertEquals(NavGate.perm("production.view"), NavCatalogue.gate(Route.ProductionOrder(3)))
+        assertEquals("an update is open to staff, as its list is", true, NavCatalogue.gate(Route.Updates(2))?.isOpen)
+        // Before the fix, the guard looked up the exact route: no gate for People(5).
+        assertNull(NavCatalogue.item(file))
+
+        val gate = NavCatalogue.gate(file)!!
+        assertTrue(AppFlavor.TAILORS.allows(file))
+        assertFalse("a tailor's direct link to an employee file is refused", gate.allows(tailor))
+        assertFalse("team lead without hr.view", gate.allows(person("production.view", "attendance.view_team")))
+        assertTrue(gate.allows(person("production.view", "hr.view")))
+        assertTrue(gate.allows(owner))
     }
 
     @Test fun everyoneLandsOnTheirOwnWorkshopPage() {
@@ -81,6 +101,8 @@ class AppFlavorTest {
                 "Workspace/Messages",
                 "Me/Updates", "Me/Checklists", "Me/Handbook", "Me/Training", "Me/To sign", "Me/To-dos", "Me/Colleagues",
                 "Me/Clock in", "Me/My shifts", "Me/My leave", "Me/My hours", "Me/My payslips", "Me/My advances",
+                "People/Overview", "People/Requests", "People/Attendance", "People/Checklists", "People/Roster",
+                "People/Timesheets", "People/Leave", "People/Employee files", "People/Payroll",
                 "Production/My Tasks", "Production/Production Orders", "Production/Work In Progress", "Production/Quality Control", "Production/Calendar",
             ),
             labels,
