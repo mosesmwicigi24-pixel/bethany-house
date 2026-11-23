@@ -9,6 +9,8 @@
 # Signing: set DEVELOPMENT_TEAM in Signing.xcconfig (not committed) or in
 # Xcode; the bundle id ke.co.bethanyhouse.hub matches the Expo shell so the
 # store listing continues (docs/NATIVE_APPS_APPLE.md).
+# A free Apple ID (Personal Team) cannot sign push or associated domains:
+# use scripts/personal-device.sh, which generates project.personal.yml.
 name: BethanyHub
 options:
   bundleIdPrefix: ke.co.bethanyhouse
@@ -105,3 +107,23 @@ targets:
         PRODUCT_NAME: Bethany House Hub
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+
+# Shared schemes, so the run menu lists the iPhone/iPad app by name instead of
+# depending on Xcode to autocreate one per target.
+schemes:
+  HubMobile:
+    build:
+      targets:
+        HubMobile: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  HubMac:
+    build:
+      targets:
+        HubMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release

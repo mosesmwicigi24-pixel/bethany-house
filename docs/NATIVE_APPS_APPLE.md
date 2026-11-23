@@ -25,6 +25,15 @@ open BethanyHub.xcodeproj           # select HubMac or HubMobile, set your team,
 ```
 
 Signing: set `DEVELOPMENT_TEAM` in Xcode or export it before `xcodegen`.
+
+**On your own iPhone/iPad with a free Apple ID (Personal Team):**
+`apple/scripts/personal-device.sh`. It generates `BethanyHubPersonal.xcodeproj`
+from `apple/project.personal.yml` (bundle id `ke.co.bethanyhouse.hub.test`,
+no push, no associated domains: the three things a Personal Team cannot sign)
+and opens it. Choose the **HubMobile** scheme (left half of the run
+destination; **HubMac** is the Mac app and lists every iPhone as "mismatched
+platform"), your device, your Personal Team, and Run. The install expires
+after 7 days; Run again. It uses the live Hub.
 Bundle id `ke.co.bethanyhouse.hub` is the same as the Expo shell's so the
 existing App Store Connect record carries over.
 
