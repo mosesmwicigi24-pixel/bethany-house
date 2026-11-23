@@ -17,7 +17,7 @@ struct UITestRouteField: ViewModifier {
     @Environment(AppEnvironment.self) private var env
     #if DEBUG
     /// Where the tour is; outlives the shell, which is rebuilt after a sign-in.
-    @MainActor @Observable final class Cursor { static let shared = Cursor(); var index = -1 }
+    @MainActor @Observable final class Cursor { static let shared = Cursor(); var index = -1; var last = Date.distantPast }
     @State private var cursor = Cursor.shared
 
     private static let paths: [String] = (ProcessInfo.processInfo.environment["BH_UITEST_ROUTES"] ?? "")
@@ -30,6 +30,10 @@ struct UITestRouteField: ViewModifier {
             content.overlay(alignment: .bottomTrailing) {
                 Button("next") {
                     guard cursor.index + 1 < Self.paths.count else { return }
+                    // One press, one screen: a key held while the app was busy
+                    // opening a record repeated, and skipped a screen (tour run 12).
+                    guard Date().timeIntervalSince(cursor.last) > 1 else { return }
+                    cursor.last = Date()
                     cursor.index += 1
                     env.session.touch()   // a person's click; the button sits outside tracksActivity
                     if let route = Route.from(consolePath: Self.paths[cursor.index]) { env.navigator.go(route) }
