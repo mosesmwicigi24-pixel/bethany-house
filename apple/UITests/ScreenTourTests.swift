@@ -46,6 +46,7 @@ final class ScreenTourTests: XCTestCase {
     func testEveryScreen() throws {
         let app = XCUIApplication()
         app.launchEnvironment["HUB_URL"] = Self.hub
+        app.launchEnvironment["BH_UITEST_ROUTES"] = "1"
         #if os(iOS)
         // The iPad as a workstation: landscape, sidebar beside the screen.
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -57,8 +58,7 @@ final class ScreenTourTests: XCTestCase {
 
         var problems: [String] = []
         for (i, screen) in Self.screens.enumerated() {
-            guard let url = URL(string: "bethanyhub://hub/admin\(screen.path)") else { continue }
-            app.open(url)
+            go(app, screen.path)
             settle(app)
             dismissSystemAlerts()
             snap(app, String(format: "%03d %@", i + 1, screen.name))
@@ -76,6 +76,16 @@ final class ScreenTourTests: XCTestCase {
     }
 
     // MARK: - Steps
+
+    /// Navigate in the running app through the DEBUG-only route field
+    /// (BethanyUI UITestRouteField), as a sidebar click would.
+    @MainActor
+    private func go(_ app: XCUIApplication, _ path: String) {
+        let field = app.textFields["uitest.route"]
+        guard field.waitForExistence(timeout: 10) else { return }
+        field.click_or_tap()
+        field.typeText(path + "\n")
+    }
 
     @MainActor
     private func signIn(_ app: XCUIApplication) {
@@ -130,6 +140,16 @@ final class ScreenTourTests: XCTestCase {
                 break
             }
         }
+        #endif
+    }
+}
+
+private extension XCUIElement {
+    func click_or_tap() {
+        #if os(macOS)
+        click()
+        #else
+        tap()
         #endif
     }
 }
