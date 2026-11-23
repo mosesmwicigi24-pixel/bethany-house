@@ -12,6 +12,9 @@ name: Apple UI tour
 
 on:
   workflow_dispatch:
+  # A preview branch (e.g. main plus open PRs merged together) is toured on push.
+  push:
+    branches: ["ui-tour/**"]
   pull_request:
     paths:
       - "apple/UITests/**"
