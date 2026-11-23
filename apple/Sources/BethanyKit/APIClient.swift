@@ -45,6 +45,9 @@ public actor APIClient {
         /// Marks polling (no human touched the screen): does not count as activity.
         public var background: Bool
         public var headers: [String: String]
+        /// 0…1 as the body goes up (a clip can be tens of megabytes; a bare
+        /// spinner for a minute reads as "stuck"). Nil: no progress reported.
+        public var uploadProgress: (@Sendable (Double) -> Void)?
 
         public enum Body: Sendable {
             case json(JSONValue)
@@ -181,7 +184,12 @@ public actor APIClient {
             urlRequest.httpBody = Self.multipartBody(parts, boundary: boundary)
         }
 
-        let (data, raw) = try await session.data(for: urlRequest)
+        let (data, raw): (Data, URLResponse)
+        if let progress = request.uploadProgress {
+            (data, raw) = try await session.data(for: urlRequest, delegate: UploadProgressDelegate(progress))
+        } else {
+            (data, raw) = try await session.data(for: urlRequest)
+        }
         guard let http = raw as? HTTPURLResponse else { throw APIError.transport("No HTTP response") }
         var headers: [String: String] = [:]
         for (k, v) in http.allHeaderFields { if let k = k as? String, let v = v as? String { headers[k] = v } }
@@ -278,4 +286,14 @@ public struct APIError: Error, Sendable, Hashable {
     public var isValidation: Bool { status == 422 }
     public var isDeleted: Bool { status == 404 && reason == "deleted" }
     public var firstFieldError: String? { errors.values.first?.first }
+}
+
+/// Reports a request body's upload progress (0…1) to a closure.
+final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let report: @Sendable (Double) -> Void
+    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        report(min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend)))
+    }
 }
