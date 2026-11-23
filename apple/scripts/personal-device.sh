@@ -31,9 +31,10 @@ fi
 cat <<MSG
 
 Opening BethanyHubPersonal.xcodeproj. In Xcode:
-  1. Menu bar: Product > Scheme > HubMobile (not HubMac).
+  1. Menu bar: Product > Scheme > TailorsMobile (Tailors Hub) or
+     HubMobile (Bethany Hub). Not HubMac: that is the Mac app.
   2. Top bar: choose your iPhone or iPad.
-  3. $team
+  3. $team (set it on each app you run)
   4. Press Run. First time only, on the device: Settings > General >
      VPN & Device Management > your Apple ID > Trust.
 MSG

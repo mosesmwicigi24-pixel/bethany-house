@@ -8,6 +8,7 @@ Code: `apple/`. One Swift package, two app targets.
 | `BethanyUI` | `apple/Sources/BethanyUI` | Design system (`Theme`), shared components, sign-in flow, security prompts, the macOS shell (`MacShell`), command palette, `RouteView` + `FeatureRegistry`, and the feature screens under `Features/`. |
 | `HubMac` | `apple/Apps/HubMac` | macOS 14+ app target. |
 | `HubMobile` | `apple/Apps/HubMobile` | iOS/iPadOS 17+ universal app target (Steps 4–5). |
+| `TailorsMobile` | `apple/Apps/TailorsMobile` + the HubMobile app file | "Tailors Hub", the workshop app: same code, built with `TAILORS` (`AppFlavor.tailors`). See `docs/TAILORS_HUB.md`. |
 | Tests | `apple/Tests/BethanyKitTests` | Gates, home path, sidebar parity, contract shapes, money, dates, deep links, renewal timing. |
 
 ## Build

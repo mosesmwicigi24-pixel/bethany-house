@@ -21,7 +21,7 @@ touching `android/` and keeps an unsigned debug APK as an artifact.
 ```sh
 cd android
 echo "sdk.dir=$ANDROID_HOME" > local.properties    # git-ignored
-./gradlew :core:testDebugUnitTest :app:testHubDebugUnitTest
+./gradlew :core:testDebugUnitTest :app:testHubDebugUnitTest   # two flavours: hub (Bethany Hub), tailors (Tailors Hub, docs/TAILORS_HUB.md)
 ./gradlew :app:assembleDebug   # both apps: apk/hub/debug (Bethany Hub), apk/tailors/debug (Tailors Hub)
 ```
 
