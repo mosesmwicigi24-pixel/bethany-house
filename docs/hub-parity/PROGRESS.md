@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### In progress — 23 November 2026, Codex
+
+- Refining the Apple production-order Details and Thread UI in `ProductionOrderDetail.swift`; preserving existing Hub APIs and permissions. Claude has claimed Android offline files separately.
+
 ### iPhone simulator review — 23 November 2026
 
 - Reviewed commit `571a6dc4` on iPhone 17 Pro simulator, iOS 27.2, against the live Hub. The review used read-only navigation and no task, attendance or employee data was submitted.
