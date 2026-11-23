@@ -9,9 +9,10 @@ import BethanyKit
 /// The same rule as Android's sidebar sign-out.
 extension AppEnvironment {
     /// Changes the signed-in person made offline that have not been sent.
+    /// -1 when the saved queue cannot be read: unknown is never "none".
     func unsentChanges() async -> Int {
         guard let offline else { return 0 }
-        return await offline.pending().count
+        do { return try await offline.pendingChecked().count } catch { return -1 }
     }
 
     func signOutNow() async {
@@ -34,7 +35,7 @@ struct SignOutGuard: ViewModifier {
     @Binding var unsent: Int
 
     func body(content: Content) -> some View {
-        content.alert("Changes not sent yet", isPresented: Binding(get: { unsent > 0 }, set: { if !$0 { unsent = 0 } })) {
+        content.alert(unsent < 0 ? "Saved changes can't be read" : "Changes not sent yet", isPresented: Binding(get: { unsent != 0 }, set: { if !$0 { unsent = 0 } })) {
             Button("Sign out anyway", role: .destructive) { Task { await env.signOutNow() } }
             Button("Stay signed in", role: .cancel) {}
         } message: {
@@ -43,7 +44,11 @@ struct SignOutGuard: ViewModifier {
     }
 
     static func message(_ n: Int) -> String {
-        (n == 1 ? "1 change you made offline has" : "\(n) changes you made offline have")
+        if n < 0 {
+            return "Changes saved on this device could not be read, so nobody can tell whether any are still waiting to reach the Hub. "
+                + "They stay on this device if you sign out. Ask a manager for help before signing out."
+        }
+        return (n == 1 ? "1 change you made offline has" : "\(n) changes you made offline have")
             + " not reached the Hub. They stay on this device and are sent the next time you sign in here. "
             + "To send them now, wait for a connection before signing out."
     }

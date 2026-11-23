@@ -4,8 +4,10 @@ package ke.co.bethanyhouse.hub.core
  * Which app this build is. Both are built from the same code:
  *
  *  - [HUB] "Bethany Hub": the whole Hub, every screen a person's permissions open.
- *  - [TAILORS] "Tailors Hub": the workshop app (owner, 2026-11-23). Only the
- *    production screens, the person's own pay and time, and staff messages.
+ *  - [TAILORS] "Tailors Hub": the workshop app for everyone who uses it
+ *    (owner, 2026-11-23): production work and the management tools a
+ *    person's permissions open, plus their own workday. People
+ *    administration, employee files and team payroll stay in Bethany Hub.
  *    Signing in needs production access; anyone else is sent to Bethany Hub.
  *
  * What a flavour hides is presentation only. The API enforces every
@@ -49,13 +51,18 @@ object TailorsHub {
     val signInGate = NavGate.anyOf("production.worker", "production.view", "production.submit_qc", "production.approve_qc")
 
     /**
-     * The whole of Tailors Hub. Production work; the person's own clock,
-     * shifts, leave, hours and payslips; messages, updates and training; their
-     * profile. Nothing that sells, buys, counts stock or reports money.
+     * The whole of Tailors Hub (owner, 2026-11-23). Production work, with the
+     * management screens each person's permissions open; the person's own
+     * workday (clock, shifts, leave, hours, payslips, advances, updates,
+     * training, checklists, handbook, documents to sign, to-dos, colleagues);
+     * messages; profile. Wider Hub permissions never turn it into the full
+     * Hub: People administration, employee files and team payroll stay in
+     * Bethany Hub, whatever the person may do there.
      */
     fun allows(route: Route): Boolean = when (route) {
         Route.ProductionMyTasks, Route.ProductionOrders, is Route.ProductionOrder, Route.Wip, Route.Qc, Route.ProductionCalendar,
-        Route.Clock, Route.MyShifts, Route.MyLeave, Route.MyTimesheet, Route.MyPayslips,
+        Route.Forms, is Route.Handbook, is Route.Sign, Route.Todos, Route.Colleagues,
+        Route.Clock, Route.MyShifts, Route.MyLeave, Route.MyTimesheet, Route.MyPayslips, Route.MyAdvances,
         is Route.Comms, is Route.Updates, is Route.Courses, Route.Profile -> true
         else -> false
     }

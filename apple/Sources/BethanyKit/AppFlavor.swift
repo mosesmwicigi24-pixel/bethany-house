@@ -3,8 +3,10 @@ import Foundation
 /// Which app this build is. Both are built from the same code:
 ///
 /// - `hub` "Bethany Hub": the whole Hub, every screen a person's permissions open.
-/// - `tailors` "Tailors Hub": the workshop app (owner, 2026-11-23). Only the
-///   production screens, the person's own pay and time, and staff messages.
+/// - `tailors` "Tailors Hub": the workshop app for everyone who uses it
+///   (owner, 2026-11-23): production work and the management tools a
+///   person's permissions open, plus their own workday. People
+///   administration, employee files and team payroll stay in Bethany Hub.
 ///   Signing in needs production access; anyone else is sent to Bethany Hub.
 ///
 /// What a flavour hides is presentation only. The API enforces every
@@ -50,13 +52,18 @@ public enum TailorsHub {
     /// Workshop staff: tailors, QC inspectors, production managers.
     public static let signInGate = NavGate.anyOf(["production.worker", "production.view", "production.submit_qc", "production.approve_qc"])
 
-    /// The whole of Tailors Hub. Production work; the person's own clock,
-    /// shifts, leave, hours and payslips; messages, updates and training; their
-    /// profile. Nothing that sells, buys, counts stock or reports money.
+    /// The whole of Tailors Hub (owner, 2026-11-23). Production work, with
+    /// the management screens each person's permissions open; the person's
+    /// own workday (clock, shifts, leave, hours, payslips, advances, updates,
+    /// training, checklists, handbook, documents to sign, to-dos,
+    /// colleagues); messages; profile. Wider Hub permissions never turn it
+    /// into the full Hub: People administration, employee files and team
+    /// payroll stay in Bethany Hub, whatever the person may do there.
     public static func allows(_ route: Route) -> Bool {
         switch route {
         case .productionMyTasks, .productionOrders, .productionOrder, .wip, .qc, .productionCalendar,
-             .clock, .myShifts, .myLeave, .myTimesheet, .myPayslips,
+             .forms, .handbook, .sign, .todos, .colleagues,
+             .clock, .myShifts, .myLeave, .myTimesheet, .myPayslips, .myAdvances,
              .comms, .updates, .courses, .profile:
             return true
         default:

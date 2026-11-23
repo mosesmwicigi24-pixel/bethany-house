@@ -121,6 +121,9 @@ struct SidebarFooter: View {
             if env.connection.pendingCount > 0 {
                 Label("\(env.connection.pendingCount) pending", systemImage: "arrow.triangle.2.circlepath").font(Theme.Font.caption).foregroundStyle(Theme.Palette.amber)
             }
+            if env.connection.pendingUnreadable {
+                Label("Saved changes can't be read", systemImage: "exclamationmark.triangle").font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger)
+            }
             Menu {
                 ForEach(NavCatalogue.userMenu) { item in
                     Button(item.label) { env.navigator.go(item.route) }

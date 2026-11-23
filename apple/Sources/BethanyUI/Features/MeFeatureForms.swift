@@ -20,11 +20,21 @@ struct FormsView: View {
                     let rows = d.records
                     let checks = rows.filter { $0["template"]?["kind"]?.string == "checklist" }
                     let reports = rows.filter { $0["template"]?["kind"]?.string == "report" }
-                    Text("TODAY'S CHECKLISTS").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
-                    if checks.isEmpty { Text("No checklist due today.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary) }
+                    Label("Today's checklists", systemImage: "checklist")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    if checks.isEmpty {
+                        emptySection("No checklist due today.", symbol: "checkmark.circle")
+                    }
                     ForEach(checks) { r in checklistRow(r) }
-                    Text("REPORT SOMETHING").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
-                    if reports.isEmpty { Text("No report forms for your outlet.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary) }
+                    Label("Report something", systemImage: "doc.text")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    if reports.isEmpty {
+                        emptySection("No report forms for your outlet.", symbol: "doc.text")
+                    }
                     TileGrid(minWidth: 160) {
                         ForEach(reports) { r in
                             Button { filling = r } label: {
@@ -72,6 +82,21 @@ struct FormsView: View {
         }
     }
 
+    private func emptySection(_ message: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .foregroundStyle(Theme.Palette.brandDeep)
+                .frame(width: 32, height: 32)
+                .background(Theme.Palette.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
+            Text(message).font(.subheadline).foregroundStyle(Theme.textSecondary)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private func stateLabel(_ s: String?) -> String {
         switch s { case "due": return "Due"; case "overdue": return "Overdue"; case "submitted": return "Done"; case "late": return "Done late"; case "missed": return "Missed"; default: return "" }
     }
@@ -94,7 +119,13 @@ struct FormsView: View {
                         .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Spacer()
-                if !done { Text("Fill in ›").font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.Palette.brandDeep) }
+                if done {
+                    Text(state == "late" ? "Done late" : "Done")
+                        .font(Theme.Font.caption.weight(.semibold))
+                        .foregroundStyle(Theme.Palette.success)
+                } else {
+                    Text("Fill in ›").font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.Palette.brandDeep)
+                }
             }
             .padding(Theme.Space.l).frame(maxWidth: .infinity, alignment: .leading)
             .background(done ? Theme.Palette.successSoft.opacity(0.4) : bad ? Theme.Palette.dangerSoft.opacity(0.3) : Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
@@ -121,6 +152,7 @@ struct FillFormSheet: View {
     @State private var notes = ""
     @State private var signature: String?
     @State private var busy = false
+    @State private var submissionError: String?
 
     private var template: JSONValue { row["template"] ?? .null }
     private var items: [JSONValue] { template["items"]?.array ?? [] }
@@ -140,6 +172,9 @@ struct FillFormSheet: View {
 
     var body: some View {
         MeSheet(template["name"]?.string ?? "Form", primary: isReport ? "Send" : "Done", disabled: requiresSignature && signature == nil, busy: busy, action: { await submit() }) {
+            if let submissionError {
+                NoticeText(submissionError, tone: .danger)
+            }
             Text("\(row["outlet"]?["name"]?.string ?? "")\(row["due_at"]?.date.map { " · due \(MeFormat.time($0))" } ?? "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
             ForEach(Array(items.enumerated()), id: \.offset) { _, i in
                 if let key = i["key"]?.string { itemView(i, key: key) }
@@ -185,7 +220,11 @@ struct FillFormSheet: View {
     }
 
     private func submit() async {
-        guard let templateId = template["id"]?.int, let outletId = row["outlet"]?["id"]?.int else { return }
+        submissionError = nil
+        guard let templateId = template["id"]?.int, let outletId = row["outlet"]?["id"]?.int else {
+            submissionError = "This form is missing its template or outlet. Refresh and try again."
+            return
+        }
         busy = true; defer { busy = false }
         var answers: [String: JSONValue] = [:]
         for i in items {
@@ -196,7 +235,18 @@ struct FillFormSheet: View {
             default: if let t = texts[key], !t.isEmpty { answers[key] = .string(t) }
             }
         }
-        guard let answersData = try? HubJSON.encoder.encode(JSONValue.object(answers)), let answersJSON = String(data: answersData, encoding: .utf8) else { return }
+        let answersJSON: String
+        do {
+            let answersData = try HubJSON.encoder.encode(JSONValue.object(answers))
+            guard let json = String(data: answersData, encoding: .utf8) else {
+                submissionError = "Unable to prepare this form. Please try again."
+                return
+            }
+            answersJSON = json
+        } catch {
+            submissionError = (error as? APIError)?.message ?? error.localizedDescription
+            return
+        }
         var parts: [APIClient.MultipartPart] = [
             .init(name: "template_id", value: String(templateId)),
             .init(name: "outlet_id", value: String(outletId)),
@@ -210,6 +260,6 @@ struct FillFormSheet: View {
             let r = try await env.session.client.send(.init(.post, "/v1/admin/forms/submissions", body: .multipart(parts)))
             env.toasts.show(r.json?["message"]?.string ?? (isReport ? "Sent" : "Done"))
             onDone()
-        } catch { env.toasts.error(error) }
+        } catch { submissionError = (error as? APIError)?.message ?? error.localizedDescription }
     }
 }

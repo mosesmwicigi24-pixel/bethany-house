@@ -13,11 +13,15 @@ the workshop" and offered Sign out. The owner (super admin) can open it to test.
 
 ## What it shows
 
+Owner, 2026-11-23 (scope review of commit 4eb0ecfd): Tailors Hub is the
+workshop app **for everyone who uses it**, production managers included. A
+person's wider Hub permissions never turn it into the full Hub.
+
 | Area | Screens |
 |---|---|
-| Workshop | My Tasks, Production Orders (+ an order), Work In Progress, Quality Control, Calendar |
-| Own time and pay | Clock in, My shifts, My leave, My hours, My payslips |
-| Staff | Messages, Updates, Training |
+| Workshop | My Tasks, Production Orders (+ an order, assignments), Work In Progress, Quality Control, Calendar |
+| Own workday | Clock in, My shifts, My leave, My hours, My payslips, My advances, Updates, Training, Checklists, Handbook, To sign, To-dos, Colleagues |
+| Staff | Messages |
 | Account | My profile, Sign out |
 
 Each screen still needs its own permission (a tailor without QC rights sees
@@ -25,7 +29,11 @@ no Quality Control). Home: a tailor lands on My Tasks, a manager on
 Production Orders, an inspector on Quality Control.
 
 Not in Tailors Hub: anything that sells, buys, counts stock or reports
-money; the Bill of Materials; My advances; search; the notifications page.
+money; the Bill of Materials; search; the notifications page; the Today
+summary; and **People administration, employee files and team payroll**
+(Overview, Requests, Attendance, Checklist management, Roster, Timesheets,
+team Leave, Employee files, Payroll). Managers use Bethany Hub for those,
+whatever their permissions.
 A link, push tap or button that leads to one of those shows "This page is
 in Bethany Hub", never the website version.
 

@@ -1,6 +1,11 @@
 import SwiftUI
 import BethanyKit
 
+extension EnvironmentValues {
+    /// The path hosting this screen when the shell owns separate tab stacks.
+    @Entry var currentRoutePath: Binding<[Route]>? = nil
+}
+
 /// Resolves a `Route` to its screen. Every route the catalogue knows is
 /// listed here; the feature registry decides whether a native screen exists
 /// yet. Until one does, `ConsoleBridgeView` shows the same page of the Hub
@@ -16,7 +21,7 @@ public struct RouteView: View {
     public var body: some View {
         if !env.session.flavor.allows(route) {
             NotInThisAppView()
-        } else if let gate = NavCatalogue.item(for: route)?.gate, !env.session.allows(gate) {
+        } else if let gate = (NavCatalogue.item(for: route) ?? Navigator.parent(of: route).flatMap { NavCatalogue.item(for: $0) })?.gate, !env.session.allows(gate) {
             NoAccessView(route: route)
         } else if let screen = FeatureRegistry.screen(for: route) {
             screen
