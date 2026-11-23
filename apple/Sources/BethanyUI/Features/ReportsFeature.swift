@@ -32,7 +32,9 @@ enum ReportsFeature {
 /// Keys whose numeric value is money (a KES figure unless the row names a currency).
 func isMoneyKey(_ key: String) -> Bool {
     let k = key.lowercased()
-    if k.contains("count") || k.contains("orders") || k.hasSuffix("_days") || k.contains("pct") || k.contains("percent") || k.contains("rate") || k.contains("units") || k.contains("qty") || k.contains("quantity") || k.contains("lines") || k.hasSuffix("_id") || k == "id" || k.contains("customers") || k.contains("buyers") || k.contains("checks") || k.contains("skus") || k.contains("items") { return false }
+    if k.contains("count") || k.contains("orders") || k.hasSuffix("_days") || k.contains("pct") || k.contains("percent") || k.contains("rate") || k.contains("units") || k.contains("qty") || k.contains("quantity") || k.contains("lines") || k.hasSuffix("_id") || k == "id" || k.contains("customers") || k.contains("buyers") || k.contains("checks") || k.contains("skus") || k.contains("items")
+        // completed_with_due is a count of jobs that had a due date, not money (UI tour 2026-11-23).
+        || k.contains("with_due") { return false }
     return ["revenue", "amount", "total", "value", "paid", "balance", "collected", "sales", "cost", "profit", "spent", "refund", "price", "kes", "volume", "expense", "inflow", "outflow", "gross", "net", "margin_", "sold", "due", "held", "budget", "aov", "ltv", "lifetime"].contains { k.contains($0) }
 }
 

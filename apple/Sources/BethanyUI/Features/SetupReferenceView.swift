@@ -193,6 +193,7 @@ struct LanguagesView: View {
         Page("Languages", subtitle: "Storefront and console languages") {
             if canEdit { HStack { Spacer(); Button { editing = LanguageDraft() } label: { Label("Add language", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) } }
             RemoteJSON("/v1/admin/languages", version: version) { j, reload in
+                if (j["data"]?.records ?? []).isEmpty { EmptyState("No languages yet", message: "Languages added here are offered on the storefront and console.", symbol: "character.bubble") }
                 ForEach(j["data"]?.records ?? []) { l in
                     SupportListRow("\(l.string("flag") ?? "") \(l.string("name") ?? "") · \(l.string("native_name") ?? "")", subtitle: "\(l.string("code") ?? "") · \(l.string("direction") ?? "ltr")") {
                         HStack {
@@ -251,6 +252,7 @@ struct TaxRatesView: View {
         Page("Tax rates", subtitle: "VAT and other rates applied to sales") {
             if env.session.can("settings.edit") { HStack { Spacer(); Button { editing = TaxDraft() } label: { Label("Add rate", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) } }
             RemoteJSON("/v1/admin/tax-rates", version: version) { j, reload in
+                if (j["data"]?.records ?? []).isEmpty { EmptyState("No tax rates yet", message: "Rates added here are applied to sales.", symbol: "percent") }
                 ForEach(j["data"]?.records ?? []) { t in
                     SupportListRow("\(t.string("name") ?? "") (\(t.string("code") ?? ""))", subtitle: "\(t["rate"]?.string ?? "")\(t.string("type") == "fixed" ? " fixed" : "%") · applies to \(t.string("applies_to") ?? "all") · \(t.string("country_code") ?? "all countries")") {
                         HStack {

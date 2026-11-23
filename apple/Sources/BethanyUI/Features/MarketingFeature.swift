@@ -210,6 +210,8 @@ struct HomeFrontProductsView: View {
                         BannerSlotCard(slot: slot, banners: all.filter { $0.string("position") == slot.key }, placement: placement, reload: reload) { editing = $0 }
                     }
                 }
+            } else {
+                EmptyState("Pick a product", message: "Its highlights, poster, feature cards and story chapters are edited here.", symbol: "doc.richtext")
             }
         }
         .task { products = (try? await env.session.client.json("/v1/admin/products", query: ["per_page": "300"]))?["data"]?.records ?? [] }
@@ -320,6 +322,10 @@ struct InsightsView: View {
                     StatTile("Mobile share", value: "\(t["mobile_share"]?.string ?? "0")%")
                 }
                 let markets = j["markets"]?.records ?? []
+                if (t["visits"]?.int ?? 0) == 0 && markets.isEmpty {
+                    // Empty cards read as broken (UI tour 2026-11-23): say why they are empty.
+                    EmptyState("No visits recorded in this range", message: "Countries, devices and operating systems appear once the storefront records visits.", symbol: "chart.bar")
+                } else {
                 SectionCard("Visits by country") {
                     Chart(markets.prefix(12)) { m in
                         BarMark(x: .value("Visits", m.int("visits") ?? 0), y: .value("Country", countryName(m.string("country_code"))))
@@ -346,6 +352,7 @@ struct InsightsView: View {
                 HStack(alignment: .top, spacing: Theme.Space.m) {
                     SectionCard("Devices") { ForEach(j["devices"]?.records ?? []) { d in HStack { Text(d.string("device_type")?.humanized ?? "—"); Spacer(); Text(d["visits"]?.string ?? "0").monospacedDigit() }.font(Theme.Font.secondary) } }
                     SectionCard("Operating systems") { ForEach(j["os"]?.records ?? []) { d in HStack { Text(d.string("os") ?? "—"); Spacer(); Text(d["visits"]?.string ?? "0").monospacedDigit() }.font(Theme.Font.secondary) } }
+                }
                 }
             }
         }

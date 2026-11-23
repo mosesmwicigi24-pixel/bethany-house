@@ -183,7 +183,7 @@ struct ProductionCalendarView: View {
                     let active = s["active_count"]?.string ?? "0"
                     let tiles: [(String, String, StatusTone?)] = floorWorker
                         ? [("Your active orders", active, nil)]
-                        : [("Active orders", active, nil), ("Earliest free slot", s["earliest_free_slot"]?.string ?? "—", .info)]
+                        : [("Active orders", active, nil), ("Earliest free slot", s["earliest_free_slot"]?.string.map { Day.format($0, "EEE d MMM yyyy") } ?? "—", .info)]
                     StatsRow(tiles: tiles)
                     let byStage = s["by_stage"]?.object ?? [:]
                     if !byStage.isEmpty {
