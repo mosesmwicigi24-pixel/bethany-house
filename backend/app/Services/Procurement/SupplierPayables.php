@@ -234,6 +234,121 @@ class SupplierPayables
         });
     }
 
+    /**
+     * Every purchase order that still owes its supplier money — the list
+     * the bulk "mark as paid" picks from. Same rule as summary(): payable
+     * (supplier invoice, else total less returns) minus standing payments,
+     * on payable statuses, where something is still owed.
+     *
+     * @return list<array{id:int, po_number:string, supplier_id:int, supplier:string, order_date:?string, status:string, currency:string, payable:float, paid:float, balance:float, balance_kes:?float}>
+     */
+    public static function owedOrders(): array
+    {
+        $rates = ReportingCurrency::rates();
+
+        return PurchaseOrder::with('supplier:id,name')
+            ->whereIn('status', self::PAYABLE_STATUSES)
+            ->orderBy('order_date')->orderBy('id')
+            ->get()
+            ->map(function (PurchaseOrder $po) use ($rates) {
+                $payable  = self::payable($po);
+                $paid     = self::paid($po);
+                $balance  = round($payable - $paid, 2);
+                $currency = strtoupper((string) ($po->currency_code ?: 'KES'));
+                $rate     = $currency === 'KES' ? 1.0 : ($rates[$currency] ?? null);
+
+                return [
+                    'id'          => (int) $po->id,
+                    'po_number'   => (string) $po->po_number,
+                    'supplier_id' => (int) $po->supplier_id,
+                    'supplier'    => (string) ($po->supplier->name ?? ''),
+                    'order_date'  => $po->order_date?->toDateString(),
+                    'status'      => (string) $po->status,
+                    'currency'    => $currency,
+                    'payable'     => $payable,
+                    'paid'        => $paid,
+                    'balance'     => $balance,
+                    'balance_kes' => $rate === null ? null : round($balance * $rate, 2),
+                ];
+            })
+            ->filter(fn (array $r) => (int) round($r['balance'] * 100) > 0)
+            ->values()->all();
+    }
+
+    /**
+     * Pay several purchase orders in full, one payment each for exactly what
+     * that order still owes — record() per order, so every rule there holds
+     * (locked, never more than owed, payable statuses only, audited). An
+     * order that cannot be paid is skipped and named; the rest still go.
+     * Sending the same batch again pays nothing twice.
+     *
+     * $data['date_mode']: 'order_date' dates each payment on its own order's
+     * date (money paid when the order was made); 'one_date' uses paid_at.
+     *
+     * @param list<int> $orderIds
+     * @return array{paid: list<array>, skipped: list<array>}
+     */
+    public static function payInFull(array $orderIds, array $data, User $by): array
+    {
+        $paid = $skipped = [];
+        $batch = (string) $data['client_request_id'];
+
+        foreach (array_values(array_unique(array_map('intval', $orderIds))) as $id) {
+            $po = PurchaseOrder::find($id);
+            if (!$po) {
+                $skipped[] = ['id' => $id, 'po_number' => null, 'reason' => 'This purchase order no longer exists.'];
+                continue;
+            }
+
+            $balance = round(self::payable($po) - self::paid($po), 2);
+            // One request id per order, stable across a retry of the batch.
+            $requestId = substr(hash('sha256', $batch . ':' . $po->id), 0, 64);
+            $already   = SupplierPayment::where('client_request_id', $requestId)->exists();
+
+            if (!$already && (int) round($balance * 100) <= 0) {
+                $skipped[] = ['id' => $po->id, 'po_number' => $po->po_number, 'reason' => 'Nothing is outstanding on this purchase order.'];
+                continue;
+            }
+
+            $paidAt = ($data['date_mode'] ?? 'order_date') === 'order_date'
+                ? ($po->order_date ?? $po->created_at)?->copy()->setTime(12, 0)->toDateTimeString()
+                : ($data['paid_at'] ?? null);
+
+            try {
+                $payment = self::record($po, [
+                    'amount'            => $balance,
+                    'method'            => $data['method'],
+                    'reference'         => $data['reference'] ?? null,
+                    'paid_at'           => $paidAt,
+                    'notes'             => $data['notes'] ?? null,
+                    'client_request_id' => $requestId,
+                ], $by);
+
+                $paid[] = [
+                    'id' => $po->id, 'po_number' => $po->po_number,
+                    'payment_number' => $payment->payment_number,
+                    'amount' => (float) $payment->amount, 'currency' => $payment->currency_code,
+                    'amount_kes' => $payment->amount_kes === null ? null : (float) $payment->amount_kes,
+                    'paid_at' => $payment->paid_at?->toDateString(),
+                ];
+            } catch (ValidationException $e) {
+                $skipped[] = ['id' => $po->id, 'po_number' => $po->po_number, 'reason' => collect($e->errors())->flatten()->first()];
+            }
+        }
+
+        if ($paid) {
+            ActivityLogService::log('supplier_payments_bulk_recorded', null, [
+                'orders'     => count($paid),
+                'skipped'    => count($skipped),
+                'method'     => $data['method'],
+                'date_mode'  => $data['date_mode'] ?? 'order_date',
+                'payments'   => array_column($paid, 'payment_number'),
+            ], count($paid) . ' purchase orders marked as paid in one go', $by);
+        }
+
+        return ['paid' => $paid, 'skipped' => $skipped];
+    }
+
     /** Refuse cancelling a PO that still has money paid against it. */
     public static function assertCancellable(PurchaseOrder $po): void
     {

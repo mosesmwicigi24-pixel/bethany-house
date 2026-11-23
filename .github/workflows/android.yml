@@ -41,14 +41,17 @@ jobs:
       - name: Core unit tests
         run: ./gradlew :core:testDebugUnitTest --console=plain
 
+      # Two apps from one codebase (hub = Bethany Hub, tailors = Tailors Hub).
+      # The app tests run once, on Bethany Hub; what Tailors Hub may show is
+      # core's AppFlavor, covered by the core tests above.
       - name: App unit tests
-        run: ./gradlew :app:testDebugUnitTest --console=plain
+        run: ./gradlew :app:testHubDebugUnitTest --console=plain
 
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --console=plain
+      - name: Assemble debug APKs (Bethany Hub and Tailors Hub)
+        run: ./gradlew :app:assembleHubDebug :app:assembleTailorsDebug --console=plain
 
       - name: Lint (report only)
-        run: ./gradlew :app:lintDebug --console=plain || true
+        run: ./gradlew :app:lintHubDebug --console=plain || true
 
       # Paused 2026-11-05: the app's till priced a customer abroad in shillings
       # (a KES 2,500 dress billed USD 2,500) and its order page could record an
@@ -59,6 +62,6 @@ jobs:
         if: ${{ false }}
         with:
           name: hub-android-debug
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
           retention-days: 14

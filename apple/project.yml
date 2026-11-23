@@ -6,9 +6,13 @@
 #   HubMac     macOS 14+, Apple Silicon and Intel, App Sandbox, APNs
 #   HubMobile  iOS/iPadOS 17+, universal (iPhone + iPad layouts), APNs,
 #              background location while clocked in
+#   TailorsMobile  "Tailors Hub", the workshop app: the same code with
+#              AppFlavor.tailors (production, own time and pay, messages)
 # Signing: set DEVELOPMENT_TEAM in Signing.xcconfig (not committed) or in
 # Xcode; the bundle id ke.co.bethanyhouse.hub matches the Expo shell so the
 # store listing continues (docs/NATIVE_APPS_APPLE.md).
+# A free Apple ID (Personal Team) cannot sign push or associated domains:
+# use scripts/personal-device.sh, which generates project.personal.yml.
 name: BethanyHub
 options:
   bundleIdPrefix: ke.co.bethanyhouse
@@ -105,3 +109,77 @@ targets:
         PRODUCT_NAME: Bethany House Hub
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+  # Tailors Hub (owner, 2026-11-23): the workshop app for tailors, QC and
+  # production managers. Same code as HubMobile (one app file, built with
+  # TAILORS); what it shows is BethanyKit's AppFlavor.tailors. No push yet
+  # (the server addresses one app identity) and no associated domains, so a
+  # free Apple ID can sign it as it is.
+  TailorsMobile:
+    type: application
+    platform: iOS
+    supportedDestinations: [iOS, iPadOS]
+    sources:
+      - path: Apps/HubMobile/HubMobileApp.swift
+      - path: Apps/TailorsMobile
+    dependencies:
+      - package: BethanyHub
+        product: BethanyKit
+      - package: BethanyHub
+        product: BethanyUI
+    entitlements:
+      path: Apps/TailorsMobile/TailorsMobile.entitlements
+    info:
+      path: Apps/TailorsMobile/Info.plist
+      properties:
+        CFBundleDisplayName: Tailors Hub
+        CFBundleName: Tailors Hub
+        UILaunchScreen: {}
+        UIBackgroundModes: [location]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        NSLocationWhenInUseUsageDescription: Tailors Hub checks that you are at the workshop when you clock in or out, and records your position while you are on shift.
+        NSLocationAlwaysAndWhenInUseUsageDescription: While you are clocked in, Tailors Hub records your position every few minutes so your manager can see you are on site. It stops when you clock out and never runs off shift.
+        NSFaceIDUsageDescription: Unlock Tailors Hub with Face ID instead of typing your password.
+        NSCameraUsageDescription: Take QC photos and attach photos to your messages.
+        NSPhotoLibraryUsageDescription: Attach photos to QC records and messages.
+        ITSAppUsesNonExemptEncryption: false
+        CFBundleURLTypes:
+          - CFBundleURLName: ke.co.bethanyhouse.tailors
+            CFBundleURLSchemes: [tailorshub]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.tailors
+        PRODUCT_NAME: Tailors Hub
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) TAILORS
+
+# Shared schemes, so the run menu lists the iPhone/iPad app by name instead of
+# depending on Xcode to autocreate one per target.
+schemes:
+  TailorsMobile:
+    build:
+      targets:
+        TailorsMobile: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  HubMobile:
+    build:
+      targets:
+        HubMobile: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  HubMac:
+    build:
+      targets:
+        HubMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release
