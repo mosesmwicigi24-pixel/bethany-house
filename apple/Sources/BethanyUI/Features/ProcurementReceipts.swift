@@ -22,7 +22,7 @@ struct GoodsReceiptView: View {
             if let list {
                 HStack(spacing: Theme.Space.s) {
                     ModuleSearchField(text: $search, placeholder: "GRN or PO number") { Task { await reload() } }
-                    if let suppliers { LookupPicker(label: "Supplier", lookup: suppliers, selection: $supplierId).frame(maxWidth: 200) }
+                    if let suppliers { LookupPicker(label: "Supplier", lookup: suppliers, selection: $supplierId, none: "All suppliers").frame(maxWidth: 200) }
                     if env.session.can("procurement.receive") { Button { picking = true } label: { Label("Record GRN", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) }
                 }
                 RecordListView(list, emptyTitle: "No goods receipts match", emptySymbol: "shippingbox.and.arrow.backward") { g in

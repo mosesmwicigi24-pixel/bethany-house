@@ -54,7 +54,7 @@ struct StockLevelsView: View {
                 ])
                 HStack(spacing: Theme.Space.s) {
                     ModuleSearchField(text: $search, placeholder: "SKU or product") { Task { await reload() } }
-                    if let outlets { LookupPicker(label: "Outlet", lookup: outlets, selection: $outletId).frame(maxWidth: 200) }
+                    if let outlets { LookupPicker(label: "Outlet", lookup: outlets, selection: $outletId, none: "All outlets").frame(maxWidth: 200) }
                     Picker("Status", selection: $status) { Text("Any").tag(""); Text("In stock").tag("in_stock"); Text("Low").tag("low_stock"); Text("Out").tag("out_of_stock") }.frame(maxWidth: 140)
                     if env.session.can("inventory.adjust") { Button { opening = true } label: { Label("Opening stock", systemImage: "plus") } }
                 }
