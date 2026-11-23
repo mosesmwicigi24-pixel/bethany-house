@@ -91,9 +91,16 @@ final class ScreenTourTests: XCTestCase {
             XCTFail("the tour button is missing (opening \(path))")
             return false
         }
-        next.click_or_tap()
         let opened = NSPredicate(format: "value == %@", path)
-        return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: opened, object: next)], timeout: 5) == .completed
+        func arrived() -> Bool {
+            XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: opened, object: next)], timeout: 5) == .completed
+        }
+        // The button's keyboard shortcut first: it needs no hit-testing.
+        app.typeKey("]", modifierFlags: [.command, .option, .control])
+        if arrived() { return true }
+        // Then a tap on it, wherever it is.
+        next.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click_or_tap()
+        return arrived()
     }
 
     @MainActor
@@ -153,7 +160,7 @@ final class ScreenTourTests: XCTestCase {
     }
 }
 
-private extension XCUIElement {
+private extension XCUICoordinate {
     func click_or_tap() {
         #if os(macOS)
         click()
