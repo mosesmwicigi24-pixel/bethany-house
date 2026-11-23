@@ -451,3 +451,29 @@ the React console; outside this migration's scope as the console defines it.
 Checks: Linux kit tests (62 in the scratch package, incl. the 4 new) pass;
 `swiftc -parse` on every edited UI file; the macOS build and full kit suite
 are Apple CI's.
+### Slice B: quotation pricing (#566), branch `apple/parity-quote-pricing`
+
+The money-path gap: the native picker showed a product's KES base price and
+left the unit price to be typed, so on a USD quotation "22,000" could be
+entered under a dollar label — the defect #566 fixed in the console.
+
+- `BethanyKit/QuotePricing.swift`: a picked product's line is priced by
+  POST /quotations/reprice `{from: "KES", to: <quote currency>}` with the
+  search's KES base price (sale, else list); the line takes the server's
+  answer; `kept` lines are flagged "No USD price on the hub — type it."; a
+  failed request sets 0 and flags it. `QuotePricingTests` (5) on real
+  answers from the scratch Hub: product 4 → USD 171.50 (its own USD price,
+  not 22,000); KES 10 → USD 0.10 (cents kept); ZMW converted at 0.14
+  (22,000 → 3,080, worked by hand). The `kept` fixture is the controller's
+  shape, not captured (every scratch currency has a pricing rate).
+- Quotation builder: Save waits while lines are pricing; the currency picker
+  and "Add products" are disabled while repricing; the unit-price field names
+  the currency.
+- `QuotationProductPicker`: tick several, "Add N to the quotation", "on the
+  quote" tag, no prices shown — the console's `ProductMultiPicker`. The
+  order-items picker is unchanged.
+
+Not ported, on purpose: the console's live "subtotal + shipping" on the form
+(native keeps "computed by the server when saved" — no client money
+arithmetic), and typing a product name on a free line to pick a product (the
+picker covers it).
