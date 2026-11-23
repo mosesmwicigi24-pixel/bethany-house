@@ -33,7 +33,18 @@ no push, no associated domains: the three things a Personal Team cannot sign)
 and opens it. Choose the **HubMobile** scheme (left half of the run
 destination; **HubMac** is the Mac app and lists every iPhone as "mismatched
 platform"), your device, your Personal Team, and Run. The install expires
-after 7 days; Run again. It uses the live Hub.
+after 7 days; Run again. It uses the live Hub. The script fills in your
+Personal Team from the "Apple Development" certificate Xcode created, so
+regenerating does not lose it.
+
+**Keeping a Mac current with every change:** `scripts/mac-sync.sh --install`
+(or `--install <branch>` to follow a pull request's branch before it merges).
+Every 5 minutes it fetches from GitHub, fast-forwards, and regenerates the Xcode
+projects when `apple/` changed. It never overwrites local work: with edited
+tracked files, or local commits not on GitHub, it skips and says so in
+`~/Library/Logs/bethany-mac-sync.log`. `--uninstall` stops it. Any tool on the
+Mac that reads the folder (Xcode, ChatGPT's Codex, an editor) then sees the
+current code; `AGENTS.md` carries the same working rules as `CLAUDE.md`.
 Bundle id `ke.co.bethanyhouse.hub` is the same as the Expo shell's so the
 existing App Store Connect record carries over.
 
