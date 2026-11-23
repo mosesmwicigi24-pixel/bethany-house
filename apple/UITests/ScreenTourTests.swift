@@ -83,7 +83,17 @@ final class ScreenTourTests: XCTestCase {
     private func go(_ app: XCUIApplication, _ path: String) {
         let field = app.textFields["uitest.route"]
         guard field.waitForExistence(timeout: 10) else { return }
-        field.click_or_tap()
+        // The field gives up focus after each navigation (so the iPad keyboard
+        // does not cover the screenshot); tap until it has focus again, then type.
+        for _ in 0..<4 {
+            field.click_or_tap()
+            if field.hasKeyboardFocus { break }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        guard field.hasKeyboardFocus else {
+            XCTFail("could not focus the route field for \(path)")
+            return
+        }
         field.typeText(path + "\n")
     }
 
@@ -145,6 +155,8 @@ final class ScreenTourTests: XCTestCase {
 }
 
 private extension XCUIElement {
+    var hasKeyboardFocus: Bool { (value(forKey: "hasKeyboardFocus") as? Bool) ?? false }
+
     func click_or_tap() {
         #if os(macOS)
         click()
