@@ -25,6 +25,7 @@ public struct MobileShell: View {
         .securityPrompts()
         .tracksActivity()
         .overlay(alignment: .bottom) { ToastHost(env.toasts).padding(.bottom, 60) }
+        .uiTestRouteField()
         .overlay { BiometricLockOverlay(lock: env.biometrics) { await env.session.signOut(); await env.sessionDidChange() } }
     }
 }

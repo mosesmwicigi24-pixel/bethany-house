@@ -55,6 +55,7 @@ public struct MacShell: View {
         .securityPrompts()
         .tracksActivity()
         .overlay(alignment: .bottom) { ToastHost(env.toasts) }
+        .uiTestRouteField()
     }
 }
 
