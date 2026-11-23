@@ -1525,6 +1525,11 @@ Route::prefix('v1')->group(function () {
                     // Payables: what is owed to suppliers, and paying it (not expenses).
                     Route::get('/payables',      [\App\Http\Controllers\Api\SupplierPaymentController::class, 'payables'])
                         ->middleware('permission:procurement.pay|reports.financial,sanctum');
+                    Route::get('/payables/orders', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'owedOrders'])
+                        ->middleware('permission:procurement.pay|reports.financial,sanctum');
+                    // Several orders marked paid at once: super admin (in the controller), re-confirmed.
+                    Route::post('/payments/bulk', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'bulk'])
+                        ->middleware(['permission:procurement.pay,sanctum', 'step.up']);
                     Route::get('/{id}/payments', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'index']);
                     Route::post('/{id}/payments', [\App\Http\Controllers\Api\SupplierPaymentController::class, 'store'])
                         ->middleware('permission:procurement.pay,sanctum');
