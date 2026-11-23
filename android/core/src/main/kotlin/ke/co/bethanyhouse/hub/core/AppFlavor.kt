@@ -6,8 +6,9 @@ package ke.co.bethanyhouse.hub.core
  *  - [HUB] "Bethany Hub": the whole Hub, every screen a person's permissions open.
  *  - [TAILORS] "Tailors Hub": the workshop app for everyone who uses it
  *    (owner, 2026-11-23): production work and the management tools a
- *    person's permissions open, plus their own workday. People
- *    administration, employee files and team payroll stay in Bethany Hub.
+ *    person's permissions open, their own workday, and People
+ *    administration, employee files and team payroll for those whose Hub
+ *    permissions already open them.
  *    Signing in needs production access; anyone else is sent to Bethany Hub.
  *
  * What a flavour hides is presentation only. The API enforces every
@@ -55,14 +56,19 @@ object TailorsHub {
      * management screens each person's permissions open; the person's own
      * workday (clock, shifts, leave, hours, payslips, advances, updates,
      * training, checklists, handbook, documents to sign, to-dos, colleagues);
-     * messages; profile. Wider Hub permissions never turn it into the full
-     * Hub: People administration, employee files and team payroll stay in
-     * Bethany Hub, whatever the person may do there.
+     * messages; profile; and, restored by the owner the same day, People
+     * administration, employee files and team payroll for those whose Hub
+     * permissions open them (each keeps its own gate: attendance.view_team,
+     * forms.manage, hr.view, payroll.view; details inherit via
+     * NavCatalogue.gate). Nothing that sells, buys, counts stock or reports
+     * the business's money.
      */
     fun allows(route: Route): Boolean = when (route) {
         Route.ProductionMyTasks, Route.ProductionOrders, is Route.ProductionOrder, Route.Wip, Route.Qc, Route.ProductionCalendar,
         Route.Forms, is Route.Handbook, is Route.Sign, Route.Todos, Route.Colleagues,
         Route.Clock, Route.MyShifts, Route.MyLeave, Route.MyTimesheet, Route.MyPayslips, Route.MyAdvances,
+        Route.PeopleOverview, Route.PeopleRequests, Route.Attendance, Route.FormsManage, Route.Roster, Route.Timesheets, Route.Leave,
+        is Route.People, Route.Payroll,
         is Route.Comms, is Route.Updates, is Route.Courses, Route.Profile -> true
         else -> false
     }

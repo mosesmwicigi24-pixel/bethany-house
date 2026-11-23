@@ -72,3 +72,33 @@ Still open:
   person's permissions. `AppFlavorTests` / `AppFlavorTest` pin a manager with
   HR and payroll rights. Today (`.me`) is left out: not in the owner's list.
   Tailor and manager experiences still need a run on a device.
+
+### People administration restored (owner, 2026-11-23, later)
+
+The owner approved restoring People administration, employee files and team
+payroll to Tailors Hub for those whose existing Hub permissions open them.
+
+- `TailorsHub.allows` (Swift and Kotlin) includes People overview, requests,
+  attendance, checklist management, roster, timesheets, leave, employee files
+  (list and detail) and payroll again. Each keeps its catalogue gate
+  (`attendance.view_team`, `forms.manage`, `hr.view`, `payroll.view`). No
+  server permission, outlet scope, step-up or audit code changed.
+- **Detail gate (found by Codex):** Android's route guard looked up the exact
+  route, so one employee's file (`People(5)`, not a menu item) had no gate and
+  only the server stood between a direct link and the page. Both platforms now
+  resolve a screen's gate with `NavCatalogue.gate`: the item's own gate, else
+  its list's (`Route.parent`). Apple already inherited the parent gate in
+  `RouteView`; the rule moved into BethanyKit (`Route.parent`) so it is shared
+  and tested, and `Navigator.parent` forwards to it.
+- **Tests (hand-written expectations):** an HR manager sees all nine People
+  pages; a team lead without `forms.manage`/`hr.view`/`payroll.view` sees six;
+  a tailor without management rights sees none; `/people/5` parses to an
+  employee file whose gate is `hr.view` and refuses a tailor and a team lead.
+  Swift `AppFlavorTests` 7/7 (Linux, Swift 6.0.3); Kotlin `AppFlavorTest` 8/8,
+  core suite 37/37; both Android APKs build. Mutation check on both
+  platforms: reverting to the exact-route lookup fails the direct-link test.
+- Offline reliability changes (`OfflineStore.send`, checked reads) untouched.
+- **Not verified:** the Apple screen layer compiles only in Apple CI; no
+  simulator or device run from the cloud. A run on the owner's Mac (TailorsMobile
+  in the iPhone simulator) is still to do: the Mac is not connected to this
+  session.

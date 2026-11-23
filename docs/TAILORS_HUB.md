@@ -22,7 +22,15 @@ person's wider Hub permissions never turn it into the full Hub.
 | Workshop | My Tasks, Production Orders (+ an order, assignments), Work In Progress, Quality Control, Calendar |
 | Own workday | Clock in, My shifts, My leave, My hours, My payslips, My advances, Updates, Training, Checklists, Handbook, To sign, To-dos, Colleagues |
 | Staff | Messages |
+| People (restored, owner 2026-11-23) | Overview, Requests, Attendance, Roster, Timesheets, Leave (`attendance.view_team`); Checklists management (`forms.manage`); Employee files + each employee's file (`hr.view`); Payroll (`payroll.view`) |
 | Account | My profile, Sign out |
+
+People pages appear only for those whose existing Hub permissions open
+them; a tailor without management rights sees none. A detail page that is
+not itself in the menu needs its list's gate (`NavCatalogue.gate`, both
+platforms): one employee's file needs `hr.view`, also by direct link. The
+server's own checks (permissions, outlet scope, step-up for sensitive HR
+and payroll data, audit logging) are unchanged and remain the control.
 
 Each screen still needs its own permission (a tailor without QC rights sees
 no Quality Control). Home: a tailor lands on My Tasks, a manager on
@@ -30,10 +38,7 @@ Production Orders, an inspector on Quality Control.
 
 Not in Tailors Hub: anything that sells, buys, counts stock or reports
 money; the Bill of Materials; search; the notifications page; the Today
-summary; and **People administration, employee files and team payroll**
-(Overview, Requests, Attendance, Checklist management, Roster, Timesheets,
-team Leave, Employee files, Payroll). Managers use Bethany Hub for those,
-whatever their permissions.
+summary.
 A link, push tap or button that leads to one of those shows "This page is
 in Bethany Hub", never the website version.
 

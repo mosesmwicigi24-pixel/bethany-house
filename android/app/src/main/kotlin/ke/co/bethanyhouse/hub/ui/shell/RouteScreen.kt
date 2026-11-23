@@ -32,7 +32,7 @@ fun RouteScreen(route: Route) {
         ) { env.navigator.go(env.session.current.home) }
         return
     }
-    val gate = NavCatalogue.item(route)?.gate
+    val gate = NavCatalogue.gate(route)
     if (gate != null && !env.session.current.allows(gate)) {
         EmptyState(
             title = "You don't have access to this page",

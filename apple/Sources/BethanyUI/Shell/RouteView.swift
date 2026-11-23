@@ -21,7 +21,7 @@ public struct RouteView: View {
     public var body: some View {
         if !env.session.flavor.allows(route) {
             NotInThisAppView()
-        } else if let gate = (NavCatalogue.item(for: route) ?? Navigator.parent(of: route).flatMap { NavCatalogue.item(for: $0) })?.gate, !env.session.allows(gate) {
+        } else if let gate = NavCatalogue.gate(for: route), !env.session.allows(gate) {
             NoAccessView(route: route)
         } else if let screen = FeatureRegistry.screen(for: route) {
             screen

@@ -176,30 +176,8 @@ public final class Navigator {
 
     public func push(_ route: Route) { path.append(route) }
 
-    /// The sidebar entry a detail route belongs under.
-    public static func parent(of route: Route) -> Route? {
-        switch route {
-        case .order: return .orders()
-        case .shipment: return .shipments
-        case .customer: return .customers
-        case .handoff: return .orders()
-        case .productionOrder: return .productionOrders
-        case .adjustment: return .adjustments
-        case .transfer: return .transfers
-        case .purchaseOrder: return .purchaseOrders
-        case .grn: return .goodsReceipt
-        case .purchaseReturn: return .purchaseReturns
-        case .expense: return .expenses
-        case .product(let id, let new): return (id != nil || new) ? .products : nil
-        case .people(let id): return id != nil ? .people() : nil
-        case .updates(let id): return id != nil ? .updates() : nil
-        case .handbook(let id): return id != nil ? .handbook() : nil
-        case .courses(let id): return id != nil ? .courses() : nil
-        case .sign(let id): return id != nil ? .sign() : nil
-        case .comms(let id): return id != nil ? .comms() : nil
-        default: return nil
-        }
-    }
+    /// The sidebar entry a detail route belongs under (`Route.parent`, BethanyKit).
+    public static func parent(of route: Route) -> Route? { route.parent }
 }
 
 /// Touch every user interaction so the client-side idle clock matches the server's.

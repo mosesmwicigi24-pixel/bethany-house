@@ -493,6 +493,16 @@ object NavCatalogue {
 
     fun item(route: Route): NavItem? = allItems.firstOrNull { it.route == route }
 
+    /**
+     * The gate a screen needs. A detail page that is not itself in the menu
+     * (one employee's file, one production order) needs its list's gate: an
+     * employee file needs hr.view like Employee files. Null means open to any
+     * signed-in person. The route guard (RouteScreen) uses this, so a direct
+     * link, push tap or button cannot reach a detail its list would refuse.
+     * The API enforces every permission on its own; this is the app's copy.
+     */
+    fun gate(route: Route): NavGate? = item(route)?.gate ?: route.parent?.let { item(it)?.gate }
+
     /** The phone's bottom bar (BottomTabBar.tsx): Home, Messages, Me, Production, Orders (+ More). */
     fun phoneTabs(subject: PermissionSet, home: Route): List<NavItem> {
         val tabs = mutableListOf(NavItem("Home", home, icon = "Home"), NavItem("Messages", Route.Comms(), icon = "Forum"), NavItem("Me", Route.Me, icon = "Person"))
