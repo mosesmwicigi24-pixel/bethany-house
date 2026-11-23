@@ -19,17 +19,21 @@ public struct MacShell: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            NavigationStack(path: $nav.path) {
+            NavigationStack(path: nav.pathBinding(for: nav.selection)) {
                 Group {
                     if let route = nav.selection {
                         RouteView(route)
-                            .id(route)
                     } else {
                         RouteView(env.session.home)
                     }
                 }
                 .navigationDestination(for: Route.self) { RouteView($0) }
+                .task(id: nav.selection) { await Task.yield(); nav.openPending(in: nav.selection) }
             }
+            // A new section is a new stack; the old one's last write to the
+            // path is ignored (Navigator.pathBinding), so a jump into a record
+            // of another section opens the record, not its list.
+            .id(nav.selection)
             .background(Theme.canvas)
         }
         .navigationSplitViewStyle(.balanced)
@@ -55,6 +59,7 @@ public struct MacShell: View {
         .securityPrompts()
         .tracksActivity()
         .overlay(alignment: .bottom) { ToastHost(env.toasts) }
+        .uiTestRouteField()
     }
 }
 

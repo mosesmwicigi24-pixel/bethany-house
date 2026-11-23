@@ -64,6 +64,10 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ke.co.bethanyhouse.hub
             CFBundleURLSchemes: [bethanyhub]
+        # Plain HTTP only to this machine / the local network (a Hub on
+        # 127.0.0.1 for development and the UI tour); every other host stays HTTPS.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
@@ -103,6 +107,10 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ke.co.bethanyhouse.hub
             CFBundleURLSchemes: [bethanyhub]
+        # Plain HTTP only to this machine / the local network (a Hub on
+        # 127.0.0.1 for development and the UI tour); every other host stays HTTPS.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
@@ -156,6 +164,42 @@ targets:
         SUPPORTS_MACCATALYST: NO
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) TAILORS
 
+  # The screen tour (apple/UITests/ScreenTourTests.swift): opens every screen
+  # against a throwaway Hub and keeps a screenshot of each. Run by
+  # .github/workflows/apple-ui.yml; needs a Hub at UITEST_HUB_URL.
+  HubMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    supportedDestinations: [iOS, iPadOS]
+    sources:
+      - path: UITests
+        excludes: ["Fixtures/**"]
+    dependencies:
+      - target: HubMobile
+      - package: BethanyHub
+        product: BethanyKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub.uitests
+        TEST_TARGET_NAME: HubMobile
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+  HubMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+        excludes: ["Fixtures/**"]
+    dependencies:
+      - target: HubMac
+      - package: BethanyHub
+        product: BethanyKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub.macuitests
+        TEST_TARGET_NAME: HubMac
+        GENERATE_INFOPLIST_FILE: YES
+
 # Shared schemes, so the run menu lists the iPhone/iPad app by name instead of
 # depending on Xcode to autocreate one per target.
 schemes:
@@ -173,6 +217,10 @@ schemes:
         HubMobile: all
     run:
       config: Debug
+    # The screen tour (.github/workflows/apple-ui.yml).
+    test:
+      config: Debug
+      targets: [HubMobileUITests]
     archive:
       config: Release
   HubMac:
@@ -181,5 +229,9 @@ schemes:
         HubMac: all
     run:
       config: Debug
+    # The screen tour (.github/workflows/apple-ui.yml).
+    test:
+      config: Debug
+      targets: [HubMacUITests]
     archive:
       config: Release

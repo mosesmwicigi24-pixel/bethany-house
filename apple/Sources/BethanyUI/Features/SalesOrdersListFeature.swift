@@ -36,7 +36,7 @@ struct OrdersListView: View {
     }
 
     var body: some View {
-        Page(title, subtitle: list.map { "\($0.total) orders" }) {
+        Page(title, subtitle: list.map { "\($0.total) order\($0.total == 1 ? "" : "s")" }) {
             filters
             if let list {
                 LoadableView(list.state, retry: { Task { await list.load() } }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No orders match", message: "Try another status, date range or search.", symbol: "bag") }) { rows in
@@ -135,7 +135,7 @@ struct OrdersListView: View {
             TableColumn("Status") { r in StatusBadge(r.status) }.width(110)
             TableColumn("Payment") { r in PaymentSummaryCell(record: r) }.width(min: 120)
             TableColumn("Total") { r in MoneyText(r.money("total_amount")) }.width(min: 120)
-            TableColumn("Channel") { r in Text((r.string("sales_bucket") ?? r.string("order_type") ?? "—").humanized).font(Theme.Font.secondary) }.width(80)
+            TableColumn("Channel") { r in Text(OrderChannelLabel.of(salesBucket: r.string("sales_bucket"), orderType: r.string("order_type"), sourceChannel: r.string("source_channel"))).font(Theme.Font.secondary) }.width(80)
             TableColumn("Outlet") { r in Text(r["outlet"]?["name"]?.string ?? r.string("outlet_name") ?? "—").font(Theme.Font.secondary) }.width(min: 90)
             TableColumn("Date") { r in DateText(r.date("created_at")) }.width(140)
             TableColumn("") { r in OrderRowActions(order: r, onChanged: { Task { await list?.load() } }, onCancel: { cancelling = r }) }.width(150)
@@ -162,7 +162,7 @@ struct OrdersListView: View {
                     PaymentSummaryCell(record: r)
                 }
                 HStack {
-                    Text("\((r.string("sales_bucket") ?? r.string("order_type") ?? "").humanized) · \(r["outlet"]?["name"]?.string ?? r.string("outlet_name") ?? "")").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                    Text("\(OrderChannelLabel.of(salesBucket: r.string("sales_bucket"), orderType: r.string("order_type"), sourceChannel: r.string("source_channel"))) · \(r["outlet"]?["name"]?.string ?? r.string("outlet_name") ?? "")").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                     Spacer()
                     DateText(r.date("created_at"), style: .relative)
                 }

@@ -82,6 +82,7 @@ struct SignInForm: View {
                 Text("Email").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                 TextField("you@bethanyhouse.co.ke", text: $email)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("signin.email")
                     .textContentType(.username)
                     .focused($focus, equals: .email)
                     .onSubmit { focus = .password }
@@ -94,6 +95,7 @@ struct SignInForm: View {
                 Text("Password").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                 SecureField("Password", text: $password)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("signin.password")
                     .textContentType(.password)
                     .focused($focus, equals: .password)
                     .onSubmit { Task { await submit() } }
@@ -108,6 +110,7 @@ struct SignInForm: View {
                 if busy { ProgressView().controlSize(.small).tint(.white) } else { Text("Sign in") }
             }
             .buttonStyle(.primary)
+            .accessibilityIdentifier("signin.submit")
             .disabled(busy || email.isEmpty || password.isEmpty)
             .keyboardShortcut(.defaultAction)
             Button("Forgot password?") { showReset = true }

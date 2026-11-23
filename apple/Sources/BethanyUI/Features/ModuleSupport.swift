@@ -368,10 +368,14 @@ struct LookupPicker: View {
     let lookup: Lookup
     @Binding var selection: Int?
     var allowNone = true
+    /// The words for "nothing chosen". A filter names what it shows then
+    /// ("All outlets"): on the iPad a menu picker hides its label, and a bare
+    /// dash told nobody anything (UI tour run 9).
+    var none = "—"
 
     var body: some View {
         Picker(label, selection: $selection) {
-            if allowNone { Text("—").tag(Int?.none) }
+            if allowNone { Text(none).tag(Int?.none) }
             ForEach(lookup.options) { o in
                 Text(Lookup.title(o)).tag(o.int("id"))
             }

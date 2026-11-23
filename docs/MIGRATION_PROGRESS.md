@@ -533,3 +533,41 @@ the React console; outside this migration's scope as the console defines it.
 Checks: Linux kit tests (62 in the scratch package, incl. the 4 new) pass;
 `swiftc -parse` on every edited UI file; the macOS build and full kit suite
 are Apple CI's.
+
+### 2026-11-23 — screen tour on Mac and iPad (branch `apple/ui-tour`)
+
+A UI test (`apple/UITests/ScreenTourTests.swift`, CI job "UI tour" in
+`.github/workflows/apple-ui.yml`) signs in to a throwaway Hub seeded with test
+data only (`apple/UITests/Fixtures`), opens all 100 sidebar screens and four
+record pages on macOS and on an iPad Pro 13" simulator, keeps a screenshot of
+each, and fails on "Something went wrong", "Can't reach Bethany House", a
+sign-out or a screen the app did not open. It never presses a button that
+changes a record. The test Hub runs PHP 8.3, as production (`backend/Dockerfile`).
+
+Evidence: tour run 45261956629 (2026-11-23), both jobs green; every
+screenshot reviewed by eye.
+
+Found by the tour and fixed (Apple code only; Laravel unchanged):
+- A request racing a token renewal signed the person out.
+- Records opened from another section (a production order from Sales, a
+  product from a purchase order) showed the list, or a blank page on the
+  iPad. The navigator now shows the section first and opens the record once
+  its stack is on screen; the outgoing stack's last write is ignored.
+- Order channels read POS / Web / Chat (by source) / Quoted, as the console's
+  `OrderRow.tsx` (`OrderChannelLabel`, with tests).
+- Low Stock Alerts: product 3 and material 3 shared a row identity, so one
+  item showed twice and another not at all.
+- Clock in showed "(kCLErrorDomain error 1.)"; location failures now read as
+  words, and "denied" shows the existing Settings notice (with tests).
+- Filter pickers said "—" on the iPad (label hidden); they now say "All
+  outlets", "All suppliers", "Everyone", "Choose a product".
+- Empty Countries, Shipping and Production stages pages say why they are empty;
+  the calendar's earliest-free-slot tile no longer truncates.
+
+Checked and correct by design: Balances lists only part-paid or deposit till
+orders (Laravel `outstandingBalances`); P&L COGS shows KES 0 and discloses "3
+lines without a cost snapshot".
+
+Not proven: two record jumps within a second on the iPad once left the detail
+column blank (tour run 12, caused by a repeated key in the test). A person is
+unlikely to do this; check by tapping two notifications quickly on an iPad.

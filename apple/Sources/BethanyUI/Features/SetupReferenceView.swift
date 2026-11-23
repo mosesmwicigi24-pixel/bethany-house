@@ -25,6 +25,7 @@ struct CountriesView: View {
                 let s = j["stats"] ?? .null
                 HStack { Pill("\(s["total"]?.int ?? 0) countries", .neutral); Pill("\(s["active"]?.int ?? 0) active", .success); Pill("\(s["shipping_enabled"]?.int ?? 0) ship", .info) }
                 let rows = (j["data"]?.records ?? []).filter { filter.isEmpty || ($0.string("name") ?? "").localizedCaseInsensitiveContains(filter) || ($0.string("code") ?? "").localizedCaseInsensitiveContains(filter) }
+                if rows.isEmpty { EmptyState(filter.isEmpty ? "No countries yet" : "No countries match", message: filter.isEmpty ? "Countries added here are where the storefront sells and ships." : "Try another name or code.", symbol: "globe") }
                 ForEach(rows) { c in
                     SupportListRow("\(c.string("flag") ?? "") \(c.string("name") ?? "") (\(c.string("code") ?? ""))", subtitle: "\(c.string("region") ?? "") · \(c.string("default_currency_code") ?? "—") · +\(c.string("phone_code") ?? "")\(c["is_shipping_enabled"]?.bool == true ? " · ships (std \(c["standard_shipping_cost"]?.string ?? "—"), express \(c["express_shipping_cost"]?.string ?? "—"), free over \(c["free_shipping_threshold"]?.string ?? "—"), \(c["estimated_delivery_days"]?.string ?? "—") days)" : "")") {
                         HStack {
@@ -193,6 +194,7 @@ struct LanguagesView: View {
         Page("Languages", subtitle: "Storefront and console languages") {
             if canEdit { HStack { Spacer(); Button { editing = LanguageDraft() } label: { Label("Add language", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) } }
             RemoteJSON("/v1/admin/languages", version: version) { j, reload in
+                if (j["data"]?.records ?? []).isEmpty { EmptyState("No languages yet", message: "Languages added here are offered on the storefront and console.", symbol: "character.bubble") }
                 ForEach(j["data"]?.records ?? []) { l in
                     SupportListRow("\(l.string("flag") ?? "") \(l.string("name") ?? "") · \(l.string("native_name") ?? "")", subtitle: "\(l.string("code") ?? "") · \(l.string("direction") ?? "ltr")") {
                         HStack {
@@ -251,6 +253,7 @@ struct TaxRatesView: View {
         Page("Tax rates", subtitle: "VAT and other rates applied to sales") {
             if env.session.can("settings.edit") { HStack { Spacer(); Button { editing = TaxDraft() } label: { Label("Add rate", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand) } }
             RemoteJSON("/v1/admin/tax-rates", version: version) { j, reload in
+                if (j["data"]?.records ?? []).isEmpty { EmptyState("No tax rates yet", message: "Rates added here are applied to sales.", symbol: "percent") }
                 ForEach(j["data"]?.records ?? []) { t in
                     SupportListRow("\(t.string("name") ?? "") (\(t.string("code") ?? ""))", subtitle: "\(t["rate"]?.string ?? "")\(t.string("type") == "fixed" ? " fixed" : "%") · applies to \(t.string("applies_to") ?? "all") · \(t.string("country_code") ?? "all countries")") {
                         HStack {

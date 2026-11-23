@@ -24,14 +24,10 @@ struct CustomersListView: View {
 
     var body: some View {
         Page("Customers", subtitle: list.map { "\($0.total) customers" }) {
+            // Two rows: on one, the search field and every picker were cut to a
+            // few letters at a normal Mac window width (UI tour 2026-11-23).
             HStack(spacing: Theme.Space.s) {
                 SalesSearchField(text: $search, placeholder: "Name, phone, email or customer no.") { Task { await reload() } }
-                Picker("Status", selection: $status) { Text("All statuses").tag(""); Text("Active").tag("active"); Text("Inactive").tag("inactive"); Text("Suspended").tag("suspended") }.frame(maxWidth: 150)
-                Picker("Type", selection: $type) { Text("All types").tag(""); Text("Individual").tag("individual"); Text("Business").tag("business") }.frame(maxWidth: 140)
-                Picker("Sort", selection: $sort) {
-                    Text("Newest first").tag("created_at:desc"); Text("Oldest first").tag("created_at:asc")
-                    Text("Name A–Z").tag("name:asc"); Text("Name Z–A").tag("name:desc")
-                }.frame(maxWidth: 150)
                 Spacer()
                 if env.session.permissions.isSuperAdmin {
                     Button { exporting = true } label: { Label("Google Contacts CSV", systemImage: "arrow.down.doc") }
@@ -39,6 +35,15 @@ struct CustomersListView: View {
                 if env.session.can("customers.create") {
                     Button { form = CustomerFormTarget(editing: nil) } label: { Label("New customer", systemImage: "person.badge.plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
                 }
+            }
+            HStack(spacing: Theme.Space.s) {
+                Picker("Status", selection: $status) { Text("All statuses").tag(""); Text("Active").tag("active"); Text("Inactive").tag("inactive"); Text("Suspended").tag("suspended") }.frame(maxWidth: 150)
+                Picker("Type", selection: $type) { Text("All types").tag(""); Text("Individual").tag("individual"); Text("Business").tag("business") }.frame(maxWidth: 140)
+                Picker("Sort", selection: $sort) {
+                    Text("Newest first").tag("created_at:desc"); Text("Oldest first").tag("created_at:asc")
+                    Text("Name A–Z").tag("name:asc"); Text("Name Z–A").tag("name:desc")
+                }.frame(maxWidth: 150)
+                Spacer()
             }
             .onChange(of: status) { _, _ in Task { await reload() } }
             .onChange(of: type) { _, _ in Task { await reload() } }
@@ -124,7 +129,7 @@ struct CustomerRowActions: View {
                         Divider()
                         Button("Delete…", role: .destructive) { Task { await delete() } }
                     }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Image(systemName: "ellipsis.circle") }.compactMenu()
                 .fixedSize()
             }
         }

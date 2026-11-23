@@ -224,9 +224,24 @@ public final class LocationService: NSObject, CLLocationManagerDelegate {
     }
 
     nonisolated public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        let message = error.localizedDescription
-        let denied = (error as? CLError)?.code == .denied
+        let message = Self.words(for: error)
+        let ns = error as NSError
+        let denied = ns.domain == kCLErrorDomain && ns.code == CLError.Code.denied.rawValue
         Task { @MainActor in self.failed(message, denied: denied) }
+    }
+
+    /// What a person reads when the device cannot say where it is. The raw
+    /// text was "The operation couldn't be completed. (kCLErrorDomain error 1.)"
+    /// (UI tour run 11, Clock in).
+    nonisolated static func words(for error: Error) -> String {
+        let ns = error as NSError
+        guard ns.domain == kCLErrorDomain else { return error.localizedDescription }
+        switch CLError.Code(rawValue: ns.code) {
+        case .denied: return "Location is off for this app. Turn it on in Settings to clock in."
+        case .locationUnknown: return "This device can't tell where it is yet. Try again in a moment."
+        case .network: return "Finding your location needs a network connection."
+        default: return "This device couldn't find its location (\(ns.code)). Try again in a moment."
+        }
     }
 
     private func authorizationChanged(_ auth: CLAuthorizationStatus) {

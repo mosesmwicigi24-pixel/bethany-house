@@ -206,7 +206,13 @@ struct ProductionOrderRow: View {
     @ViewBuilder
     private var metadata: some View {
         if let customer = order.customerLabel { Label(customer, systemImage: "person") }
-        else if !order.isCustomerJob { Label("For stock", systemImage: "shippingbox") }
+        else if order.isCustomerJob {
+            // As the console: a customer's job whose name is missing says so.
+            Label(order.r["customer_order"]?["order_number"]?.string.map { "\($0) · name missing" } ?? "Name missing",
+                  systemImage: "person.crop.circle.badge.questionmark")
+                .foregroundStyle(Theme.Palette.warning)
+        }
+        else { Label("For stock", systemImage: "shippingbox") }
         if let date = order.dueDate { Label { DateText(date, style: .date) } icon: { Image(systemName: "calendar") } }
         if let stage = order.currentStage { Text(stage) }
     }

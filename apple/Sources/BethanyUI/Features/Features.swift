@@ -52,6 +52,9 @@ public struct Page<Content: View>: View {
                 content
             }
             .padding(.horizontal, Theme.Space.gutter)
+            // The first row sat flush under the window toolbar and was clipped
+            // (UI tour 2026-11-23: Dashboard actions, New role, Add currency).
+            .padding(.top, Theme.Space.m)
             .padding(.bottom, Theme.Space.xxl)
             .frame(maxWidth: 1200, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -62,6 +65,22 @@ public struct Page<Content: View>: View {
         .navigationSubtitle(subtitle ?? "")
         #endif
     }
+}
+
+/// A row's "…" actions menu: a small icon button. On the Mac a bare `Menu`
+/// draws as a wide pop-up button across the row (UI tour 2026-11-23, Users).
+public struct CompactMenuStyle: ViewModifier {
+    public func body(content: Content) -> some View {
+        #if os(macOS)
+        content.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        #else
+        content
+        #endif
+    }
+}
+
+extension View {
+    public func compactMenu() -> some View { modifier(CompactMenuStyle()) }
 }
 
 /// Adaptive grid: as many tiles per row as the width allows.

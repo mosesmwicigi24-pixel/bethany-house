@@ -27,6 +27,7 @@ public struct MobileShell: View {
         .securityPrompts()
         .tracksActivity()
         .overlay(alignment: .bottom) { ToastHost(env.toasts).padding(.bottom, 60) }
+        .uiTestRouteField()
         .overlay { BiometricLockOverlay(lock: env.biometrics) { await env.session.signOut(); await env.sessionDidChange() } }
     }
 }
@@ -185,10 +186,10 @@ struct PadShell: View {
                 }
             }
         } detail: {
-            NavigationStack(path: $nav.path) {
+            NavigationStack(path: nav.pathBinding(for: nav.selection)) {
                 RouteView(nav.selection ?? env.session.home)
-                    .id(nav.selection)
                     .navigationDestination(for: Route.self) { RouteView($0) }
+                    .task(id: nav.selection) { await Task.yield(); nav.openPending(in: nav.selection) }
                     .toolbar {
                         // Search reaches orders, customers and products: Bethany Hub's only.
                         if env.session.flavor == .hub {
@@ -199,6 +200,7 @@ struct PadShell: View {
                         }
                     }
             }
+            .id(nav.selection)   // as MacShell: a new section is a new stack
         }
         .sheet(isPresented: $nav.searchPresented) { CommandPalette() }
         .onAppear { if nav.selection == nil { nav.selection = env.session.home } }

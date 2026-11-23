@@ -399,9 +399,11 @@ struct ColleaguesView: View {
                 let line = [c.string("job_title"), c.string("department")].compactMap { $0 }.joined(separator: " · ")
                 let outlets = c.strings("outlets")
                 Text("\(line.isEmpty ? "—" : line)\(outlets.isEmpty ? "" : " · \(outlets.joined(separator: ", "))")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
-                HStack(spacing: Theme.Space.m) {
-                    if let phone = c.string("phone"), let u = URL(string: "tel:\(phone.filter { !$0.isWhitespace })") { Link("📞 \(phone)", destination: u) }
-                    if let email = c.string("email"), let u = URL(string: "mailto:\(email)") { Link("✉️ \(email)", destination: u).lineLimit(1) }
+                // Side by side when they fit; stacked in a narrow card (the email
+                // broke under its icon on the Mac, UI tour 2026-11-23).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.m) { contactLinks(c) }
+                    VStack(alignment: .leading, spacing: 2) { contactLinks(c) }
                 }
                 .font(Theme.Font.caption)
                 HStack(spacing: Theme.Space.m) {
@@ -421,6 +423,12 @@ struct ColleaguesView: View {
     }
 
     /// Open or find the DM (`POST channels/dm {user_id}`) and go to it.
+    @ViewBuilder
+    private func contactLinks(_ c: Record) -> some View {
+        if let phone = c.string("phone"), let u = URL(string: "tel:\(phone.filter { !$0.isWhitespace })") { Link(destination: u) { Label(phone, systemImage: "phone").lineLimit(1) } }
+        if let email = c.string("email"), let u = URL(string: "mailto:\(email)") { Link(destination: u) { Label(email, systemImage: "envelope").lineLimit(1) } }
+    }
+
     private func message(_ c: Record) async {
         guard let uid = c.int("id") else { return }
         busy = true; defer { busy = false }

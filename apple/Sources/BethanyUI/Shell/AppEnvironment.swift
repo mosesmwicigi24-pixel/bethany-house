@@ -62,10 +62,16 @@ public final class AppEnvironment {
         config.hubURL.appendingPathComponent("admin" + route.consolePath)
     }
 
+    /// Once per app run. Each window (Mac: ⌘N, a link; iPad: a second scene)
+    /// runs its `.task`; a second start would restore the session again and
+    /// open a second realtime connection without closing the first.
     public func start() async {
+        guard !started else { return }
+        started = true
         await session.start()
         await sessionDidChange()
     }
+    @ObservationIgnored private var started = false
 
     /// Resolve the signed-in person's store even when the shell is still
     /// finishing its session-change observation.
@@ -158,16 +164,28 @@ public final class Navigator {
     public var selection: Route?
     public var path: [Route] = []
     public var searchPresented = false
+    /// A record waiting for its section's stack to appear (see `go(_:)`).
+    public private(set) var pending: Route?
 
     public init() {}
 
     public func go(_ route: Route) {
+        pending = nil
         if let item = NavCatalogue.item(for: route) {
             selection = item.route
             path = []
         } else if let parent = Navigator.parent(of: route) {
-            selection = parent
-            path = [route]
+            if selection == parent {
+                path = [route]
+            } else {
+                // Another section: show it first, then open the record once
+                // its stack is on screen (openPending). A stack created with
+                // the record already in its path showed a blank page or the
+                // record twice on the iPad (UI tour run 11).
+                selection = parent
+                path = []
+                pending = route
+            }
         } else {
             selection = route
             path = []
@@ -175,6 +193,26 @@ public final class Navigator {
     }
 
     public func push(_ route: Route) { path.append(route) }
+
+    /// Called by the shell when the stack for `section` has appeared.
+    public func openPending(in section: Route?) {
+        guard let route = pending, section == selection else { return }
+        pending = nil
+        // Dropped if the person chose another section in the meantime.
+        if Navigator.parent(of: route) == section { path = [route] }
+    }
+
+    /// The path binding for the stack showing `section`. A stack that is
+    /// being replaced (the section changed) writes its own path back as it
+    /// goes; that write is ignored, or it would wipe the record `go(_:)` just
+    /// opened in the new section (UI tour, 2026-11-23: records reached from
+    /// another section showed their list, every time on the iPad).
+    public func pathBinding(for section: Route?) -> Binding<[Route]> {
+        Binding(
+            get: { self.path },
+            set: { new in if self.selection == section { self.path = new } }
+        )
+    }
 
     /// The sidebar entry a detail route belongs under (`Route.parent`, BethanyKit).
     public static func parent(of route: Route) -> Route? { route.parent }

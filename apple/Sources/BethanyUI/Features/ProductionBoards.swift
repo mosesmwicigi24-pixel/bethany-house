@@ -23,7 +23,7 @@ struct WIPBoardView: View {
         Page("Work In Progress", subtitle: "Live view of orders moving through the floor") {
             HStack {
                 if env.session.can("production.manage_assignees"), let people {
-                    LookupPicker(label: "Everyone", lookup: people, selection: $personId).frame(maxWidth: 260)
+                    LookupPicker(label: "Person", lookup: people, selection: $personId, none: "Everyone").frame(maxWidth: 260)
                         .onChange(of: personId) { _, id in Task { await loadPerson(id) } }
                 }
                 Spacer()
@@ -184,7 +184,7 @@ struct ProductionCalendarView: View {
                     let active = s["active_count"]?.string ?? "0"
                     let tiles: [(String, String, StatusTone?)] = floorWorker
                         ? [("Your active orders", active, nil)]
-                        : [("Active orders", active, nil), ("Earliest free slot", s["earliest_free_slot"]?.string ?? "—", .info)]
+                        : [("Active orders", active, nil), ("Earliest free slot", s["earliest_free_slot"]?.string.map { Day.format($0, $0.prefix(4) == Day.today().prefix(4) ? "EEE d MMM" : "EEE d MMM yyyy") } ?? "—", .info)]
                     StatsRow(tiles: tiles)
                     let byStage = s["by_stage"]?.object ?? [:]
                     if !byStage.isEmpty {
@@ -302,7 +302,7 @@ struct BomView: View {
         Page("Bill of Materials", subtitle: "What each garment is made of") {
             if let products {
                 HStack {
-                    LookupPicker(label: "Product", lookup: products, selection: $productId).frame(maxWidth: 360)
+                    LookupPicker(label: "Product", lookup: products, selection: $productId, none: "Choose a product").frame(maxWidth: 360)
                     Spacer()
                     if let pid = productId, env.session.can("bom.edit") {
                         Button { editing = BomEdit(productId: pid, bom: nil) } label: { Label("New version", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)

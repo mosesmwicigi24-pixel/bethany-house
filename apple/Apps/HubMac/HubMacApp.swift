@@ -24,6 +24,9 @@ struct HubMacApp: App {
                     await env.start()
                     await delegate.requestPushAuthorization()
                 }
+                // A link (bethanyhub://, universal link, notification) opens in the
+                // window that is already open, not a new one each time.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .onOpenURL { url in
                     // bethanyhub:// and https://hub.bethanyhouse.co.ke/admin/... (universal links)
                     if let route = Route.from(consolePath: url.path) { env.navigator.go(route) }

@@ -62,7 +62,7 @@ struct PayrollPeoplePanel: View {
                         if canEdit { Button("Record commission") { commissionFor = p } }
                         Button(p.salary == nil ? "Set salary" : "Change salary") { env.navigator.go(.people(id: p.id)) }
                         Button("Open employee file") { env.navigator.go(.people(id: p.id)) }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    } label: { Image(systemName: "ellipsis.circle") }.compactMenu()
                     .accessibilityLabel("Actions for \(p.name)")
                 }
             }
@@ -193,7 +193,7 @@ struct CommissionsPanel: View {
                         }
                         if c.canVoid { Button("Void", role: .destructive) { voiding = c } }
                         if let uid = c.userId { Button("Open employee file") { env.navigator.go(.people(id: uid)) } }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    } label: { Image(systemName: "ellipsis.circle") }.compactMenu()
                     .accessibilityLabel("Actions for \(c.transactionRef)")
                 }
             }
