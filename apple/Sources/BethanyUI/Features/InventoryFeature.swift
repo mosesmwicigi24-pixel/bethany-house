@@ -228,6 +228,10 @@ struct OpeningStockSheet: View {
 
 // MARK: - Low stock alerts (GET /v1/admin/inventory/low-stock-alerts?type=)
 
+private extension Record {
+    var alertKey: String { "\(string("type") ?? "")-\(id)" }
+}
+
 struct LowStockView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var res: Resource<JSONValue>?
@@ -248,7 +252,9 @@ struct LowStockView: View {
                     ])
                     let alerts = (j["data"]?.array ?? []).map(Record.init(json:))
                     if alerts.isEmpty { EmptyState("Nothing is running low", symbol: "checkmark.circle") }
-                    ForEach(alerts) { a in alertRow(a) }
+                    // Products and materials share the list and their ids overlap
+                    // (product 3, material 3): the row's identity is both.
+                    ForEach(alerts, id: \.alertKey) { a in alertRow(a) }
                 }
             }
         }

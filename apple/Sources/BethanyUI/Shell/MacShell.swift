@@ -23,13 +23,17 @@ public struct MacShell: View {
                 Group {
                     if let route = nav.selection {
                         RouteView(route)
-                            .id(route)
                     } else {
                         RouteView(env.session.home)
                     }
                 }
                 .navigationDestination(for: Route.self) { RouteView($0) }
             }
+            // A new section is a new stack that starts from the path it was
+            // given: with the identity on the root view alone, a jump into a
+            // record of another section (go(.productionOrder) from Sales)
+            // sometimes kept the old, empty path and showed the list (UI tour).
+            .id(nav.selection)
             .background(Theme.canvas)
         }
         .navigationSplitViewStyle(.balanced)

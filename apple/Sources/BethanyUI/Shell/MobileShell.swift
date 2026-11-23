@@ -138,7 +138,6 @@ struct PadShell: View {
         } detail: {
             NavigationStack(path: $nav.path) {
                 RouteView(nav.selection ?? env.session.home)
-                    .id(nav.selection)
                     .navigationDestination(for: Route.self) { RouteView($0) }
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
@@ -147,6 +146,7 @@ struct PadShell: View {
                         }
                     }
             }
+            .id(nav.selection)   // as MacShell: a new section is a new stack
         }
         .sheet(isPresented: $nav.searchPresented) { CommandPalette() }
         .onAppear { if nav.selection == nil { nav.selection = env.session.home } }
