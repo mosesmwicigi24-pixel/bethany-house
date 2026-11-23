@@ -80,7 +80,11 @@ jobs:
           TOKEN=$(php ../apple/UITests/Fixtures/seed.php | tail -1)
           # Several workers, as a real Hub has: one worker queues every request
           # behind the slowest (the first run took 10 s for the dashboard).
-          PHP_CLI_SERVER_WORKERS=4 nohup php artisan serve --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/serve.log" 2>&1 &
+          # --no-reload: without it artisan ignores PHP_CLI_SERVER_WORKERS and
+          # runs one process (tour run 5's Mac Hub stopped answering after
+          # Messages). If the dev server ever exits, the log says so and it
+          # starts again, so one crash does not fail every later screen.
+          nohup bash -c 'while true; do PHP_CLI_SERVER_WORKERS=4 php artisan serve --no-reload --host 127.0.0.1 --port 8000; echo "[serve exited with $? at $(date)]"; sleep 1; done' > "$RUNNER_TEMP/serve.log" 2>&1 &
           for i in $(seq 1 30); do curl -fs "$HUB/api/v1/settings/currencies" > /dev/null && break; sleep 1; done
           ../apple/UITests/Fixtures/seed_api.sh "$HUB" "$TOKEN"
 
