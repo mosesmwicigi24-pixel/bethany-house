@@ -70,32 +70,90 @@ struct PaymentMethodSheet: View {
     }
 }
 
-/// PUT /payment-methods-management/{id}/config {configuration: {key: value}}
+/// PUT /payment-methods-management/{id}/config {configuration: {key: value}}.
+///
+/// The console's fixed fields per provider (PaymentMethodsPage.tsx, #576). A
+/// saved secret never comes back: the server answers it as "" and says in
+/// `config_set` which keys are saved. A key left blank keeps the saved one
+/// (the server drops blank and masked values and merges the rest), so a key
+/// cannot be removed from here. `environment` must be sandbox or production.
+struct PaymentCredentialField {
+    let key: String
+    let label: String
+    var secret = false
+    var hint: String?
+    var options: [(String, String)]?
+
+    static func fields(for code: String?) -> [PaymentCredentialField] {
+        switch code {
+        case "mpesa": return [
+            .init(key: "account_name", label: "Business name", hint: "The name registered on the paybill or till, as Safaricom shows it."),
+            .init(key: "shortcode", label: "Shortcode (paybill or till number)"),
+            .init(key: "consumer_key", label: "Consumer key", secret: true, hint: "From your app on the Safaricom Daraja portal."),
+            .init(key: "consumer_secret", label: "Consumer secret", secret: true),
+            .init(key: "passkey", label: "Passkey", secret: true, hint: "The Lipa na M-Pesa Online passkey Safaricom sent you."),
+            .init(key: "environment", label: "Environment", options: [("sandbox", "Sandbox (testing)"), ("production", "Production (real money)")]),
+        ]
+        case "paystack": return [.init(key: "public_key", label: "Public key"), .init(key: "secret_key", label: "Secret key", secret: true)]
+        case "flutterwave": return [.init(key: "public_key", label: "Public key"), .init(key: "secret_key", label: "Secret key", secret: true), .init(key: "encryption_key", label: "Encryption key", secret: true)]
+        default: return []
+        }
+    }
+}
+
 struct PaymentConfigSheet: View {
     @Environment(AppEnvironment.self) private var env
     let method: Record
     let saved: () -> Void
-    @State private var pairs: [(String, String)] = []
+    @State private var values: [String: String] = [:]
+    /// The provider's fixed fields, then any other key already stored on the
+    /// method (e.g. `instructions` on manual methods) — those the console's
+    /// form does not list; kept here so the native form loses nothing it had.
+    private var fields: [PaymentCredentialField] {
+        let fixed = PaymentCredentialField.fields(for: method.string("code"))
+        let known = Set(fixed.map(\.key))
+        let stored = (method["config_set"]?.object ?? method["config"]?.object ?? [:]).keys.filter { !known.contains($0) }.sorted()
+        return fixed + stored.map { PaymentCredentialField(key: $0, label: $0.humanized, secret: true) }
+    }
+    private func isSaved(_ key: String) -> Bool { method["config_set"]?[key]?.bool == true }
     var body: some View {
         EditSheet("Configuration · \(method.string("name") ?? "")", save: {
-            var o: [String: JSONValue] = [:]
-            for (k, v) in pairs where !k.isEmpty { o[k] = .string(v) }
+            let o = values.mapValues { JSONValue.string($0) }
             let r = try await env.session.client.put("/v1/admin/payment-methods-management/\(method.id)/config", json: J.obj([("configuration", .object(o))]))
             toastResult(env, r); saved()
-        }) { _ in
-            Text("Provider keys and settings. Secrets are stored server-side; they come back masked.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
-            ForEach(pairs.indices, id: \.self) { i in
-                HStack {
-                    TextField("key", text: Binding(get: { pairs[i].0 }, set: { pairs[i].0 = $0 })).textFieldStyle(.roundedBorder).font(Theme.Font.mono)
-                    TextField("value", text: Binding(get: { pairs[i].1 }, set: { pairs[i].1 = $0 })).textFieldStyle(.roundedBorder)
-                    Button(role: .destructive) { pairs.remove(at: i) } label: { Image(systemName: "minus.circle") }
+        }) { e in
+            if fields.isEmpty {
+                Text("No credentials required for this payment method.").font(Theme.Font.body).foregroundStyle(Theme.textSecondary)
+            } else {
+                Text("A saved key is never shown again. Leave a key blank to keep the one that is saved; type a new one to replace it.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                ForEach(fields, id: \.key) { f in
+                    let binding = Binding(get: { values[f.key] ?? "" }, set: { values[f.key] = $0 })
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let options = f.options {
+                            OptionPicker(f.label, binding, options: [("", "Choose…")] + options)
+                        } else {
+                            Text(f.label).font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
+                            if f.secret {
+                                SecureField(isSaved(f.key) ? "•••••••• saved" : "", text: binding).textFieldStyle(.roundedBorder).font(Theme.Font.mono)
+                            } else {
+                                TextField("", text: binding).textFieldStyle(.roundedBorder).font(Theme.Font.mono)
+                            }
+                        }
+                        if let hint = f.secret && isSaved(f.key) ? "Saved. Leave blank to keep it." : f.hint {
+                            Text(hint).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                        }
+                        if let err = e?.errors["configuration.\(f.key)"]?.first ?? e?.errors[f.key]?.first {
+                            Text(err).font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger)
+                        }
+                    }
                 }
             }
-            Button { pairs.append(("", "")) } label: { Label("Add key", systemImage: "plus") }
         }
         .task {
-            let cfg = method["configuration"]?.object ?? method["config"]?.object ?? [:]
-            pairs = cfg.keys.sorted().map { ($0, cfg[$0]?.string ?? "") }
+            // As the console: start from what came back — plain keys with their
+            // value, secrets as "" (the server keeps a saved key when it gets "").
+            let cfg = method["config"]?.object ?? method["configuration"]?.object ?? [:]
+            values = cfg.compactMapValues { $0.string }
         }
     }
 }

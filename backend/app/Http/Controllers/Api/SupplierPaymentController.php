@@ -72,6 +72,46 @@ class SupplierPaymentController extends Controller
         ]);
     }
 
+    // GET /purchase-orders/payables/orders — every order that still owes money.
+    public function owedOrders()
+    {
+        $rows = SupplierPayables::owedOrders();
+
+        return response()->json([
+            'data'           => $rows,
+            'total_owed_kes' => round(collect($rows)->sum(fn ($r) => (float) ($r['balance_kes'] ?? 0)), 2),
+            'unconverted'    => collect($rows)->filter(fn ($r) => $r['balance_kes'] === null)->pluck('currency')->unique()->values(),
+        ]);
+    }
+
+    /**
+     * POST /purchase-orders/payments/bulk — mark several orders as paid in
+     * full (owner, 2026-11-23). The super admin's alone: one click can clear
+     * a large payable. One payment per order, through SupplierPayables.
+     */
+    public function bulk(Request $request)
+    {
+        abort_unless($request->user()->hasRole('super_admin'), 403, 'Only the super admin marks purchase orders as paid in bulk.');
+
+        $validated = $request->validate([
+            'purchase_order_ids'   => 'required|array|min:1|max:500',
+            'purchase_order_ids.*' => 'integer',
+            'method'               => 'required|in:' . implode(',', SupplierPayment::METHODS),
+            'reference'            => 'nullable|string|max:120',
+            'date_mode'            => 'required|in:order_date,one_date',
+            'paid_at'              => 'nullable|required_if:date_mode,one_date|date',
+            'notes'                => 'nullable|string|max:2000',
+            'client_request_id'    => 'required|string|max:64',
+        ]);
+
+        $result = SupplierPayables::payInFull($validated['purchase_order_ids'], $validated, $request->user());
+
+        return response()->json([
+            'message' => count($result['paid']) . ' purchase order' . (count($result['paid']) === 1 ? '' : 's') . ' marked as paid'
+                . ($result['skipped'] ? ', ' . count($result['skipped']) . ' skipped.' : '.'),
+        ] + $result);
+    }
+
     /**
      * GET /purchase-orders/payables — what is owed to each supplier.
      *

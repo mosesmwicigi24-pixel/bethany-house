@@ -6,6 +6,7 @@ import BethanyKit
 /// pay structures, leave, training, signing requests and the timesheet.
 struct PeopleListView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @State private var q = ""
     @State private var department = ""
     @State private var page = 1
@@ -26,7 +27,7 @@ struct PeopleListView: View {
                                 Text("\(d.string("title") ?? "") (\(d.string("kind")?.humanized ?? ""))").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
                                 Spacer()
                                 Text(Day.format(d.string("expires_at"))).font(Theme.Font.caption).foregroundStyle(d["expired"]?.bool == true ? Theme.Palette.danger : Theme.Palette.warning)
-                                if let uid = d["user"]?["id"]?.int { Button("Open") { env.navigator.push(.people(id: uid)) }.font(Theme.Font.secondary) }
+                                if let uid = d["user"]?["id"]?.int { Button("Open") { openPerson(uid) }.font(Theme.Font.secondary) }
                             }
                         }
                     }
@@ -38,7 +39,7 @@ struct PeopleListView: View {
                     OptionPicker("Department", $department, options: [("", "All departments")] + departments.map { ($0, $0) })
                 }
                 ForEach(j["data"]?.records ?? []) { p in
-                    Button { env.navigator.push(.people(id: p.int("id") ?? 0)) } label: {
+                    Button { if let id = p.int("id") { openPerson(id) } } label: {
                         HStack(spacing: Theme.Space.m) {
                             Avatar(name: p.string("name") ?? "?", size: 36)
                             VStack(alignment: .leading, spacing: 2) {
@@ -66,6 +67,11 @@ struct PeopleListView: View {
                 }
             }
         }
+    }
+
+    private func openPerson(_ id: Int) {
+        if let currentRoutePath { currentRoutePath.wrappedValue.append(.people(id: id)) }
+        else { env.navigator.push(.people(id: id)) }
     }
 }
 

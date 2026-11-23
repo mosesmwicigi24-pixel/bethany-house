@@ -16,7 +16,9 @@ public struct MobileShell: View {
 
     public var body: some View {
         Group {
-            if sizeClass == .regular {
+            if !env.session.mayUseApp {
+                WorkshopOnlyView()
+            } else if sizeClass == .regular {
                 PadShell()
             } else {
                 PhoneShell()
@@ -34,23 +36,26 @@ struct PhoneShell: View {
     @Environment(AppEnvironment.self) private var env
     @State private var tab: Int = 0
     @State private var paths: [Int: [Route]] = [:]
-    @State private var moreRoute: Route?
 
     var body: some View {
-        let tabs = NavCatalogue.phoneTabs(for: env.session.permissions, home: env.session.home)
+        let tabs = env.session.flavor.phoneTabs(for: env.session.permissions, home: env.session.home)
         TabView(selection: $tab) {
             ForEach(Array(tabs.enumerated()), id: \.offset) { i, item in
                 NavigationStack(path: pathBinding(i)) {
                     RouteView(item.route)
                         .navigationDestination(for: Route.self) { RouteView($0) }
                 }
+                .environment(\.currentRoutePath, pathBinding(i))
                 .tabItem { Label(item.label, systemImage: item.icon) }
                 .tag(i)
             }
             NavigationStack(path: pathBinding(99)) {
-                MoreList()
+                MoreList(tabRoutes: Set(tabs.map(\.route))) { route in
+                    paths[99, default: []].append(route)
+                }
                     .navigationDestination(for: Route.self) { RouteView($0) }
             }
+            .environment(\.currentRoutePath, pathBinding(99))
             .tabItem { Label("More", systemImage: "line.3.horizontal") }
             .tag(99)
         }
@@ -75,28 +80,73 @@ struct PhoneShell: View {
 
 struct MoreList: View {
     @Environment(AppEnvironment.self) private var env
+    let tabRoutes: Set<Route>
+    let open: (Route) -> Void
     @State private var unsent = 0
+
+    private var groups: [NavGroup] {
+        let groups = env.session.flavor.groups(for: env.session.permissions)
+        guard env.session.flavor == .tailors else { return groups }
+        let priority = groups.filter { $0.label == "Production" } + groups.filter { $0.label != "Production" }
+        return priority.flatMap { group -> [NavGroup] in
+            let items = group.items.filter { !tabRoutes.contains($0.route) }
+            guard !items.isEmpty else { return [] }
+            if group.label == "Me" {
+                let personal: Set<Route> = [.myShifts, .myLeave, .myTimesheet, .myPayslips, .myAdvances]
+                let workday = items.filter { !personal.contains($0.route) }
+                let timeAndPay = items.filter { personal.contains($0.route) }
+                return [NavGroup("My workday", workday), NavGroup("Time & pay", timeAndPay)]
+                    .filter { !$0.items.isEmpty }
+            }
+            return [NavGroup(group.label == "Production" ? "Workshop" : group.label, items)]
+        }
+    }
+
     var body: some View {
         List {
-            ForEach(NavCatalogue.groups.compactMap { $0.visible(for: env.session.permissions) }) { group in
+            ForEach(groups) { group in
                 Section(group.label) {
                     ForEach(group.items) { item in
-                        NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) }
+                        row(item)
                             .badge(item.route == .peopleRequests ? env.peopleRequests : item.route == .notifications ? env.unreadNotifications : 0)
                     }
                 }
             }
             .task { await env.refreshCounts() }
             Section {
-                ForEach(NavCatalogue.userMenu) { item in NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) } }
+                ForEach(env.session.flavor.userMenu) { item in row(item) }
                 Button(role: .destructive) { Task { unsent = await env.requestSignOut() } } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
             } header: {
                 Text(env.session.me?.name ?? "")
             }
         }
         .navigationTitle("More")
+        .navigationBarTitleDisplayMode(.inline)
         .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, Theme.tapTarget)
         .modifier(SignOutGuard(unsent: $unsent))
+    }
+
+    private func row(_ item: NavItem) -> some View {
+        Button { open(item.route) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: item.icon)
+                    .font(.body)
+                    .foregroundStyle(Theme.Palette.brandDeep)
+                    .frame(width: 22)
+                    .accessibilityHidden(true)
+                Text(item.label).font(.subheadline).foregroundStyle(Theme.text)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            .frame(minHeight: Theme.tapTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
     }
 }
 
@@ -109,7 +159,7 @@ struct PadShell: View {
         @Bindable var nav = env.navigator
         NavigationSplitView(columnVisibility: $visibility) {
             List(selection: $nav.selection) {
-                ForEach(NavCatalogue.groups.compactMap { $0.visible(for: env.session.permissions) }) { group in
+                ForEach(env.session.flavor.groups(for: env.session.permissions)) { group in
                     Section(group.label) {
                         ForEach(group.items) { item in
                             NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) }
@@ -125,11 +175,11 @@ struct PadShell: View {
                     try? await Task.sleep(nanoseconds: 60_000_000_000)
                 }
             }
-            .navigationTitle("Hub")
+            .navigationTitle(env.session.flavor == .tailors ? "Workshop" : "Hub")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        ForEach(NavCatalogue.userMenu) { item in Button(item.label) { env.navigator.go(item.route) } }
+                        ForEach(env.session.flavor.userMenu) { item in Button(item.label) { env.navigator.go(item.route) } }
                         Divider()
                         Button("Sign out", role: .destructive) { Task { unsent = await env.requestSignOut() } }
                     } label: { Image(systemName: "person.crop.circle") }
@@ -141,9 +191,12 @@ struct PadShell: View {
                     .navigationDestination(for: Route.self) { RouteView($0) }
                     .task(id: nav.selection) { await Task.yield(); nav.openPending(in: nav.selection) }
                     .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button { env.navigator.searchPresented = true } label: { Image(systemName: "magnifyingglass") }
-                                .keyboardShortcut("k", modifiers: [.command])
+                        // Search reaches orders, customers and products: Bethany Hub's only.
+                        if env.session.flavor == .hub {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button { env.navigator.searchPresented = true } label: { Image(systemName: "magnifyingglass") }
+                                    .keyboardShortcut("k", modifiers: [.command])
+                            }
                         }
                     }
             }

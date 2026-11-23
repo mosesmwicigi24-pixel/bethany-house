@@ -7,6 +7,7 @@ import BethanyKit
 /// (the feed's `can_post`) posts the rest and sees scheduled posts.
 struct UpdatesView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.currentRoutePath) private var currentRoutePath
     @State private var kind = ""
     @State private var rows: [Record] = []
     @State private var page = 1
@@ -29,7 +30,13 @@ struct UpdatesView: View {
             ChipPicker(options: [("", "All"), ("update", "Updates"), ("recognition", "Recognitions"), ("event", "Events"), ("celebration", "Celebrations")], selection: $kind)
             LoadableView(state, retry: { Task { await load(reset: true) } }, isEmpty: { $0.isEmpty }, empty: { EmptyState("Nothing here yet", message: canPost ? "Post the first update." : nil, symbol: "megaphone") }) { posts in
                 LazyVStack(spacing: Theme.Space.m) {
-                    ForEach(posts) { p in PostCard(post: p) { env.navigator.push(.updates(id: p.int("id"))) } }
+                    ForEach(posts) { p in
+                        PostCard(post: p) {
+                            let route = Route.updates(id: p.int("id"))
+                            if let currentRoutePath { currentRoutePath.wrappedValue.append(route) }
+                            else { env.navigator.push(route) }
+                        }
+                    }
                     if hasMore {
                         Button("Older posts") { Task { await load(reset: false) } }.buttonStyle(.bordered).frame(maxWidth: .infinity)
                     }

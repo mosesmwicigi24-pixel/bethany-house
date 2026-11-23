@@ -17,6 +17,7 @@ public final class AppEnvironment {
     public let kioskAPI: KioskAPI
     public private(set) var realtime: RealtimeClient?
     public private(set) var offline: OfflineStore?
+    private var offlineUserId: Int?
 
     public struct Config: Sendable {
         public var hubURL: URL
@@ -24,10 +25,14 @@ public final class AppEnvironment {
         public var reverbHost: String?
         public var reverbPort: Int
         public var reverbScheme: String
+        /// Bethany Hub or Tailors Hub (`AppFlavor`).
+        public var flavor: AppFlavor
 
         /// Production defaults; a dev build points `hubURL` at a local stack.
         public init(hubURL: URL = URL(string: "https://hub.bethanyhouse.co.ke")!,
-                    reverbKey: String? = nil, reverbHost: String? = nil, reverbPort: Int = 443, reverbScheme: String = "wss") {
+                    reverbKey: String? = nil, reverbHost: String? = nil, reverbPort: Int = 443, reverbScheme: String = "wss",
+                    flavor: AppFlavor = .hub) {
+            self.flavor = flavor
             self.hubURL = hubURL
             self.reverbKey = reverbKey
             self.reverbHost = reverbHost ?? hubURL.host
@@ -40,12 +45,16 @@ public final class AppEnvironment {
 
     public init(config: Config = Config()) {
         self.config = config
-        self.session = SessionStore(baseURL: config.hubURL.appendingPathComponent("api"))
+        self.session = SessionStore(baseURL: config.hubURL.appendingPathComponent("api"), flavor: config.flavor)
         let kioskStore = KioskStore()
         self.kiosk = kioskStore
         self.kioskAPI = KioskAPI(baseURL: config.hubURL.appendingPathComponent("api"), store: kioskStore, device: session.device)
-        let push = PushRegistration(client: session.client, device: session.device)
-        session.pushRegistrar = push
+        // Push is Bethany Hub's only: the server sends to one app identity
+        // (APNS_BUNDLE_ID) and drops any other app's device token, so Tailors
+        // Hub does not register until the server can address it.
+        if config.flavor == .hub {
+            session.pushRegistrar = PushRegistration(client: session.client, device: session.device)
+        }
     }
 
     /// Console URL for a route, for sharing and for the bridge view.
@@ -64,10 +73,21 @@ public final class AppEnvironment {
     }
     @ObservationIgnored private var started = false
 
+    /// Resolve the signed-in person's store even when the shell is still
+    /// finishing its session-change observation.
+    public func offlineStoreForCurrentUser() -> OfflineStore? {
+        guard session.state == .signedIn, let me = session.me else { return nil }
+        if offlineUserId != me.id || offline == nil {
+            offline = OfflineStore(userId: me.id)
+            offlineUserId = me.id
+        }
+        return offline
+    }
+
     /// Call after sign-in/sign-out: realtime and offline follow the person.
     public func sessionDidChange() async {
         if let me = session.me, session.state == .signedIn {
-            offline = OfflineStore(userId: me.id)
+            _ = offlineStoreForCurrentUser()
             if let key = config.reverbKey, let host = config.reverbHost {
                 let rt = RealtimeClient(configuration: .init(appKey: key, host: host, port: config.reverbPort, scheme: config.reverbScheme), client: session.client)
                 realtime = rt
@@ -76,11 +96,12 @@ public final class AppEnvironment {
                     Task { @MainActor in self?.handleNotificationPushed(event) }
                 }
             }
-            connection.pendingCount = await offline?.pending().count ?? 0
+            await refreshPendingCount()
         } else {
             await realtime?.disconnect()
             realtime = nil
             offline = nil
+            offlineUserId = nil
         }
     }
 
@@ -105,12 +126,32 @@ public final class AppEnvironment {
         if let title = event.payload?["title"]?.string { toasts.show(title, tone: .info) }
     }
 
-    /// Replays queued offline operations when a connection returns.
+    /// The pending badge, from a checked read: an unreadable queue is flagged
+    /// (`pendingUnreadable`), never shown as nothing waiting.
+    public func refreshPendingCount() async {
+        guard let offline else { connection.pendingCount = 0; connection.pendingUnreadable = false; return }
+        do {
+            connection.pendingCount = try await offline.pendingChecked().count
+            connection.pendingUnreadable = false
+        } catch {
+            connection.pendingUnreadable = true
+        }
+    }
+
+    /// Replays queued offline operations when a connection returns. Every
+    /// send goes through `OfflineStore.send`, the same path as a screen's
+    /// "Send now", so nothing is sent twice.
     public func replayPending() async {
         guard let offline, connection.isOnline else { return }
         let result = await offline.replay(with: session.client)
-        connection.pendingCount = await offline.pending().count
+        await refreshPendingCount()
+        if result.unreadable {
+            toasts.show("Changes saved on this device could not be read, so they were not sent. Don't sign out; ask a manager for help.", tone: .danger)
+        }
         if !result.sent.isEmpty { toasts.show("\(result.sent.count) saved change\(result.sent.count == 1 ? "" : "s") sent") }
+        if !result.notCleared.isEmpty {
+            toasts.show("\(result.notCleared.count) sent change\(result.notCleared.count == 1 ? " was" : "s were") received by the Hub but could not be cleared from this device. They will not be sent again.", tone: .warning)
+        }
         for (op, e) in result.refused { toasts.show("\(op.kind.humanized) was refused: \(e.message)", tone: .danger) }
     }
 }
@@ -173,30 +214,8 @@ public final class Navigator {
         )
     }
 
-    /// The sidebar entry a detail route belongs under.
-    public static func parent(of route: Route) -> Route? {
-        switch route {
-        case .order: return .orders()
-        case .shipment: return .shipments
-        case .customer: return .customers
-        case .handoff: return .orders()
-        case .productionOrder: return .productionOrders
-        case .adjustment: return .adjustments
-        case .transfer: return .transfers
-        case .purchaseOrder: return .purchaseOrders
-        case .grn: return .goodsReceipt
-        case .purchaseReturn: return .purchaseReturns
-        case .expense: return .expenses
-        case .product(let id, let new): return (id != nil || new) ? .products : nil
-        case .people(let id): return id != nil ? .people() : nil
-        case .updates(let id): return id != nil ? .updates() : nil
-        case .handbook(let id): return id != nil ? .handbook() : nil
-        case .courses(let id): return id != nil ? .courses() : nil
-        case .sign(let id): return id != nil ? .sign() : nil
-        case .comms(let id): return id != nil ? .comms() : nil
-        default: return nil
-        }
-    }
+    /// The sidebar entry a detail route belongs under (`Route.parent`, BethanyKit).
+    public static func parent(of route: Route) -> Route? { route.parent }
 }
 
 /// Touch every user interaction so the client-side idle clock matches the server's.

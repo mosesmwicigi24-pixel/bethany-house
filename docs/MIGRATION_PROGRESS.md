@@ -390,6 +390,150 @@ builds (#561's log, `sort -u`). Every one is fixed at its cause, not hidden:
 
 Verification is the Apple CI build's warning count on this branch.
 
+### Slice C: material sourcing (#573), branch `apple/parity-material-sourcing`
+
+- `BethanyKit/MaterialSourcing.swift` mirrors the console's
+  `components/production/MaterialSourcing.tsx`: default (store when it has
+  enough, else buy), split (starts at what is free, short of the whole need),
+  the three refusals ("Only 1 m free in the store.", "Enter how much comes
+  from the store.", "Less than 16 pcs, or choose From store."), the payload,
+  the "On raising: …" summary, the raise toast, and the job's state (status,
+  what is outstanding, free + what the job already holds, the current
+  decision as choices). `MaterialSourcingTests` (6) on real answers from the
+  scratch Hub, seeded as backend `MaterialSourcingTest` (2 shirts = 5 m fabric
+  + 16 buttons; store 1 m and 120).
+- **Send to production** (`RaiseProductionSheet`): GET
+  `orders/{id}/items/{itemId}/production-materials`, a From store / To buy /
+  Split row per material, `materials` sent with the raise; blocked while
+  loading or when a row is refused; the console's empty-BOM and load-failure
+  wording. Scratch Hub: fabric 1 + 4, buttons 16 + 0 was accepted, answer
+  `materials_status: "waiting"`.
+- **Production job**: "Where the materials come from" panel (GET/POST
+  `production-orders/{id}/material-sourcing`), status chip, per-material
+  issued / reserved / being bought / not yet sourced; "Choose sources" /
+  "Change" for `production.raise_order` or `production.manage_assignees`
+  while the job is open. Scratch Hub refused 5 m from store with "White
+  cotton fabric: only 0 m free in the store."
+- **Purchase order lines**: the job and customer order a material line was
+  raised for, "job cancelled", and "Move to another supplier" on a draft for
+  `procurement.create` (POST `…/items/{itemId}/move`), then opens the order
+  the line joined. Scratch Hub: "Line moved to PO-20261121-0002."
+- **Raw materials**: "N m to buy · set a supplier" on the list
+  (`needs_supplier`, sent to procurement only) and "Bought from" on edit for
+  `procurement.create`, sent only when changed.
+
+The console's "Adjust price" step of 0.01 needs nothing natively: Apple never
+rounded a typed unit price, and no Swift code rounds prices to whole units
+(the #573 "prices keep two decimals" half).
+
+### Slice D: BOM cost and product media (#563), branch `apple/parity-bom-media`
+
+- **BOM cost source**: each saved BOM line says where its cost came from —
+  "last bought 3 Oct · PO-OLD-1" or "set by Super Admin, 21 Nov" (Nairobi
+  day) — and the total adds "+ N materials without a cost". A material with
+  no cost shows "No cost · set" for `inventory.adjust` (the cost is set on the
+  material, PUT `inventory/materials/{id}` `{unit_cost}`; a change past the
+  threshold comes back as a proposal and is said so), else "No cost on
+  record". `BethanyKit/BomCost.swift`, `BomCostTests` (4) on a real GET
+  `products/8/bom` from the scratch Hub: fabric bought on PO-OLD-1, buttons
+  set by hand (CHG-1), lining uncosted; total 2.5 × 400 + 8 × 6 = 1,048.
+- **Product media**: the "video but no photos" notice; a clip's type is
+  checked (MP4, MOV, M4V, WebM) and a clip longer than 6 s is flagged before
+  upload (`backend/config/video.php` `max_seconds`); an upload progress bar
+  with a percentage (`APIClient.Request.uploadProgress`, a
+  `URLSessionTaskDelegate` on `data(for:delegate:)`); a tile-sized preview of
+  the clip and "Open the clip"; photos and clips can be dropped on their
+  sections. The raw clip URL is no longer printed.
+
+### Slice B: quotation pricing (#566), branch `apple/parity-quote-pricing`
+
+The money-path gap: the native picker showed a product's KES base price and
+left the unit price to be typed, so on a USD quotation "22,000" could be
+entered under a dollar label — the defect #566 fixed in the console.
+
+- `BethanyKit/QuotePricing.swift`: a picked product's line is priced by
+  POST /quotations/reprice `{from: "KES", to: <quote currency>}` with the
+  search's KES base price (sale, else list); the line takes the server's
+  answer; `kept` lines are flagged "No USD price on the hub — type it."; a
+  failed request sets 0 and flags it. `QuotePricingTests` (5) on real
+  answers from the scratch Hub: product 4 → USD 171.50 (its own USD price,
+  not 22,000); KES 10 → USD 0.10 (cents kept); ZMW converted at 0.14
+  (22,000 → 3,080, worked by hand). The `kept` fixture is the controller's
+  shape, not captured (every scratch currency has a pricing rate).
+- Quotation builder: Save waits while lines are pricing; the currency picker
+  and "Add products" are disabled while repricing; the unit-price field names
+  the currency.
+- `QuotationProductPicker`: tick several, "Add N to the quotation", "on the
+  quote" tag, no prices shown — the console's `ProductMultiPicker`. The
+  order-items picker is unchanged.
+
+Not ported, on purpose: the console's live "subtotal + shipping" on the form
+(native keeps "computed by the server when saved" — no client money
+arithmetic), and typing a product name on a free line to pick a product (the
+picker covers it).
+
+## 2026-11-20 — Parity re-check after #563–#577
+
+Fifteen commits landed on `main` after the last parity merge (#562). Each
+console-visible change was compared with the Apple code (`git show` of each
+commit against `apple/Sources`), and `tools/parity/xref_runtime.py` was re-run.
+
+New literal gaps (22, was 20):
+`orders/{id}/items/{itemId}/production-materials` and
+`purchase-orders/{id}/items/{itemId}/move` (#573). `production-orders/{id}/material-sourcing`
+showed as a runtime-built match, but nothing in `apple/Sources` sends it.
+
+| Commit | Console change | Apple before | Slice |
+|---|---|---|---|
+| #564 | Supplier payments: I&M Bank as its own method, nothing preselected | stale list, `bank_transfer` preselected | A |
+| #565 | "Me" nav group renamed "My Workday"; course "Required" wording | old wording | A |
+| #568/#569 | Users: Staff / Website customers tabs; ID and System tag | staff only; no ID/tag | A |
+| #572 | Customer Reviews form: name, stars, review, where posted | no rating — a review added natively was skipped by the storefront | A |
+| #576 | Credentials form: fixed fields per provider, "saved, blank keeps" | free-form key/value | A |
+| #566 | Quotation picker prices each product in the quotation's currency (`quotations/reprice`); tick several | KES base price shown as a hint, price typed by hand | B |
+| #573 | Material sourcing at Send to production; job materials panel; PO line move; material's preferred supplier | missing | C |
+| #563 | BOM cost source and "without a cost"; product media notices/progress | missing | D |
+| #570 | Phone layouts | N/A (native layout) | — |
+| #574 | 14-day repair rule on quotation/invoice | PDFs come from the server, so already carry it; no API field for native screens | owner |
+| #571, #575, #577, #567 | Storefront feeds, webhook rule, starter content | server-only | — |
+
+#577's review approval lives in the Livewire admin (`/customers/reviews`), not
+the React console; outside this migration's scope as the console defines it.
+
+### Slice A (branch `apple/parity-563-577`)
+
+- **Supplier payments** — `BethanyKit/SupplierPaymentMethod.swift` mirrors
+  `SupplierPayment::METHODS` / `NEEDS_REFERENCE` with the console's labels and
+  hints; no method is preselected and the sheet cannot be sent without one;
+  the payments list shows "I&M Bank", not a humanised code.
+  `SupplierPaymentMethodTests` (4), fixture typed from the PHP constants.
+  The server rule itself is pinned by `SupplierPaymentsTest.php:211-213`
+  (no payable PO on the scratch database to try it live).
+- **Users** — segmented Staff / Website customers (`exclude_type=customer` /
+  `user_type=customer`, as the console), the console's note on the customers
+  tab, `#id` on every row and a "System" tag. "Promote to staff" is reachable
+  again (it only shows on a customer). Scratch Hub: `user_type=customer`
+  answered 0 rows; `exclude_type=customer` answered types `staff`, `system`.
+- **Customer Reviews** — the slot is renamed, a new review starts at
+  "Google review" and 5 stars, the form is name / stars / review (2,000) /
+  where posted, `styles.rating` is saved as a number, the list shows stars.
+- **Payment credentials** — the console's fixed fields (M-Pesa: business
+  name, shortcode, consumer key/secret, passkey, environment picker;
+  Paystack; Flutterwave), secrets as secure fields with "•••••••• saved" from
+  `config_set`, blank keeps the saved key. Other keys already stored on a
+  method (scratch Hub: `instructions` on mukuru, wu_moneygram, mpesa_manual,
+  bank_transfer) stay editable as saved fields, which the native form could
+  already do; the console form does not list them. **Owner note:** since #576
+  the server returns `instructions` as "" (it is not in `PLAIN_CONFIG_KEYS`),
+  so no screen can show the text a manual method gives customers.
+- **My Workday** — sidebar group renamed; course toggle reads "Required
+  (waits on Today until passed)". The phone tab stays "Me", as the console's
+  `BottomTabBar.tsx`.
+
+Checks: Linux kit tests (62 in the scratch package, incl. the 4 new) pass;
+`swiftc -parse` on every edited UI file; the macOS build and full kit suite
+are Apple CI's.
+
 ### 2026-11-23 — screen tour on Mac and iPad (branch `apple/ui-tour`)
 
 A UI test (`apple/UITests/ScreenTourTests.swift`, CI job "UI tour" in

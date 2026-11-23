@@ -15,6 +15,7 @@ import ke.co.bethanyhouse.hub.core.ConnectionMonitor
 import ke.co.bethanyhouse.hub.core.DeviceIdentity
 import ke.co.bethanyhouse.hub.core.LocationService
 import ke.co.bethanyhouse.hub.core.OfflineStore
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.PushRegistration
 import ke.co.bethanyhouse.hub.core.RealtimeClient
 import ke.co.bethanyhouse.hub.core.Route
@@ -47,7 +48,9 @@ class AppEnvironment(
     val config = Config(hubUrl, BuildConfig.REVERB_KEY.ifBlank { null }, BuildConfig.REVERB_HOST.ifBlank { null }, BuildConfig.REVERB_PORT, BuildConfig.REVERB_SCHEME)
     val device = DeviceIdentity.current(secureStore, BuildConfig.VERSION_NAME + "+" + BuildConfig.VERSION_CODE)
     val client = ApiClient(config.hubUrl.toHubBaseUrl(), device)
-    val session = SessionStore(client, secureStore)
+    /** Bethany Hub or Tailors Hub, from the build flavour (core AppFlavor). */
+    val flavor = AppFlavor.valueOf(BuildConfig.APP_FLAVOR)
+    val session = SessionStore(client, secureStore, flavor = flavor)
     val push = PushRegistration(client, device, secureStore).also { session.pushRegistrar = it }
     val toasts = Toasts()
     val connection = ConnectionMonitor(app)

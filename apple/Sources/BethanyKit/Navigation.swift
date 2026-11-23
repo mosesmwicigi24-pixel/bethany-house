@@ -305,7 +305,7 @@ public enum NavCatalogue {
             NavItem("Notifications", .notifications, gate: .perm("notifications.view"), icon: "bell"),
             NavItem("Messages", .comms(), icon: "bubble.left.and.bubble.right"),
         ]),
-        NavGroup("Me", [
+        NavGroup("My Workday", [   // renamed from "Me" (console Sidebar.tsx, owner 2026-11-14); the phone tab stays "Me" as in BottomTabBar.tsx
             NavItem("Today", .me, icon: "sun.max"),
             NavItem("Updates", .updates(), icon: "megaphone"),
             NavItem("Checklists", .forms, icon: "checklist"),
@@ -442,6 +442,16 @@ public enum NavCatalogue {
 
     public static func item(for route: Route) -> NavItem? { allItems.first { $0.route == route } }
 
+    /// The gate a screen needs. A detail page that is not itself in the menu
+    /// (one employee's file, one production order) needs its list's gate: an
+    /// employee file needs hr.view like Employee files. `nil` means open to any
+    /// signed-in person. `RouteView` uses this, so a direct link, push tap or
+    /// button cannot reach a detail its list would refuse. The API enforces
+    /// every permission on its own; this is the app's copy.
+    public static func gate(for route: Route) -> NavGate? {
+        item(for: route)?.gate ?? route.parent.flatMap { item(for: $0)?.gate }
+    }
+
     /// The phone's bottom tab bar (BottomTabBar.tsx): Home, Messages, Me,
     /// Production (production.view), Orders (orders.view), More.
     public static func phoneTabs(for subject: PermissionSet, home: Route) -> [NavItem] {
@@ -457,5 +467,34 @@ public enum NavCatalogue {
             tabs.append(NavItem("Orders", .orders(channel: .web), icon: "bag"))
         }
         return tabs
+    }
+}
+
+extension Route {
+    /// The list a detail screen belongs to, for navigation (the sidebar row
+    /// that stays selected) and for its gate (`NavCatalogue.gate(for:)`).
+    /// Mirrors Android's `Route.parent`.
+    public var parent: Route? {
+        switch self {
+        case .order: return .orders()
+        case .shipment: return .shipments
+        case .customer: return .customers
+        case .handoff: return .orders()
+        case .productionOrder: return .productionOrders
+        case .adjustment: return .adjustments
+        case .transfer: return .transfers
+        case .purchaseOrder: return .purchaseOrders
+        case .grn: return .goodsReceipt
+        case .purchaseReturn: return .purchaseReturns
+        case .expense: return .expenses
+        case .product(let id, let new): return (id != nil || new) ? .products : nil
+        case .people(let id): return id != nil ? .people() : nil
+        case .updates(let id): return id != nil ? .updates() : nil
+        case .handbook(let id): return id != nil ? .handbook() : nil
+        case .courses(let id): return id != nil ? .courses() : nil
+        case .sign(let id): return id != nil ? .sign() : nil
+        case .comms(let id): return id != nil ? .comms() : nil
+        default: return nil
+        }
     }
 }

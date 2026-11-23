@@ -260,3 +260,30 @@ re-verify, then fix the appendix.
   `InternationalCorridorTest.php` encode the FX and report-parity rules.
 - Run the suite with `make test` (wraps `php artisan test` in the laravel
   container) — see `Makefile` and `README.md` for the full command set.
+
+---
+
+## Two assistants, one branch (owner, 2026-11-23)
+
+Claude (cloud session) and ChatGPT / Codex (the owner's Mac) develop on the
+**same branch, `claude/new-session-mv2clx`**, and move it forward together.
+Rules for both:
+
+1. **Pull before you start and before you push:**
+   `git pull --no-rebase origin claude/new-session-mv2clx`.
+2. **Never rewrite shared history.** No rebase, amend, reset or force-push on
+   this branch. Merge commits only.
+3. **Small commits, pushed often.** Do not sit on unpushed work; the other
+   assistant builds on what is on GitHub.
+4. **Do not edit the same files at the same time.** Say what you are taking in
+   `docs/hub-parity/PROGRESS.md` before starting, and what you finished,
+   verified and left open when you stop. Read it first when you pick up.
+5. **Scope and money rules are not yours to widen.** What Tailors Hub shows,
+   permissions, pricing, FX and payroll need the owner's decision first
+   (`docs/TAILORS_HUB.md`, this file's protocol). Keep Apple and Android in
+   step, with tests on both.
+6. **Into `main` only by pull request,** with every CI check green and the
+   owner's word. Merge with a **merge commit, not a squash**, so this branch
+   keeps going without a restart.
+7. **Review each other.** Before asking the owner to merge, the other
+   assistant reads the diff.

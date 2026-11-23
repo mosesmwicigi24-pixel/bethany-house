@@ -14,7 +14,7 @@ public struct SignInFlow: View {
             Theme.canvas.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: Theme.Space.xl) {
-                    Brand()
+                    Brand(flavor: session.flavor)
                     if let reason = env.kiosk.ended {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(reason).font(Theme.Font.secondary).foregroundStyle(Theme.Palette.warning)
@@ -51,10 +51,14 @@ public struct SignInFlow: View {
 }
 
 struct Brand: View {
+    let flavor: AppFlavor
+
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: "house.lodge").font(.system(size: 36)).foregroundStyle(Theme.Palette.brand)
-            Text("Bethany House Hub").font(Theme.Font.display(22))
+            Image(systemName: flavor == .tailors ? "scissors" : "house.lodge")
+                .font(.system(size: 30))
+                .foregroundStyle(Theme.Palette.brand)
+            Text(flavor == .tailors ? flavor.appName : "Bethany House Hub").font(.title2.weight(.semibold))
             Text("Staff sign-in").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
         }
         .padding(.top, Theme.Space.xxl)

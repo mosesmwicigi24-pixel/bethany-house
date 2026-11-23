@@ -72,7 +72,7 @@ struct WIPBoardView: View {
             if orders.isEmpty { Text("—").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary).padding(.vertical, 8) }
             ForEach(orders) { r in
                 let o = ProductionOrderRecord(r)
-                ModuleRowCard(action: { env.navigator.push(.productionOrder(id: o.id)) }) {
+                ModuleRowCard(route: .productionOrder(id: o.id)) {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack { Text(o.number).font(Theme.Font.body.weight(.semibold)); PriorityBadge(priority: o.priority); if o.isOverdue { StatusBadge("overdue", tone: .danger) } }
                         Text("\(o.quantity) × \(o.productName)").font(Theme.Font.secondary).lineLimit(2)
@@ -123,7 +123,7 @@ struct QCView: View {
                                 DateText(o.dueDate, style: .date)
                             }
                             Spacer()
-                            Button("Open") { env.navigator.push(.productionOrder(id: o.id)) }
+                            NavigationLink("Open", value: Route.productionOrder(id: o.id))
                         }
                         HStack {
                             if o.status == "qc_pending", env.session.can("production.submit_qc") {
@@ -133,7 +133,7 @@ struct QCView: View {
                                 Button { reworking = r } label: { Label("Send back for rework", systemImage: "arrow.uturn.backward") }.buttonStyle(.bordered)
                             }
                             if o.status == "qc_passed", env.session.can("production.approve_qc") {
-                                Button("Complete & stock…") { env.navigator.push(.productionOrder(id: o.id)) }.buttonStyle(.bordered)
+                                NavigationLink("Complete & stock…", value: Route.productionOrder(id: o.id)).buttonStyle(.bordered)
                             }
                         }
                     }
@@ -171,6 +171,7 @@ struct ProductionCalendarView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var schedule: Resource<JSONValue>?
     @State private var month = Date()
+    @State private var showAllOverdue = false
 
     var body: some View {
         // A floor worker's schedule holds only her own jobs (server, Production
@@ -193,10 +194,36 @@ struct ProductionCalendarView: View {
                             }
                         }
                     }
-                    monthView(s["upcoming_orders"]?.array ?? [])
+                    let orders = s["upcoming_orders"]?.array ?? []
+                    let today = HubDates.dayString(Date())
+                    let overdue = orders.filter { item in
+                        item["due_date"]?.date.map { HubDates.dayString($0) < today } ?? false
+                    }
+                    if !overdue.isEmpty {
+                        SectionCard("Overdue") {
+                            ForEach(Array(overdue.prefix(showAllOverdue ? overdue.count : 3).enumerated()), id: \.offset) { _, order in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(order["product_name"]?.string ?? order["order_number"]?.string ?? "Production order")
+                                        .font(.subheadline.weight(.semibold))
+                                    DateText(order["due_date"]?.date, style: .date).font(.caption)
+                                }
+                            }
+                            if overdue.count > 3 {
+                                Button(showAllOverdue ? "Show fewer" : "Show all \(overdue.count) overdue orders") {
+                                    showAllOverdue.toggle()
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Theme.Palette.brandDeep)
+                            }
+                        }
+                    }
+                    monthView(orders)
                 }
             }
         }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task {
             if schedule == nil {
                 let c = env.session.client
@@ -208,11 +235,14 @@ struct ProductionCalendarView: View {
     }
 
     private func monthView(_ orders: [JSONValue]) -> some View {
-        let cal = Calendar.current
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = HubDates.nairobi
         let start = cal.date(from: cal.dateComponents([.year, .month], from: month)) ?? month
         let days = cal.range(of: .day, in: .month, for: start)?.count ?? 30
         let byDay = Dictionary(grouping: orders.filter { $0["due_date"]?.date != nil }) { HubDates.dayString($0["due_date"]!.date!) }
-        let f = DateFormatter(); f.dateFormat = "LLLL yyyy"
+        let f = DateFormatter()
+        f.timeZone = HubDates.nairobi
+        f.dateFormat = "LLLL yyyy"
         return SectionCard {
             HStack {
                 Button { month = cal.date(byAdding: .month, value: -1, to: month) ?? month } label: { Image(systemName: "chevron.left") }
@@ -220,6 +250,14 @@ struct ProductionCalendarView: View {
                 Button { month = cal.date(byAdding: .month, value: 1, to: month) ?? month } label: { Image(systemName: "chevron.right") }
             }
             .buttonStyle(.plain)
+            HStack {
+                Button("Today") { month = Date() }
+                if let next = orders.compactMap({ $0["due_date"]?.date }).filter({ $0 >= cal.startOfDay(for: Date()) }).min() {
+                    Button("Next due date") { month = next }
+                }
+            }
+            .font(.subheadline)
+            .tint(Theme.Palette.brandDeep)
             ForEach(1...days, id: \.self) { d in
                 let date = cal.date(byAdding: .day, value: d - 1, to: start)!
                 let key = HubDates.dayString(date)

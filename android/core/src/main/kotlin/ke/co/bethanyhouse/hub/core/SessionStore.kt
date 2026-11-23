@@ -31,6 +31,8 @@ class SessionStore(
     val client: ApiClient,
     private val store: SecureStore,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    /** Which app this is; decides home and what may be shown ([AppFlavor]). */
+    val flavor: AppFlavor = AppFlavor.HUB,
 ) : SessionAuth {
 
     sealed class State {
@@ -53,13 +55,16 @@ class SessionStore(
         val stepUp: StepUpChallenge? = null,
         val heldDownload: JsonElement? = null,
         val idleLockedOut: Boolean = false,
+        val flavor: AppFlavor = AppFlavor.HUB,
     ) {
-        val home: Route get() = HomePath.resolve(permissions)
+        val home: Route get() = flavor.home(permissions)
+        /** Signed in to an app this person may use (Tailors Hub needs production access). */
+        val mayUseApp: Boolean get() = flavor.mayUse(permissions)
         fun can(permission: String) = permissions.can(permission)
         fun allows(gate: NavGate) = gate.allows(permissions)
     }
 
-    private val _snapshot = MutableStateFlow(Snapshot())
+    private val _snapshot = MutableStateFlow(Snapshot(flavor = flavor))
     val snapshot: StateFlow<Snapshot> = _snapshot.asStateFlow()
     val current: Snapshot get() = _snapshot.value
 
@@ -158,7 +163,7 @@ class SessionStore(
         renewalJob?.cancel(); idleJob?.cancel()
         token = null
         store.remove(TOKEN); store.remove(ME_CACHE)
-        _snapshot.value = Snapshot(state = State.SignedOut)
+        _snapshot.value = Snapshot(state = State.SignedOut, flavor = flavor)
         waitersLock.withLock {
             pinWaiters.forEach { it.complete(false) }; pinWaiters.clear()
             stepUpWaiters.forEach { it.complete(false) }; stepUpWaiters.clear()

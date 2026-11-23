@@ -33,6 +33,15 @@ enum ProductionStatus {
     static let priorities = ["low", "normal", "high", "urgent"]
 
     static func acceptsFloorWork(_ s: String?) -> Bool { floorWork.contains(s ?? "") }
+
+    static func label(_ status: String) -> String {
+        switch status {
+        case "qc_pending": return "Awaiting QC"
+        case "qc_passed": return "Passed QC"
+        case "qc_failed": return "Failed QC"
+        default: return status.humanized
+        }
+    }
 }
 
 /// Typed reads over a production order payload (ProductionController index/show).
@@ -75,35 +84,25 @@ struct ProductionOrdersView: View {
         Page("Production Orders", subtitle: "Every job on the floor you may see") {
             if let list {
                 let stats = list.extras["stats"] ?? .null
-                StatsRow(tiles: [
-                    ("Pending", stats["pending"]?.string ?? "0", nil),
-                    ("In progress", stats["in_progress"]?.string ?? "0", .pink),
-                    ("QC pending", stats["qc_pending"]?.string ?? "0", (stats["qc_pending"]?.int ?? 0) > 0 ? .amber : nil),
-                    ("Overdue", stats["overdue"]?.string ?? "0", (stats["overdue"]?.int ?? 0) > 0 ? .danger : nil),
-                ])
-                HStack(spacing: Theme.Space.s) {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
                     ModuleSearchField(text: $search, placeholder: "Order, product, customer or phone") { Task { await reload() } }
-                    Picker("Status", selection: $status) {
-                        Text("All statuses").tag("")
-                        ForEach(ProductionStatus.all, id: \.self) { Text($0.humanized).tag($0) }
-                        Text("Overdue").tag("overdue")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Theme.Space.s) { queueFilters(stats: stats) }
+                        VStack(alignment: .leading, spacing: 4) { queueFilters(stats: stats) }
                     }
-                    .frame(maxWidth: 180)
-                    Picker("Type", selection: $type) {
-                        Text("All types").tag("")
-                        Text("For stock").tag("stock")
-                        Text("Customer orders").tag("customer")
-                    }
-                    .frame(maxWidth: 160)
-                    if env.session.can("production.raise_order") {
-                        Button { showCreate = true } label: { Label("New", systemImage: "plus") }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Theme.Space.s) { filters }
+                        VStack(alignment: .leading, spacing: Theme.Space.s) { filters }
                     }
                 }
                 RecordListView(list, emptyTitle: "No production orders match", emptySymbol: "hammer") { r in
-                    ProductionOrderRow(order: ProductionOrderRecord(r)) { env.navigator.push(.productionOrder(id: ProductionOrderRecord(r).id)) }
+                    ProductionOrderRow(order: ProductionOrderRecord(r))
                 }
             }
         }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task {
             if list == nil {
                 list = RecordList(client: env.session.client, path: "/v1/admin/production-orders", perPage: 20)
@@ -114,6 +113,52 @@ struct ProductionOrdersView: View {
         .onChange(of: type) { _, _ in Task { await reload() } }
         .refreshable { await list?.load() }
         .sheet(isPresented: $showCreate) { ProductionOrderCreateSheet { Task { await list?.load() } } }
+    }
+
+    @ViewBuilder
+    private func queueFilters(stats: JSONValue) -> some View {
+        queueFilter("All orders", value: "")
+        queueFilter("Overdue", value: "overdue", count: stats["overdue"]?.int)
+        queueFilter("Awaiting QC", value: "qc_pending", count: stats["qc_pending"]?.int)
+    }
+
+    private func queueFilter(_ label: String, value: String, count: Int? = nil) -> some View {
+        Button {
+            status = value
+        } label: {
+            Text(count.map { "\(label) · \($0)" } ?? label)
+                .font(.caption.weight(.semibold))
+                .fixedSize()
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .foregroundStyle(status == value ? .white : Theme.text)
+                .background(status == value ? Theme.Palette.nav : Theme.card, in: RoundedRectangle(cornerRadius: 7))
+                .frame(minHeight: Theme.tapTarget)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(status == value ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var filters: some View {
+        Picker("Status", selection: $status) {
+            Text("All statuses").tag("")
+            ForEach(ProductionStatus.all, id: \.self) { Text(ProductionStatus.label($0)).tag($0) }
+            Text("Overdue").tag("overdue")
+        }
+        .frame(maxWidth: 180)
+        Picker("Type", selection: $type) {
+            Text("All types").tag("")
+            Text("For stock").tag("stock")
+            Text("Customer orders").tag("customer")
+        }
+        .frame(maxWidth: 160)
+        if env.session.can("production.raise_order") {
+            Button { showCreate = true } label: { Label("New order", systemImage: "plus") }
+                .buttonStyle(.bordered)
+                .tint(Theme.Palette.brandDeep)
+        }
     }
 
     private func reload() async {
@@ -130,30 +175,46 @@ struct ProductionOrdersView: View {
 
 struct ProductionOrderRow: View {
     let order: ProductionOrderRecord
-    let open: () -> Void
     var body: some View {
-        ModuleRowCard(action: open) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: Theme.Space.s) {
-                    Text(order.number).font(Theme.Font.body.weight(.semibold))
-                    StatusBadge(order.status)
-                    PriorityBadge(priority: order.priority)
-                    if order.isOverdue { StatusBadge("overdue", tone: .danger) }
+        ModuleRowCard(route: .productionOrder(id: order.id)) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(order.quantity) × \(order.productName)").font(.subheadline.weight(.semibold))
+                Text(order.number).font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) { badges }
+                    VStack(alignment: .leading, spacing: 4) { badges }
                 }
-                Text("\(order.quantity) × \(order.productName)").font(Theme.Font.secondary)
-                HStack(spacing: Theme.Space.s) {
-                    if let c = order.customerLabel { Label(c, systemImage: "person").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
-                    else if order.isCustomerJob {
-                        // As the console: a customer's job whose name is missing says so.
-                        Label(order.r["customer_order"]?["order_number"]?.string.map { "\($0) · name missing" } ?? "Name missing", systemImage: "person.crop.circle.badge.questionmark").font(Theme.Font.caption).foregroundStyle(Theme.Palette.warning)
-                    }
-                    else { Label("For stock", systemImage: "shippingbox").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
-                    if let d = order.dueDate { Label { DateText(d, style: .date) } icon: { Image(systemName: "calendar") }.font(Theme.Font.caption) }
-                    if let s = order.currentStage { Text(s).font(Theme.Font.caption).foregroundStyle(Theme.Palette.brandDeep) }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) { metadata }
+                    VStack(alignment: .leading, spacing: 4) { metadata }
                 }
+                .font(.caption).foregroundStyle(Theme.textSecondary)
                 ProgressView(value: Double(order.percent), total: 100).tint(Theme.Palette.brand)
             }
         }
+    }
+
+    @ViewBuilder
+    private var badges: some View {
+        if let status = order.status {
+            StatusBadge(ProductionStatus.label(status), tone: status == "qc_pending" ? .amber : nil)
+        }
+        if let priority = order.priority, priority != "normal" { PriorityBadge(priority: priority) }
+        if order.isOverdue { StatusBadge("Overdue", tone: .danger) }
+    }
+
+    @ViewBuilder
+    private var metadata: some View {
+        if let customer = order.customerLabel { Label(customer, systemImage: "person") }
+        else if order.isCustomerJob {
+            // As the console: a customer's job whose name is missing says so.
+            Label(order.r["customer_order"]?["order_number"]?.string.map { "\($0) · name missing" } ?? "Name missing",
+                  systemImage: "person.crop.circle.badge.questionmark")
+                .foregroundStyle(Theme.Palette.warning)
+        }
+        else { Label("For stock", systemImage: "shippingbox") }
+        if let date = order.dueDate { Label { DateText(date, style: .date) } icon: { Image(systemName: "calendar") } }
+        if let stage = order.currentStage { Text(stage) }
     }
 }
 

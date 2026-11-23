@@ -145,9 +145,21 @@ struct UsersView: View {
     @State private var editing: UserDraft?
     @State private var security: Record?
     @State private var promoting: Record?
+    /// Staff (default) or website customers — the console's two tabs (#568).
+    @State private var who = "staff"
 
     var body: some View {
         Page("Users", subtitle: "Accounts, roles, outlets and sign-in security") {
+            Picker("Which accounts", selection: $who) {
+                Text("Staff").tag("staff")
+                Text("Website customers").tag("customers")
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 360)
+            .onChange(of: who) { Task { await reload() } }
+            if who == "customers" {
+                Text("People who signed up on the website or ordered through chat. They are not staff; their orders and details live under Customers. Promote one only if they are joining the team.")
+                    .font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            }
             HStack(alignment: .bottom) {
                 TextField("Search name, email or phone", text: $search).textFieldStyle(.roundedBorder).onSubmit { Task { await reload() } }
                 OptionPicker("Status", $status, options: [("", "Any"), ("active", "Active"), ("inactive", "Inactive"), ("suspended", "Suspended")])
@@ -166,7 +178,7 @@ struct UsersView: View {
         }
         .task {
             if list == nil {
-                list = PagedList(client: env.session.client, path: "/v1/admin/users", query: ["exclude_type": "customer", "sort_by": "first_name", "sort_order": "asc"])
+                list = PagedList(client: env.session.client, path: "/v1/admin/users", query: whoQuery.merging(["sort_by": "first_name", "sort_order": "asc"]) { a, _ in a })
                 roles = (try? await env.session.client.json("/v1/admin/roles"))?["data"]?.records ?? []
                 await reload()
             }
@@ -177,13 +189,18 @@ struct UsersView: View {
     }
 
     private func reload() async {
-        list?.query = ["exclude_type": "customer", "sort_by": "first_name", "sort_order": "asc", "search": search.isEmpty ? nil : search, "status": status.isEmpty ? nil : status, "role": role.isEmpty ? nil : role]
+        list?.query = whoQuery.merging(["sort_by": "first_name", "sort_order": "asc", "search": search.isEmpty ? nil : search, "status": status.isEmpty ? nil : status, "role": role.isEmpty ? nil : role]) { a, _ in a }
         await list?.load()
     }
 
+    /// GET /users: `exclude_type=customer` for staff (system accounts included), `user_type=customer` for the website tab.
+    private var whoQuery: [String: String?] { who == "customers" ? ["user_type": "customer"] : ["exclude_type": "customer"] }
+
     private func userRow(_ u: Record) -> some View {
-        SupportListRow(u.string("name") ?? "\(u.string("first_name") ?? "") \(u.string("last_name") ?? "")", subtitle: "\(u.string("email") ?? "") · \((u["roles"]?.array ?? []).compactMap { $0["display_name"]?.string ?? $0["name"]?.string }.joined(separator: ", ")) · \(u["outlet"]?["name"]?.string ?? "no outlet") · last sign-in \(u.string("last_login_at").map(Day.dateTime) ?? "never")") {
+        SupportListRow(u.string("name") ?? "\(u.string("first_name") ?? "") \(u.string("last_name") ?? "")", subtitle: "\(u.string("email") ?? "") · #\(u.id) · \((u["roles"]?.array ?? []).compactMap { $0["display_name"]?.string ?? $0["name"]?.string }.joined(separator: ", ")) · \(u["outlet"]?["name"]?.string ?? "no outlet") · last sign-in \(u.string("last_login_at").map(Day.dateTime) ?? "never")") {
             HStack {
+                // An owner or system account: not on the staff list, payroll or rosters (#569).
+                if u.string("user_type") == "system" { Pill("System", .neutral) }
                 StatusBadge(u.status)
                 if u["locked_at"]?.string != nil { Pill("locked", .danger) }
                 if u["two_factor_enabled"]?.bool == true { Pill("2FA", .success) } else if u["must_setup_2fa"]?.bool == true { Pill("2FA pending", .warning) }
