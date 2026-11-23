@@ -124,7 +124,7 @@ struct CustomerRowActions: View {
                         Divider()
                         Button("Delete…", role: .destructive) { Task { await delete() } }
                     }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Image(systemName: "ellipsis.circle") }.compactMenu()
                 .fixedSize()
             }
         }

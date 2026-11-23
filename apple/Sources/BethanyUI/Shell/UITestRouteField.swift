@@ -25,6 +25,7 @@ struct UITestRouteField: ViewModifier {
                     .accessibilityIdentifier("uitest.route")
                     .focused($focused)
                     .onSubmit {
+                        env.session.touch()   // a person's click; the field sits outside tracksActivity
                         if let route = Route.from(consolePath: path) { env.navigator.go(route) }
                         path = ""
                         focused = false   // the keyboard must not cover the screenshot

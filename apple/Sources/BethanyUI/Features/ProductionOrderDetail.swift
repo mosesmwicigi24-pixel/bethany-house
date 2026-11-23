@@ -96,6 +96,8 @@ struct ProductionOrderDetailView: View {
                     if let c = o.customerLabel {
                         Text("For \(c)").font(Theme.Font.secondary)
                         if let contact = o.r.string("customer_contact") { Text(contact).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
+                    } else if o.isCustomerJob {
+                        Text("For order \(o.r["customer_order"]?["order_number"]?.string ?? "") · name missing").font(Theme.Font.secondary).foregroundStyle(Theme.Palette.warning)
                     } else { Text("For stock").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary) }
                 }
                 Spacer()
@@ -287,7 +289,7 @@ struct ProductionTaskRow: View {
                     } else if task["concurrent_allowed"]?.bool == true, task["started_at"]?.isNull != false {
                         Button("Re-lock") { Task { await unlock(false) } }
                     }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Image(systemName: "ellipsis.circle") }.compactMenu()
             }
         }
         .padding(.vertical, 4)

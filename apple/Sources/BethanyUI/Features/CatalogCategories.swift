@@ -87,7 +87,7 @@ struct CategoriesView: View {
                         if env.session.can("products.delete") {
                             Button("Delete", role: .destructive) { Task { await delete(id) } }
                         }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    } label: { Image(systemName: "ellipsis.circle") }.compactMenu()
                 }
             }
             .buttonStyle(.plain)

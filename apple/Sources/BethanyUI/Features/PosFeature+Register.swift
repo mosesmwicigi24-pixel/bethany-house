@@ -95,8 +95,9 @@ struct PosRootView: View {
 
 struct OwnerWatchBanner: View {
     var body: some View {
-        Label("The owner's account watches the till but does not transact (owner.no_transact). A cashier or outlet manager rings sales; you may approve with your PIN.", systemImage: "eye")
+        Label("The owner's account watches the till but does not transact. A cashier or outlet manager rings sales; you may approve with your PIN.", systemImage: "eye")
             .font(Theme.Font.caption).foregroundStyle(Theme.Palette.amber)
+            .fixedSize(horizontal: false, vertical: true)   // wrap, never cut off mid-sentence
             .padding(Theme.Space.m).frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.Palette.amberSoft, in: RoundedRectangle(cornerRadius: Theme.Radius.field))
     }

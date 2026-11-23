@@ -202,7 +202,7 @@ struct UsersView: View {
                     if env.session.can("users.delete") {
                         Button("Delete", role: .destructive) { Task { do { let r = try await env.session.client.delete("/v1/admin/users/\(u.id)"); toastResult(env, r); await reload() } catch { env.toasts.error(error) } } }
                     }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Image(systemName: "ellipsis.circle") }.compactMenu()
             }
         }
     }
