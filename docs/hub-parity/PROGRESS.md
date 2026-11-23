@@ -1,5 +1,14 @@
 # Tailors Hub audit progress
 
+### iPhone simulator review — 23 November 2026
+
+- Reviewed commit `571a6dc4` on iPhone 17 Pro simulator, iOS 27.2, against the live Hub. The review used read-only navigation and no task, attendance or employee data was submitted.
+- Xcode `TailorsMobile` Debug simulator build succeeded. Its sole warning was: `warning: Metadata extraction skipped, no AppIntents.framework dependency found`.
+- The signed-in account showed My Tasks, Calendar, Messages and Clock in, plus More. More showed workday links and no People section. The account's assigned role was not independently verified; the menu and access test reflect its observed permissions.
+- A task showed a Men badge before nine measurements, in the same order as the previously supplied screenshot. Independent comparison against the Hub's original measurement sheet remains unverified.
+- The custom-scheme link `tailorshub://hub/admin/people/5` displayed `You don't have access to this page`. An actual HTTPS universal link was not tested.
+- HR/payroll account navigation and employee-file access remain unverified pending an appropriate sign-in. Screenshots of the task, measurements, More and access-denied screens were saved locally under `/private/tmp/tailors-review-571a6dc4-screens/`; they contain live data and are not committed.
+
 ## 23 November 2026
 
 - Inspected the user-provided brief, repository governance, existing working tree, prior native checklist and audit backlog, route allowlist and registrations.
