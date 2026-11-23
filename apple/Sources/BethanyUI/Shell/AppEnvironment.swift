@@ -53,10 +53,16 @@ public final class AppEnvironment {
         config.hubURL.appendingPathComponent("admin" + route.consolePath)
     }
 
+    /// Once per app run. Each window (Mac: ⌘N, a link; iPad: a second scene)
+    /// runs its `.task`; a second start would restore the session again and
+    /// open a second realtime connection without closing the first.
     public func start() async {
+        guard !started else { return }
+        started = true
         await session.start()
         await sessionDidChange()
     }
+    @ObservationIgnored private var started = false
 
     /// Call after sign-in/sign-out: realtime and offline follow the person.
     public func sessionDidChange() async {

@@ -20,6 +20,8 @@ struct HubMobileApp: App {
                     await env.start()
                     await delegate.requestPushAuthorization()
                 }
+                // A link opens in the scene that is already open (iPad allows several).
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .onOpenURL { url in
                     if let route = Route.from(consolePath: url.path) { env.navigator.go(route) }
                 }
