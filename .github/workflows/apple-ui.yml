@@ -34,6 +34,9 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      # One macOS runner at a time: in parallel, one job waited 15 minutes for a
+      # runner and was cancelled (runs 3 and 4).
+      max-parallel: 1
       matrix:
         platform: [ipad, mac]
     env:
