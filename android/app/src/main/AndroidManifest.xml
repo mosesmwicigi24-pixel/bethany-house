@@ -44,20 +44,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- bethanyhub:// deep links -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="bethanyhub" />
-            </intent-filter>
-            <!-- Android App Links for the Hub (assetlinks.json served by the backend, Step 2) -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="hub.bethanyhouse.co.ke" android:pathPrefix="/admin" />
-            </intent-filter>
+            <!-- Deep links are per app: src/hub/AndroidManifest.xml (bethanyhub://
+                 and Hub App Links), src/tailors/AndroidManifest.xml (tailorshub://). -->
         </activity>
 
         <service
