@@ -60,12 +60,18 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ke.co.bethanyhouse.hub
             CFBundleURLSchemes: [bethanyhub]
+        # Plain HTTP only to this machine / the local network (a Hub on
+        # 127.0.0.1 for development and the UI tour); every other host stays HTTPS.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
         PRODUCT_NAME: Bethany House Hub
         ENABLE_HARDENED_RUNTIME: YES
         ARCHS: $(ARCHS_STANDARD)
+    scheme:
+      testTargets: [HubMacUITests]
   HubMobile:
     type: application
     platform: iOS
@@ -99,9 +105,50 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ke.co.bethanyhouse.hub
             CFBundleURLSchemes: [bethanyhub]
+        # Plain HTTP only to this machine / the local network (a Hub on
+        # 127.0.0.1 for development and the UI tour); every other host stays HTTPS.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
         PRODUCT_NAME: Bethany House Hub
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+    scheme:
+      testTargets: [HubMobileUITests]
+  # The screen tour (apple/UITests/ScreenTourTests.swift): opens every screen
+  # against a throwaway Hub and keeps a screenshot of each. Run by
+  # .github/workflows/apple-ui.yml; needs a Hub at UITEST_HUB_URL.
+  HubMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    supportedDestinations: [iOS, iPadOS]
+    sources:
+      - path: UITests
+        excludes: ["Fixtures/**"]
+    dependencies:
+      - target: HubMobile
+      - package: BethanyHub
+        product: BethanyKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub.uitests
+        TEST_TARGET_NAME: HubMobile
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+  HubMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+        excludes: ["Fixtures/**"]
+    dependencies:
+      - target: HubMac
+      - package: BethanyHub
+        product: BethanyKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub.macuitests
+        TEST_TARGET_NAME: HubMac
+        GENERATE_INFOPLIST_FILE: YES

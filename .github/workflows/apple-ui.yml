@@ -1,0 +1,125 @@
+name: Apple UI tour
+
+# The screen tour (apple/UITests/ScreenTourTests.swift): boots a throwaway Hub
+# on the runner (fresh Postgres database `bh_uitest`, test fixture from
+# apple/UITests/Fixtures), runs the iPad app in a simulator and the Mac app,
+# signs in, opens every screen in the navigation catalogue plus the fixture's
+# record pages, and keeps a screenshot of each as an artifact. A screen that
+# shows "Something went wrong" fails the run, named.
+#
+# TEST DATA ONLY: nothing here reaches a real Hub, a real database or any
+# secret. Unsigned/ad-hoc builds; no upload anywhere but this run's artifacts.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apple/UITests/**"
+      - ".github/workflows/apple-ui.yml"
+
+concurrency:
+  group: apple-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tour:
+    name: UI tour (${{ matrix.platform }})
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ipad, mac]
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: bh_uitest
+      DB_USERNAME: testing
+      DB_PASSWORD: testing
+      HUB: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql, gd, zip, intl, bcmath
+          coverage: none
+
+      - name: Postgres (throwaway database bh_uitest)
+        run: |
+          brew install postgresql@16
+          brew services start postgresql@16
+          export PATH="$(brew --prefix postgresql@16)/bin:$PATH"
+          for i in $(seq 1 30); do pg_isready -h 127.0.0.1 && break; sleep 1; done
+          psql -h 127.0.0.1 postgres -c "CREATE ROLE testing LOGIN SUPERUSER PASSWORD 'testing'"
+          createdb -h 127.0.0.1 -O testing bh_uitest
+
+      - name: Hub (backend) install and migrate
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          composer install --no-interaction --prefer-dist --no-progress
+          php artisan key:generate
+          php artisan migrate --force
+
+      - name: Fixture, then serve the Hub
+        working-directory: backend
+        run: |
+          TOKEN=$(php ../apple/UITests/Fixtures/seed.php | tail -1)
+          nohup php artisan serve --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/serve.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fs "$HUB/api/v1/settings/currencies" > /dev/null && break; sleep 1; done
+          ../apple/UITests/Fixtures/seed_api.sh "$HUB" "$TOKEN"
+
+      - name: Generate the Xcode project
+        working-directory: apple
+        run: brew install xcodegen && xcodegen generate
+
+      - name: Tour on iPad (simulator)
+        if: matrix.platform == 'ipad'
+        working-directory: apple
+        env:
+          TEST_RUNNER_UITEST_HUB_URL: ${{ env.HUB }}
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r in sorted(d, reverse=True) if "iOS" in r for x in d[r] if x["name"].startswith("iPad Pro 13")))')
+          echo "Simulator $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcodebuild test -project BethanyHub.xcodeproj -scheme HubMobile \
+            -destination "id=$UDID" -resultBundlePath "$RUNNER_TEMP/tour.xcresult" \
+            -only-testing:HubMobileUITests \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+
+      - name: Tour on Mac
+        if: matrix.platform == 'mac'
+        working-directory: apple
+        env:
+          TEST_RUNNER_UITEST_HUB_URL: ${{ env.HUB }}
+        run: |
+          xcodebuild test -project BethanyHub.xcodeproj -scheme HubMac \
+            -destination 'platform=macOS' -resultBundlePath "$RUNNER_TEMP/tour.xcresult" \
+            -only-testing:HubMacUITests \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+
+      - name: Export the screenshots
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/shots"
+          if [ -d "$RUNNER_TEMP/tour.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/tour.xcresult" --output-path "$RUNNER_TEMP/shots" || true
+          fi
+          cp "$RUNNER_TEMP/serve.log" "$RUNNER_TEMP/shots/" 2>/dev/null || true
+          cp backend/storage/logs/laravel.log "$RUNNER_TEMP/shots/" 2>/dev/null || true
+          ls "$RUNNER_TEMP/shots" | head -20
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-tour-${{ matrix.platform }}
+          path: ${{ runner.temp }}/shots
+          retention-days: 14
