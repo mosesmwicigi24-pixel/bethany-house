@@ -139,6 +139,7 @@ struct PadShell: View {
             NavigationStack(path: nav.pathBinding(for: nav.selection)) {
                 RouteView(nav.selection ?? env.session.home)
                     .navigationDestination(for: Route.self) { RouteView($0) }
+                    .task(id: nav.selection) { await Task.yield(); nav.openPending(in: nav.selection) }
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button { env.navigator.searchPresented = true } label: { Image(systemName: "magnifyingglass") }

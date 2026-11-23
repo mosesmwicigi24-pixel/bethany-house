@@ -123,16 +123,28 @@ public final class Navigator {
     public var selection: Route?
     public var path: [Route] = []
     public var searchPresented = false
+    /// A record waiting for its section's stack to appear (see `go(_:)`).
+    public private(set) var pending: Route?
 
     public init() {}
 
     public func go(_ route: Route) {
+        pending = nil
         if let item = NavCatalogue.item(for: route) {
             selection = item.route
             path = []
         } else if let parent = Navigator.parent(of: route) {
-            selection = parent
-            path = [route]
+            if selection == parent {
+                path = [route]
+            } else {
+                // Another section: show it first, then open the record once
+                // its stack is on screen (openPending). A stack created with
+                // the record already in its path showed a blank page or the
+                // record twice on the iPad (UI tour run 11).
+                selection = parent
+                path = []
+                pending = route
+            }
         } else {
             selection = route
             path = []
@@ -140,6 +152,14 @@ public final class Navigator {
     }
 
     public func push(_ route: Route) { path.append(route) }
+
+    /// Called by the shell when the stack for `section` has appeared.
+    public func openPending(in section: Route?) {
+        guard let route = pending, section == selection else { return }
+        pending = nil
+        // Dropped if the person chose another section in the meantime.
+        if Navigator.parent(of: route) == section { path = [route] }
+    }
 
     /// The path binding for the stack showing `section`. A stack that is
     /// being replaced (the section changed) writes its own path back as it
