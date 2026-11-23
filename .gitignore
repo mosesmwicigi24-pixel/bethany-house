@@ -12,3 +12,6 @@ react-admin/dist/
 # streams as sibling files named "<file>:Zone.Identifier"; copying a directory
 # out of Windows drags them along. They are never part of the source tree.
 *:Zone.Identifier
+
+# macOS Finder metadata
+.DS_Store

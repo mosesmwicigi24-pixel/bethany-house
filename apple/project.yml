@@ -8,6 +8,11 @@
 #              background location while clocked in
 #   TailorsMobile  "Tailors Hub", the workshop app: the same code with
 #              AppFlavor.tailors (production, own time and pay, messages)
+# Entitlements are set with CODE_SIGN_ENTITLEMENTS, never XcodeGen's
+# `entitlements: path:`: given a path without `properties`, XcodeGen rewrites
+# the file as an empty <dict/>, so every generated build lost push, associated
+# domains, the keychain group and (Mac) the sandbox. The committed .entitlements
+# files are the only source; generating must leave them untouched.
 # Signing: set DEVELOPMENT_TEAM in Signing.xcconfig (not committed) or in
 # Xcode; the bundle id ke.co.bethanyhouse.hub matches the Expo shell so the
 # store listing continues (docs/NATIVE_APPS_APPLE.md).
@@ -48,8 +53,6 @@ targets:
         product: BethanyKit
       - package: BethanyHub
         product: BethanyUI
-    entitlements:
-      path: Apps/HubMac/HubMac.entitlements
     info:
       path: Apps/HubMac/Info.plist
       properties:
@@ -66,6 +69,7 @@ targets:
             CFBundleURLSchemes: [bethanyhub]
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: Apps/HubMac/HubMac.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
         PRODUCT_NAME: Bethany House Hub
         ENABLE_HARDENED_RUNTIME: YES
@@ -81,8 +85,6 @@ targets:
         product: BethanyKit
       - package: BethanyHub
         product: BethanyUI
-    entitlements:
-      path: Apps/HubMobile/HubMobile.entitlements
     info:
       path: Apps/HubMobile/Info.plist
       properties:
@@ -105,6 +107,7 @@ targets:
             CFBundleURLSchemes: [bethanyhub]
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: Apps/HubMobile/HubMobile.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub
         PRODUCT_NAME: Bethany House Hub
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -126,8 +129,6 @@ targets:
         product: BethanyKit
       - package: BethanyHub
         product: BethanyUI
-    entitlements:
-      path: Apps/TailorsMobile/TailorsMobile.entitlements
     info:
       path: Apps/TailorsMobile/Info.plist
       properties:
@@ -150,6 +151,7 @@ targets:
             CFBundleURLSchemes: [tailorshub]
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: Apps/TailorsMobile/TailorsMobile.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.tailors
         PRODUCT_NAME: Tailors Hub
         TARGETED_DEVICE_FAMILY: "1,2"
