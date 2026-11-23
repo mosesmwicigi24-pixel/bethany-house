@@ -8,8 +8,8 @@ import BethanyKit
 /// The tour passes its list of paths at launch in BH_UITEST_ROUTES (one per
 /// line). Earlier ways in failed on CI (tour runs of 2026-11-23): opening
 /// `bethanyhub://` links relaunched the app, and a hidden text field stopped
-/// taking keyboard focus on the iPad after the first screen. A button needs
-/// neither.
+/// taking keyboard focus on the iPad after the first screen. The button
+/// answers a keyboard shortcut, which needs neither focus nor a tap.
 ///
 /// Present only in a DEBUG build launched with BH_UITEST_ROUTES — never in a
 /// release build and never for a person using the app.
@@ -27,13 +27,16 @@ struct UITestRouteField: ViewModifier {
     func body(content: Content) -> some View {
         #if DEBUG
         if !Self.paths.isEmpty {
-            content.overlay(alignment: .bottomLeading) {
+            content.overlay(alignment: .bottomTrailing) {
                 Button("next") {
                     guard cursor.index + 1 < Self.paths.count else { return }
                     cursor.index += 1
                     env.session.touch()   // a person's click; the button sits outside tracksActivity
                     if let route = Route.from(consolePath: Self.paths[cursor.index]) { env.navigator.go(route) }
                 }
+                // The tour presses ⌃⌥⌘] (no hit-testing: on the Mac the sidebar
+                // footer covered the button, on the iPad taps on it did nothing).
+                .keyboardShortcut("]", modifiers: [.command, .option, .control])
                 .buttonStyle(.plain)
                 .font(.system(size: 9))
                 .frame(width: 44, height: 44)
