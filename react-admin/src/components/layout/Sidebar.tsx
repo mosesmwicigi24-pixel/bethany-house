@@ -116,6 +116,12 @@ export const NAV: NavGroup[] = [
                 permission: "products.view",
             },
             {
+                label: "Product clips",
+                href: "/catalogue/products/clips",
+                icon: "products",
+                permission: "products.edit",
+            },
+            {
                 label: "Categories",
                 href: "/catalogue/categories",
                 icon: "categories",

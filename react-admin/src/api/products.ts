@@ -128,6 +128,10 @@ export interface ProductListItem {
     category: { id: number; name_en: string } | null;
     primary_image: ProductImage | null;
     en_translation: ProductTranslation | null;
+    /** Short product clip, when one is set (hover-to-play on the storefront). */
+    video_url?: string | null;
+    /** 'processing' while the queue converts a clip, 'failed', or null when settled. */
+    video_status?: string | null;
     base_price: ProductPrice | null;
     variants_count: number;
 }
