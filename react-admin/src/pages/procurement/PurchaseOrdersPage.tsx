@@ -5,6 +5,7 @@ import { purchaseOrderApi, supplierApi } from "@/api/procurement";
 import type { PurchaseOrder, POStatus, POItemCosts } from "@/api/procurement";
 import { VariantGridPanel, type VariantPick } from "./VariantGridPanel";
 import { OwedToSuppliersChip } from "./SupplierPayments";
+import { MarkOrdersPaidButton } from "./BulkMarkPaid";
 import { useToastStore } from "@/store/toast.store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Modal } from "@/components/ui/Modal";
@@ -1137,7 +1138,7 @@ function PODetailModal({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrdersPage() {
-    const { can, canAny } = usePermissions();
+    const { can, canAny, isSuperAdmin } = usePermissions();
     const canCreate = can("procurement.create");
     const canApprove = can("procurement.approve");
     const [page, setPage] = useState(1);
@@ -1203,6 +1204,7 @@ export default function PurchaseOrdersPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                 {canAny("procurement.pay", "reports.financial") && <OwedToSuppliersChip />}
+                {isSuperAdmin && <MarkOrdersPaidButton />}
                 {canCreate && (
                 <button
                     className="btn-primary btn-sm whitespace-nowrap"

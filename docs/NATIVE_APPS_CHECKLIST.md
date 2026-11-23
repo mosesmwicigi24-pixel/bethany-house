@@ -136,8 +136,8 @@ were ported (#517–#537). Items 1–7 were checked by hand in both apps.
 | P8 | Console-only so far: People & pay, Commissions (#532/#533), message notices and "waiting on your reply" (#530), push action buttons (#537), variant price hints (#526). | parity | Backlog |
 
 The installable debug APK (CI artifact `hub-android-debug`) points at the
-live Hub; its upload is paused in `.github/workflows/android.yml` until P1
-and P2 are fixed in the apps.
+live Hub. Its upload was paused from 2026-11-05 until P1 and P2 were fixed
+in the apps (#543, #544) and resumed after they merged.
 
 Read-only check of whether P1 reached the live Hub (nothing in it writes):
 

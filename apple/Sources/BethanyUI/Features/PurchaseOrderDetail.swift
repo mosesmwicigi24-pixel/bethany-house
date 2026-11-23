@@ -14,6 +14,10 @@ struct PurchaseOrderDetailView: View {
     @State private var sheet: Sheet?
     @State private var showAudit = false
     @State private var showRevisions = false
+    @State private var moving: MovingLine?
+
+    /// A job's material line being moved to another supplier (#573).
+    struct MovingLine: Identifiable { let id = UUID(); let line: JSONValue; let supplierId: Int? }
 
     enum Sheet: Identifiable {
         case reject, cancel, approve, receive, returnGoods, invoice, payment, revise
@@ -50,6 +54,12 @@ struct PurchaseOrderDetailView: View {
                 case .payment: RecordSupplierPaymentSheet(po: po) { reload() }
                 case .revise: RevisePurchaseOrderSheet(po: po) { reload() }
                 }
+            }
+        }
+        .sheet(item: $moving) { m in
+            MovePurchaseLineSheet(poId: poId, currentSupplierId: m.supplierId, line: m.line) { newPo in
+                // As the console: go to the purchase order the line joined.
+                if newPo != poId { env.navigator.go(.purchaseOrder(id: newPo)) } else { reload() }
             }
         }
     }
@@ -134,6 +144,20 @@ struct PurchaseOrderDetailView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(lineTitle(i)).font(Theme.Font.body)
                         Text("\(quantityText(i["quantity"])) @ \(Money(json: i["unit_price"] ?? .null, currency: po.currency)?.formatted() ?? "—") · received \(quantityText(i["quantity_received"]))").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()
+                        // The production job this material was requested for (#573).
+                        if let job = i["production_order"], !job.isNull {
+                            HStack(spacing: 6) {
+                                if let jid = job["id"]?.int {
+                                    Button("Job \(job["order_number"]?.string ?? "")") { env.navigator.go(.productionOrder(id: jid)) }.buttonStyle(.borderless)
+                                }
+                                if let o = job["customer_order"]?["order_number"]?.string { Text("· Order \(o)").foregroundStyle(Theme.textSecondary) }
+                                if job["status"]?.string == "cancelled" { StatusBadge("job cancelled", tone: .danger) }
+                                if po.status == "draft" && env.session.can("procurement.create") {
+                                    Button("Move to another supplier") { moving = MovingLine(line: i, supplierId: po.r.int("supplier_id") ?? po.r["supplier"]?["id"]?.int) }.buttonStyle(.borderless)
+                                }
+                            }
+                            .font(Theme.Font.caption)
+                        }
                     }
                     Spacer()
                     MoneyText((i["total_price"] ?? i["subtotal"]).flatMap { Money(json: $0, currency: po.currency) })
@@ -358,7 +382,7 @@ struct SupplierPaymentsSection: View {
                         let voided = p["voided_at"]?.isNull == false
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                HStack { Text(p.string("payment_number") ?? "").font(Theme.Font.body.weight(.semibold)); StatusBadge(voided ? "voided" : p.string("method")?.humanized, tone: voided ? .danger : .info) }
+                                HStack { Text(p.string("payment_number") ?? "").font(Theme.Font.body.weight(.semibold)); StatusBadge(voided ? "voided" : SupplierPaymentMethod.label(for: p.string("method")), tone: voided ? .danger : .info) }
                                 Text("\(p.string("paid_at") ?? "") · \(p.string("reference") ?? "") · \(Names.person(p["recorder"]) ?? "")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
                                 if voided, let why = p.string("void_reason") { Text("Voided: \(why)").font(Theme.Font.caption).foregroundStyle(Theme.Palette.danger) }
                             }
@@ -399,23 +423,26 @@ struct RecordSupplierPaymentSheet: View {
     let po: PurchaseOrderRecord
     let onDone: () -> Void
     @State private var amount = ""
-    @State private var method = "bank_transfer"
+    /// Nothing preselected (console, 2026-11-14): the payment is filed under the method someone chose.
+    @State private var method: SupplierPaymentMethod?
     @State private var reference = ""
     @State private var paidAt = Date()
     @State private var notes = ""
     @State private var requestId = UUID().uuidString
     @State private var error: APIError?
 
-    static let methods = ["bank_transfer", "mpesa", "cash", "cheque", "card", "other"]
-    static let needsReference: Set<String> = ["bank_transfer", "mpesa", "cheque", "card"]
-
-    private var valid: Bool { (JSONValue.decimal(amount)?.double ?? 0) > 0 && (!Self.needsReference.contains(method) || !reference.trimmingCharacters(in: .whitespaces).isEmpty) }
+    private var valid: Bool { SupplierPaymentMethod.canRecord(amount: JSONValue.decimal(amount)?.double, method: method, reference: reference) }
 
     var body: some View {
         ModuleFormSheet("Record payment — \(po.number)", submitLabel: "Record payment", canSubmit: valid, error: error, submit: submit) {
             ModuleField("Amount (\(po.currency))", error: error?.errors["amount"]?.first) { TextField("0.00", text: $amount).textFieldStyle(.roundedBorder) }
-            ModuleField("Method", error: error?.errors["method"]?.first) { Picker("Method", selection: $method) { ForEach(Self.methods, id: \.self) { Text($0.humanized).tag($0) } } }
-            ModuleField(Self.needsReference.contains(method) ? "Reference (required)" : "Reference", error: error?.errors["reference"]?.first) { TextField("Transaction code", text: $reference).textFieldStyle(.roundedBorder) }
+            ModuleField("Method", error: error?.errors["method"]?.first) {
+                Picker("Method", selection: $method) {
+                    Text("Choose how you paid…").tag(SupplierPaymentMethod?.none)
+                    ForEach(SupplierPaymentMethod.allCases) { Text($0.label).tag(Optional($0)) }
+                }
+            }
+            ModuleField(method?.needsReference == true ? "Reference (required)" : "Reference", error: error?.errors["reference"]?.first) { TextField(method?.referenceHint ?? "Receipt or note", text: $reference).textFieldStyle(.roundedBorder) }
             ModuleField("Paid on") { DatePicker("", selection: $paidAt, displayedComponents: .date).labelsHidden() }
             ModuleField("Notes") { TextField("Notes", text: $notes, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(2...4) }
             Text("Money paid to a supplier is not an expense; it settles the payables ledger. Retrying this form cannot record it twice.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
@@ -425,7 +452,7 @@ struct RecordSupplierPaymentSheet: View {
     private func submit() async {
         do {
             let r = try await env.session.client.post("/v1/admin/purchase-orders/\(po.id)/payments", json: .object([
-                "amount": JSONValue.decimal(amount) ?? .number(0), "method": .string(method), "reference": .str(reference), "paid_at": .string(apiDay(paidAt)), "notes": .str(notes), "client_request_id": .string(requestId),
+                "amount": JSONValue.decimal(amount) ?? .number(0), "method": .string(method?.rawValue ?? ""), "reference": .str(reference), "paid_at": .string(apiDay(paidAt)), "notes": .str(notes), "client_request_id": .string(requestId),
             ]))
             env.toasts.show(r.json?["message"]?.string ?? "Payment recorded"); onDone(); dismiss()
         } catch let e as APIError { error = e } catch { self.error = APIError.transport(error.localizedDescription) }

@@ -209,9 +209,11 @@ struct QuotationBuilderSheet: View {
     @State private var adding = false
     @State private var repricing = false
     @State private var keptKeys: Set<UUID> = []
+    /// Lines waiting for the server's price in this currency; Save waits for them.
+    @State private var pricingKeys: Set<UUID> = []
 
     private var canSubmit: Bool {
-        !lines.isEmpty && lines.allSatisfy { (Int($0.quantity) ?? 0) > 0 && Sales.amountJSON($0.unitPrice) != nil }
+        !lines.isEmpty && pricingKeys.isEmpty && lines.allSatisfy { (Int($0.quantity) ?? 0) > 0 && Sales.amountJSON($0.unitPrice) != nil }
             && (!revise || reason.trimmingCharacters(in: .whitespaces).count >= 5)
     }
 
@@ -255,6 +257,7 @@ struct QuotationBuilderSheet: View {
                         ForEach(currencies) { c in Text("\(c.string("code") ?? "") — \(c.string("name") ?? "")").tag(c.string("code") ?? "") }
                         if !currencies.contains(where: { $0.string("code") == currency }) { Text(currency).tag(currency) }
                     }.labelsHidden()
+                    .disabled(repricing)
                 }
                 TextInput(label: "Served by", text: $servedBy)
                 SalesOptionalDateField(label: "Valid until", date: $validUntil)
@@ -266,16 +269,20 @@ struct QuotationBuilderSheet: View {
                         VStack(alignment: .leading, spacing: 2) {
                             TextField("Description", text: $l.name).textFieldStyle(.roundedBorder)
                             if let sku = l.sku { Text(sku).font(Theme.Font.mono).foregroundStyle(Theme.textTertiary) }
-                            if keptKeys.contains(l.id) { Text("Typed price kept — not converted").font(Theme.Font.caption).foregroundStyle(Theme.Palette.amber) }
+                            if keptKeys.contains(l.id) && !pricingKeys.contains(l.id) { Text("No \(currency) price on the hub — type it.").font(Theme.Font.caption).foregroundStyle(Theme.Palette.amber) }
                         }
                         TextField("Qty", text: $l.quantity).textFieldStyle(.roundedBorder).frame(width: 56)
-                        TextField("Unit price", text: $l.unitPrice).textFieldStyle(.roundedBorder).frame(width: 100)
+                        if pricingKeys.contains(l.id) {
+                            HStack(spacing: 4) { ProgressView().controlSize(.small); Text("Pricing…").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }.frame(width: 100)
+                        } else {
+                            TextField("Unit price (\(currency))", text: $l.unitPrice).textFieldStyle(.roundedBorder).frame(width: 100)
+                        }
                         TextField("Discount", text: $l.discount).textFieldStyle(.roundedBorder).frame(width: 80)
                         Button(role: .destructive) { lines.removeAll { $0.id == l.id } } label: { Image(systemName: "trash") }.buttonStyle(.plain).foregroundStyle(Theme.Palette.danger)
                     }
                 }
                 HStack {
-                    Button { adding = true } label: { Label("Add from catalogue", systemImage: "plus") }
+                    Button { adding = true } label: { Label("Add products (priced in \(currency))", systemImage: "plus") }.disabled(repricing)
                     Button("Add free line") { lines.append(OrderLineEditor.Line(recordId: nil, productId: nil, variantId: nil, name: "", sku: nil, quantity: "1", unitPrice: "", discount: "0", locked: false)) }
                     if repricing { ProgressView().controlSize(.small) }
                 }
@@ -293,7 +300,7 @@ struct QuotationBuilderSheet: View {
             }
         }
         .sheet(isPresented: $adding) {
-            ProductPickerSheet(currency: currency, onPicked: { lines.append($0); adding = false }, onCancel: { adding = false })
+            QuotationProductPicker(currency: currency, onTheQuote: Set(lines.compactMap(\.productId)), onAdd: { picked in adding = false; Task { await addProducts(picked) } }, onCancel: { adding = false })
         }
     }
 
@@ -312,6 +319,45 @@ struct QuotationBuilderSheet: View {
         lines = (q["items"]?.array ?? []).map(Record.init(json:)).map { i in
             OrderLineEditor.Line(recordId: nil, productId: i["product_id"]?.string, variantId: i["product_variant_id"]?.string, name: i.string("product_name") ?? "", sku: i.string("sku"),
                                  quantity: i["quantity"]?.string ?? "1", unitPrice: i["unit_price"]?.string ?? "", discount: i["discount_amount"]?.string ?? "0", locked: false)
+        }
+    }
+
+    /// Add ticked products; each waits for its price in this currency (QuotePricing).
+    private func addProducts(_ picked: [Record]) async {
+        let fresh = picked.map { p in
+            OrderLineEditor.Line(recordId: nil, productId: p.id, variantId: nil, name: p["en_translation"]?["name"]?.string ?? p.string("name") ?? p.string("sku") ?? "Product #\(p.id)",
+                                 sku: p.string("sku"), quantity: "1", unitPrice: "", discount: "0", locked: false)
+        }
+        guard !fresh.isEmpty else { return }
+        lines.append(contentsOf: fresh)
+        let kes = Dictionary(uniqueKeysWithValues: zip(fresh.map(\.id), picked.map { QuotePricing.kesPrice(of: $0.json) }))
+        await priceNewLines(fresh.map(\.id), kes: kes)
+    }
+
+    /// POST /quotations/reprice {from: "KES", to: <this currency>} for new lines.
+    /// The KES figure never lands on a line; a failure sets 0 and flags it.
+    private func priceNewLines(_ keys: [UUID], kes: [UUID: JSONValue?]) async {
+        let to = currency
+        let new = keys.compactMap { k in lines.first { $0.id == k } }.map {
+            QuotePricing.NewLine(key: $0.id.uuidString, productId: $0.productId, kesPrice: kes[$0.id] ?? nil, name: $0.name)
+        }
+        guard !new.isEmpty else { return }
+        pricingKeys.formUnion(keys)
+        repricing = true
+        defer { pricingKeys.subtract(keys); repricing = !pricingKeys.isEmpty }
+        do {
+            let r = try await env.session.client.post("/v1/admin/quotations/reprice", json: QuotePricing.body(to: to, lines: new))
+            let priced = QuotePricing.answer(r.json ?? .null)
+            var keptCount = 0
+            for k in keys {
+                guard let i = lines.firstIndex(where: { $0.id == k }), let p = priced[k.uuidString] else { continue }
+                lines[i].unitPrice = p.unitPrice
+                if p.kept { keptKeys.insert(k); keptCount += 1 } else { keptKeys.remove(k) }
+            }
+            if keptCount > 0 { env.toasts.show(QuotePricing.keptWarning(count: keptCount, currency: to), tone: .warning) }
+        } catch {
+            for k in keys { if let i = lines.firstIndex(where: { $0.id == k }) { lines[i].unitPrice = QuotePricing.failed.unitPrice; keptKeys.insert(k) } }
+            env.toasts.error(error)
         }
     }
 
@@ -512,5 +558,57 @@ struct InterestCartsView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Quotation product picker (tick several; priced by the server)
+
+/// The console's ProductMultiPicker (#566): search (GET /products?search&per_page=15),
+/// tick several, "Add N". No price is shown here — each line is priced in the
+/// quotation's currency by the server when it is added.
+struct QuotationProductPicker: View {
+    @Environment(AppEnvironment.self) private var env
+    let currency: String
+    let onTheQuote: Set<String>
+    let onAdd: ([Record]) -> Void
+    let onCancel: () -> Void
+    @State private var search = ""
+    @State private var hits: [Record] = []
+    @State private var ticked: [Record] = []
+    @State private var searching = false
+
+    var body: some View {
+        SheetFrame(title: "Add products", submitLabel: ticked.isEmpty ? "Add" : "Add \(ticked.count) to the quotation", canSubmit: !ticked.isEmpty, onCancel: onCancel, onSubmit: { onAdd(ticked) }) {
+            SalesSearchField(text: $search, placeholder: "Search products to add (priced in \(currency))") { Task { await find() } }
+            if searching { ProgressView().controlSize(.small) }
+            if !searching && hits.isEmpty && search.trimmingCharacters(in: .whitespaces).count >= 2 {
+                Text("No products match “\(search.trimmingCharacters(in: .whitespaces))”. Use “Add free line” to type one.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            }
+            ForEach(hits) { p in
+                let on = ticked.contains { $0.id == p.id }
+                Button { if on { ticked.removeAll { $0.id == p.id } } else { ticked.append(p) } } label: {
+                    HStack {
+                        Image(systemName: on ? "checkmark.square.fill" : "square").foregroundStyle(on ? Theme.Palette.brand : Theme.textTertiary)
+                        Text(p["en_translation"]?["name"]?.string ?? p.string("name") ?? "Product #\(p.id)").font(on ? Theme.Font.body.weight(.semibold) : Theme.Font.body)
+                        if onTheQuote.contains(p.id) { Pill("on the quote") }
+                        Spacer()
+                        Text(p.string("sku") ?? "").font(Theme.Font.mono).foregroundStyle(Theme.textTertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Text(ticked.isEmpty ? "Tick products, then Add" : "\(ticked.count) ticked: \(ticked.prefix(3).map { $0["en_translation"]?["name"]?.string ?? $0.string("sku") ?? "" }.joined(separator: ", "))\(ticked.count > 3 ? "…" : "")")
+                .font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+        }
+    }
+
+    private func find() async {
+        let term = search.trimmingCharacters(in: .whitespaces)
+        guard term.count >= 2 else { hits = []; return }
+        searching = true
+        defer { searching = false }
+        do { hits = try await env.session.client.get("/v1/admin/products", query: ["search": term, "per_page": "15"]).json?.salesRecords ?? [] }
+        catch { hits = []; env.toasts.error(error) }
     }
 }

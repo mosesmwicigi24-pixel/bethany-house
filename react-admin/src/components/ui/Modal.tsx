@@ -8,6 +8,9 @@ interface ModalProps {
   children: ReactNode
   footer?: ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+  /** Sits above every other dialog — for a prompt that interrupts whatever is
+   *  open (the "Confirm it's you" step-up), which otherwise opened underneath. */
+  onTop?: boolean
   closeOnBackdrop?: boolean
 }
 
@@ -102,6 +105,7 @@ export function Modal({
   footer,
   size = 'md',
   closeOnBackdrop = true,
+  onTop = false,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   // Unique id for aria-labelledby - stable across renders
@@ -128,7 +132,7 @@ export function Modal({
 
   return (
     // The outer div is presentational (positioning only) - role/aria live on the panel
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className={`fixed inset-0 ${onTop ? 'z-[80]' : 'z-50'} flex items-center justify-center p-4`}>
       {/* Backdrop - aria-hidden so screen readers skip it */}
       <div
         className="absolute inset-0 bg-surface-950/50 backdrop-blur-sm animate-fade-in"

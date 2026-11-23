@@ -464,7 +464,7 @@ struct CourseEditSheet: View {
             FieldLabel("What it is for") { TextField("", text: $description, axis: .vertical).lineLimit(2...4).textFieldStyle(.roundedBorder) }
             OutletPicker(choices: outlets, outletId: $outletId)
             Stepper("Pass mark \(passMark)%", value: $passMark, in: 1...100, step: 5)
-            Toggle("Required (waits on the Me page until passed)", isOn: $required)
+            Toggle("Required (waits on Today until passed)", isOn: $required)
             Toggle("Published", isOn: $publish)
             Text("Lessons").font(Theme.Font.sectionTitle)
             ForEach($lessons) { $l in
