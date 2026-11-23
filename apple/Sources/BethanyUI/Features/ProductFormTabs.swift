@@ -1,5 +1,6 @@
 import SwiftUI
 import BethanyKit
+import AVKit
 
 // Product form tabs that act on a saved product: images and video,
 // variants (with generate-from-attributes), and the bill of materials.
@@ -13,12 +14,27 @@ struct ProductImagesTab: View {
     let reload: () -> Void
     @State private var busy = false
     @State private var videoStatus: String?
+    /// Upload progress 0…1 while a clip goes up; nil when idle (#563).
+    @State private var progress = UploadProgressBox()
+    private var videoProgress: Double? { progress.value }
 
     private var canEdit: Bool { env.session.can("products.edit") }
     private var images: [JRow] { jrows(product["images"]) }
 
     var body: some View {
         SectionCard("Images") {
+            if images.isEmpty, let v = product["video_url"]?.string, !v.isEmpty {
+                // A clip with no photo: the storefront cards need a still to play
+                // over, and the website fills the gap with its own built-in photos
+                // (or a placeholder) — none of which live in the Hub.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("This product has a video but no photos in the Hub.").font(Theme.Font.caption.weight(.semibold))
+                    Text("Until you upload photos here, the website shows its own built-in photos for it (or a placeholder). Photos you upload replace those everywhere, and the video plays over the first one.").font(Theme.Font.caption)
+                }
+                .foregroundStyle(Theme.Palette.amber)
+                .padding(Theme.Space.s)
+                .background(Theme.Palette.amberSoft, in: RoundedRectangle(cornerRadius: 8))
+            }
             if images.isEmpty { Text("No images yet.").font(Theme.Font.secondary).foregroundStyle(Theme.textTertiary) }
             ForEach(Array(images.enumerated()), id: \.element.id) { index, img in
                 HStack(spacing: Theme.Space.m) {
@@ -40,26 +56,54 @@ struct ProductImagesTab: View {
                 Divider()
             }
             if canEdit {
-                AttachmentPicker(label: busy ? "Uploading…" : "Add images (up to 10)", types: [.image], allowsMultiple: true) { files in Task { await upload(files) } }.disabled(busy).font(Theme.Font.secondary)
+                AttachmentPicker(label: busy ? "Uploading…" : "Add images (up to 10) — or drop photos here", types: [.image], allowsMultiple: true) { files in Task { await upload(files) } }.disabled(busy).font(Theme.Font.secondary)
             }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard canEdit, !busy else { return false }
+            let files = urls.compactMap(UploadFile.load).filter { $0.mime.hasPrefix("image/") }
+            guard !files.isEmpty else { return false }
+            Task { await upload(files) }
+            return true
         }
         SectionCard("Video") {
             let status = videoStatus ?? product["video_status"]?.string
-            if let url = product["video_url"]?.string, !url.isEmpty, status == nil {
-                HStack { Image(systemName: "play.rectangle").foregroundStyle(Theme.Palette.brand); Text(url).font(Theme.Font.caption).lineLimit(1); Spacer() }
+            if let p = videoProgress {
+                // The file is still going up: a bar with a number says "keep this open".
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack { Text(p < 1 ? "Uploading…" : "Upload complete — handing over for conversion…").font(Theme.Font.secondary); Spacer(); Text("\(Int((p * 100).rounded()))%").font(Theme.Font.secondary).monospacedDigit().foregroundStyle(Theme.textSecondary) }
+                    ProgressView(value: p).tint(Theme.Palette.brand)
+                    Text("Keep the app open until the upload finishes.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                }
+            } else if let url = product["video_url"]?.string, !url.isEmpty, status == nil, let clip = URL(string: url) {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    // Sized like a product tile, so it reads as the clip a shopper sees on the card.
+                    VideoPlayer(player: AVPlayer(url: clip))
+                        .frame(width: 160, height: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Shoppers see this on the product card and as the first slide of the gallery.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        Link("Open the clip", destination: clip).font(Theme.Font.caption)
+                    }
+                }
             }
             if status == "processing" { Label("Converting for the web — it will appear here shortly.", systemImage: "clock").font(Theme.Font.secondary).foregroundStyle(Theme.Palette.amber) }
             if status == "failed" { Label("The last conversion failed. Upload the clip again.", systemImage: "exclamationmark.triangle").font(Theme.Font.secondary).foregroundStyle(Theme.Palette.danger) }
             if product["video_url"]?.string == nil && status == nil { Text("No clip. One short clip per product (hover-to-play on storefront cards); uploading again replaces it.").font(Theme.Font.secondary).foregroundStyle(Theme.textTertiary) }
             if canEdit {
                 HStack {
-                    AttachmentPicker(label: "Upload video", types: [.movie, .mpeg4Movie, .quickTimeMovie], camera: false) { files in if let f = files.first { Task { await uploadVideo(f) } } }
+                    AttachmentPicker(label: "Upload video (or drop a clip here)", types: [.movie, .mpeg4Movie, .quickTimeMovie], camera: false) { files in if let f = files.first { Task { await uploadVideo(f) } } }
                     if product["video_url"]?.string != nil || status != nil {
                         ConfirmButton("Remove video", message: "The clip is removed from the product.", destructive: true, action: { await delete("video", "Video removed") }) { Text("Remove") }
                     }
                 }
                 .font(Theme.Font.secondary).disabled(busy)
             }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard canEdit, !busy, videoProgress == nil, let f = urls.first.flatMap(UploadFile.load) else { return false }
+            Task { await uploadVideo(f) }
+            return true
         }
         .task(id: product["video_status"]?.string) { await pollVideo() }
     }
@@ -87,14 +131,38 @@ struct ProductImagesTab: View {
         do { _ = try await env.session.client.delete("/v1/admin/products/\(productId)/\(path)"); env.toasts.show(msg); videoStatus = nil; reload() } catch { env.toasts.error(error) }
     }
 
+    /// The hub keeps only the first few seconds of a clip (backend/config/video.php
+    /// `max_seconds`, 6); said before upload, as the console does.
+    static let videoMaxSeconds = 6.0
+
     private func uploadVideo(_ f: UploadFile) async {
-        busy = true; defer { busy = false }
+        guard ["mp4", "mov", "m4v", "webm"].contains((f.name as NSString).pathExtension.lowercased()) else {
+            env.toasts.show("Upload an MP4, MOV, M4V or WebM clip.", tone: .danger); return
+        }
+        if let seconds = await Self.clipSeconds(f), seconds > Self.videoMaxSeconds + 0.5 {
+            env.toasts.show("This clip is \(Int(seconds.rounded())) seconds — only the first \(Int(Self.videoMaxSeconds)) are kept. Trim it first if the best shot comes later.", tone: .info)
+        }
+        busy = true; progress.value = 0
+        defer { busy = false; progress.value = nil }
         do {
-            let r = try await env.session.client.send(APIClient.Request(.post, "/v1/admin/products/\(productId)/video", body: .multipart([f.part(name: "video")])))
+            var req = APIClient.Request(.post, "/v1/admin/products/\(productId)/video", body: .multipart([f.part(name: "video")]))
+            let box = progress
+            req.uploadProgress = { p in Task { @MainActor in if box.value != nil { box.value = p } } }
+            let r = try await env.session.client.send(req)
             videoStatus = r.json?["video_status"]?.string ?? "processing"
             env.toasts.show(r.json?["message"]?.string ?? "Video uploaded")
             await pollVideo()
         } catch { env.toasts.error(error) }
+    }
+
+    /// A local clip's length, read from its metadata; nil when it cannot be read (the upload still goes ahead).
+    private static func clipSeconds(_ f: UploadFile) async -> Double? {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString)-\(f.name)")
+        guard (try? f.data.write(to: tmp)) != nil else { return nil }
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        guard let d = try? await AVURLAsset(url: tmp).load(.duration) else { return nil }
+        let s = CMTimeGetSeconds(d)
+        return s.isFinite ? s : nil
     }
 
     /// GET /products/{id}/video until video_status settles (null) or fails.
@@ -108,6 +176,12 @@ struct ProductImagesTab: View {
             if s != "processing" { reload(); return }
         }
     }
+}
+
+/// Upload progress, written from the network delegate's callbacks on the main actor.
+@MainActor @Observable
+final class UploadProgressBox {
+    var value: Double?
 }
 
 // MARK: - Variants
@@ -337,6 +411,10 @@ struct BomTab: View {
     @State private var adding = false
     @State private var feasibilityQty = "1"
     @State private var feasibility: [Int: JSONValue] = [:]
+    @State private var costing: CostingMaterial?
+
+    /// A BOM material with no cost on record, being costed on the material itself (#563).
+    struct CostingMaterial: Identifiable { let id: Int; let name: String; let unit: String }
 
     private var canEdit: Bool { env.session.can("bom.edit") }
 
@@ -352,6 +430,7 @@ struct BomTab: View {
         .task { if list == nil { load() } }
         .sheet(isPresented: $adding) { ProductBomEditSheet(productId: productId, existing: nil, variants: jrows(product["variants"])) { adding = false; load() } }
         .sheet(item: $editing) { e in ProductBomEditSheet(productId: productId, existing: e.json, variants: jrows(product["variants"])) { editing = nil; load() } }
+        .sheet(item: $costing) { m in SetMaterialCostSheet(material: m) { load() } }
     }
 
     private func load() {
@@ -370,10 +449,26 @@ struct BomTab: View {
                 if let v = bom["variant"], !v.isNull { Text(v["variant_name"]?.string ?? "").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                 Spacer()
                 Text("Total \(fmtMoney(bom["total_cost"], currency: "KES")) · \(bom.int("items_count") ?? jrows(bom["items"]).count) items").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                if let note = BomCost.uncostedNote(bom.int("uncosted_count") ?? 0) { Text(note).font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.Palette.warning) }
             }
             if let n = bom.str("notes"), !n.isEmpty { Text(n).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
-            DataTable(columns: [DataColumn("Material", "material_name"), DataColumn("Code", "material_code"), DataColumn("Qty", "quantity", .number(3)), DataColumn("Unit", "unit_of_measure"), DataColumn("Unit cost", "cost_per_unit", .money, fixedCurrency: "KES"), DataColumn("Line cost", "line_cost", .money, fixedCurrency: "KES")],
+            DataTable(columns: [DataColumn("Material", "material_name"), DataColumn("Code", "material_code"), DataColumn("Qty", "quantity", .number(3)), DataColumn("Unit", "unit_of_measure"), DataColumn("Unit cost", "cost_per_unit", .money, fixedCurrency: "KES"), DataColumn("Line cost", "line_cost", .money, fixedCurrency: "KES"), DataColumn("Cost from", "cost_from")],
                       rows: jrows(bom["items"]).map { JRow(id: $0.id, json: flattenItem($0.json)) })
+            // A material with no cost on record: the total leaves it out (#563).
+            ForEach(jrows(bom["items"]).filter { !BomCost.hasCost($0.json) && env.session.canViewCost }) { item in
+                let m = item.json["material"] ?? .null
+                HStack {
+                    Text(m["name"]?.string ?? "Material").font(Theme.Font.caption)
+                    Spacer()
+                    if env.session.can("inventory.adjust"), let mid = m["id"]?.int {
+                        Button("No cost · set") { costing = CostingMaterial(id: mid, name: m["name"]?.string ?? "Material", unit: item.json["unit_of_measure"]?.string ?? m["unit_of_measure"]?.string ?? "unit") }
+                            .font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.Palette.warning)
+                    } else {
+                        Text("No cost on record").font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.Palette.warning)
+                            .help("Receive it on a purchase order, or ask someone who manages materials to set its cost")
+                    }
+                }
+            }
             HStack(spacing: Theme.Space.s) {
                 HStack(spacing: 4) { Text("Can we make").font(Theme.Font.caption); DecimalField("1", text: $feasibilityQty).frame(width: 60); Button("Check") { Task { await check(bid) } }.font(Theme.Font.caption) }
                 if let f = feasibility[bid] {
@@ -399,6 +494,7 @@ struct BomTab: View {
         o["material_name"] = j["material"]?["name"] ?? .null
         o["material_code"] = j["material"]?["code"] ?? .null
         o["cost_per_unit"] = j["material"]?["cost_per_unit"] ?? .null
+        o["cost_from"] = BomCost.sourceText(j["material"]?["cost_source"]).map { .string($0) } ?? .null
         return .object(o)
     }
 
@@ -477,5 +573,39 @@ struct ProductBomEditSheet: View {
             else { body.put("product_variant_id", variantId.map { .number(Double($0)) }); _ = try await env.session.client.post("/v1/admin/products/\(productId)/bom", json: .object(body)) }
             env.toasts.show("BOM saved"); done()
         } catch let e as APIError { error = e } catch { env.toasts.error(error) }
+    }
+}
+
+/// "No cost · set" (#563): the cost is set on the material itself
+/// (PUT inventory/materials/{id} {unit_cost}) — the one cost BOM costing,
+/// stock value and production reports read; never a second price in the BOM.
+/// A change past the threshold comes back as a proposal for approval.
+struct SetMaterialCostSheet: View {
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    let material: BomTab.CostingMaterial
+    let onSaved: () -> Void
+    @State private var value = ""
+    @State private var error: APIError?
+
+    var body: some View {
+        ModuleFormSheet("Cost of \(material.name)", canSubmit: BomCost.validCost(value) != nil, error: error, submit: submit) {
+            ModuleField("KES per \(material.unit)", error: error?.errors["unit_cost"]?.first) { DecimalField("per \(material.unit)", text: $value) }
+            Text("Saved on the material, so every BOM using it picks it up. Receiving it on a purchase order later replaces it with what was actually paid.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+        }
+    }
+
+    private func submit() async {
+        guard let cost = BomCost.validCost(value) else { return }
+        do {
+            let r = try await env.session.client.put("/v1/admin/inventory/materials/\(material.id)", json: .object(["unit_cost": .number(cost)]))
+            let proposal = r.json?["proposal"]
+            if let p = proposal, !p.isNull, p["status"]?.string != "applied" {
+                env.toasts.show(r.json?["message"]?.string ?? "The cost change waits for approval", tone: .warning)
+            } else {
+                env.toasts.show("\(material.name): KES \(BomCost.validCost(value).map { String(format: "%.2f", $0) } ?? value) per \(material.unit) saved on the material.")
+            }
+            onSaved(); dismiss()
+        } catch let e as APIError { error = e } catch { self.error = APIError.transport(error.localizedDescription) }
     }
 }
