@@ -243,6 +243,17 @@ internal fun ClockScreen() {
         val outletId = o["id"].int ?: return
         busy = true
         try {
+            // One saved punch at a time (as on iOS): a second offline tap would
+            // replace the saved punch and lose its original time.
+            val store = env.offline
+            if (store == null) { env.toasts.show("Can't check saved work on this device. Try again.", StatusTone.DANGER); return }
+            val saved = try { store.pendingChecked() } catch (e: OfflineStore.QueueUnreadable) {
+                env.toasts.show("Can't read saved work on this device. Ask a manager for help before clocking in or out.", StatusTone.DANGER); return
+            }
+            if (saved.any { it.kind == "punch" }) {
+                loadPending()
+                env.toasts.show("Send the saved punch before recording another.", StatusTone.WARNING); return
+            }
             val f = env.location.currentFix(10_000) ?: fix
             if (f == null) { env.toasts.show("Waiting for your location. Try again in a moment.", StatusTone.WARNING); return }
             fix = f
@@ -265,14 +276,15 @@ internal fun ClockScreen() {
                 askReason = false; reason = ""; serverAsksOverride = false
                 status.reload()
             } catch (e: ApiError) {
-                val store = env.offline
-                if (e.isOffline && !force && store != null) {
+                // The store checked above: env.offline can change underneath a sign-in.
+                if (e.isOffline && !force) {
                     val op = OfflineStore.PendingOperation(kind = "punch", method = "POST", path = path, body = json, dedupeKey = "punch")
                     if (!store.enqueue(op)) {
                         env.toasts.show("No signal, and your punch could not be saved on this device. Try again when you are back online.", StatusTone.DANGER)
                         return
                     }
                     pending = op
+                    env.refreshPendingCount()
                     env.toasts.show(if (active != null) "No signal. Your clock-out is saved and will be sent when you are back online." else "No signal. Your clock-in is saved and will be sent when you are back online.", StatusTone.INFO)
                 } else {
                     if (e.raw["requires_override"].bool == true) serverAsksOverride = true
