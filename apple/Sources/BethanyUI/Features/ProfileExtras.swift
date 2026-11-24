@@ -16,9 +16,11 @@ struct EditProfileSheet: View {
     @State private var email = ""
     @State private var languages: [Record] = []
     @State private var currencies: [Record] = []
+    @State private var loadError: String?
+    @State private var loaded = false
 
     var body: some View {
-        EditSheet("Details & preferences", canSave: !first.trimmingCharacters(in: .whitespaces).isEmpty && !last.trimmingCharacters(in: .whitespaces).isEmpty, save: {
+        EditSheet("Details & preferences", canSave: loaded && !first.trimmingCharacters(in: .whitespaces).isEmpty && !last.trimmingCharacters(in: .whitespaces).isEmpty, save: {
             let r = try await env.session.client.put("/v1/admin/profile", json: .object([
                 "first_name": .string(first.trimmingCharacters(in: .whitespaces)), "last_name": .string(last.trimmingCharacters(in: .whitespaces)),
                 "phone": .string(phone.trimmingCharacters(in: .whitespaces)), "preferred_language": .string(language), "preferred_currency": .string(currency),
@@ -26,31 +28,48 @@ struct EditProfileSheet: View {
             toastResult(env, r, fallback: "Profile updated")
             await env.session.refreshMe()
         }) { e in
+            if let loadError {
+                Text(loadError).font(Theme.Font.secondary).foregroundStyle(Theme.Palette.danger)
+                Button("Try again") { Task { await loadProfile() } }
+            } else if !loaded {
+                ProgressView("Loading your details…")
+            }
+            if loaded {
             Field("First name", $first, error: e?.errors["first_name"]?.first)
             Field("Last name", $last, error: e?.errors["last_name"]?.first)
             DetailRow("Email", email)
             Text("Contact admin to change your email address.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
             Field("Phone number", $phone, placeholder: "+254 700 000 000", error: e?.errors["phone"]?.first)
             Picker("Preferred language", selection: $language) {
-                if languages.isEmpty { Text("English").tag("en") }
+                if languages.isEmpty { Text(language.uppercased()).tag(language) }
                 ForEach(languages) { l in Text("\(l.string("name") ?? "") (\(l.string("native_name") ?? l.string("code") ?? ""))").tag(l.string("code") ?? "") }
             }
             Picker("Preferred currency", selection: $currency) {
-                if currencies.isEmpty { Text("KES").tag("KES") }
+                if currencies.isEmpty { Text(currency).tag(currency) }
                 ForEach(currencies) { c in Text("\(c.string("code") ?? "") - \(c.string("name") ?? "")").tag(c.string("code") ?? "") }
             }
             Text("Preferences apply to your personal view of the Hub.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            }
         }
-        .task {
+        .task { await loadProfile() }
+    }
+
+    private func loadProfile() async {
+        loadError = nil
+        do {
             let c = env.session.client
-            if let u = (try? await c.get("/v1/admin/profile"))?.json?["user"] {
+            guard let u = try await c.get("/v1/admin/profile").json?["user"] else {
+                loadError = "Your details could not be loaded. Please try again."; return
+            }
+            do {
                 first = u["first_name"]?.string ?? ""; last = u["last_name"]?.string ?? ""; phone = u["phone"]?.string ?? ""
                 email = u["email"]?.string ?? ""
                 language = u["preferred_language"]?.string ?? "en"; currency = u["preferred_currency"]?.string ?? "KES"
             }
             languages = (try? await c.get("/v1/admin/languages"))?.json?.records ?? []
             currencies = (try? await c.get("/v1/admin/currencies-management"))?.json?.records ?? []
-        }
+            loaded = true
+        } catch { loadError = "Your details could not be loaded. Please try again." }
     }
 }
 
@@ -100,9 +119,11 @@ struct MyEmploymentPanel: View {
                 Text("Something wrong here? Ask whoever keeps the employee files; only they can change it.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
             }
             SectionCard("Mine to keep") {
-                DetailRow("Date of birth", me.dateOfBirth.map(PayrollText.date) ?? "—")
-                DetailRow("Emergency contact", [me.emergencyName, me.emergencyRelationship, me.emergencyPhone].compactMap { $0 }.joined(separator: " · ").nilIfEmpty ?? "—")
-                Button("Edit…") { editing = true }.font(Theme.Font.secondary)
+                if let dob = me.dateOfBirth, !dob.isEmpty { DetailRow("Date of birth", PayrollText.date(dob)) }
+                if let contact = [me.emergencyName, me.emergencyRelationship, me.emergencyPhone].compactMap({ $0?.nilIfEmpty }).joined(separator: " · ").nilIfEmpty {
+                    DetailRow("Emergency contact", contact)
+                } else { Text("Add an emergency contact so your team knows who to reach.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary) }
+                Button("Edit personal details") { editing = true }.buttonStyle(.bordered).tint(Theme.Palette.brand)
             }
             if me.masked.contains(where: { !($0.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
                 SectionCard("Identifiers") {
@@ -178,7 +199,9 @@ struct MyActivityPanel: View {
                     HStack {
                         Text(a.text).font(Theme.Font.body)
                         Spacer()
-                        DateText(a.createdAt, style: .relative).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                        if let date = a.createdAt {
+                            Text(date.formatted(date: .abbreviated, time: .shortened)).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        }
                     }
                     Divider()
                 }
