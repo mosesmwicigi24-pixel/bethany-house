@@ -28,11 +28,17 @@ import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Note
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -223,12 +229,31 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
                     val visible = if (tailors) groups.filter { it.id == selectedOrder } else groups
                     if (tailors && visible.isEmpty()) Text("This job is no longer on your task list.", style = MaterialTheme.typography.bodyMedium)
                     visible.forEach { g ->
-                        SectionCard {
-                            TaskOrderHeader(g.order)
-                            g.tasks.forEach { t ->
-                                TaskCard(task = t, order = g.order,
-                                    pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") },
-                                    onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
+                        if (tailors) {
+                            TailorJobHeading(g.order)
+                            if (!history && (g.order["status"].str in listOf("qc_pending", "qc_passed", "qc_failed") || openTaskStages(g, history).isEmpty())) {
+                                SectionCard { Text(taskSummary(g, history), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.hub.textSecondary) }
+                            }
+                            openTaskStages(g, history).forEach { t ->
+                                SectionCard {
+                                    TaskCard(task = t, order = g.order,
+                                        pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") },
+                                        onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
+                                }
+                            }
+                            TailorJobSpecifications(g.order)
+                            g.order["notes"].str?.takeIf { it.isNotBlank() }?.let { notes ->
+                                SectionCard("Bench note") { Text(notes, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.hub.textSecondary) }
+                            }
+                            if (g.tasks.isNotEmpty()) TailorStageOverview(g, history) { noteFor = it }
+                        } else {
+                            SectionCard {
+                                TaskOrderHeader(g.order)
+                                g.tasks.forEach { t ->
+                                    TaskCard(task = t, order = g.order,
+                                        pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") },
+                                        onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
+                                }
                             }
                         }
                         if (tailors && g.tasks.isNotEmpty()) StageJourney(g.tasks)
@@ -372,6 +397,113 @@ internal fun taskSummary(group: TaskOrderGroup, history: Boolean): String {
         return "${stage["stage"]["name"].str ?: "Stage"} · $label"
     }
     return if (history) "${group.tasks.size} ${if (group.tasks.size == 1) "stage" else "stages"}" else "Your stages are finished"
+}
+
+@Composable
+private fun TailorJobHeading(order: JsonElement?) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(taskName(order), style = MaterialTheme.typography.headlineSmall)
+        order["customer_label"].str?.takeIf { it.isNotBlank() }?.let {
+            Text("For $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.hub.textSecondary)
+        }
+        order["order_number"].str?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary) }
+        order["due_date"].date?.let { due ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Due", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                DateText(due, DateStyle.DATE)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TailorJobSpecifications(order: JsonElement?) {
+    val sheet = MeasurementSheet.of(order["measurements"])
+    val specs = order["specifications"].stringPairs
+    var specsOpen by remember { mutableStateOf(true) }
+    var measurementsOpen by remember { mutableStateOf(true) }
+    if (specs.isNotEmpty() || sheet.gender != null) {
+        SectionCard {
+            TextButton(onClick = { specsOpen = !specsOpen }, modifier = Modifier.fillMaxWidth()) {
+                Text("Specifications", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                Text("${specs.size + if (sheet.gender == null) 0 else 1}  ${if (specsOpen) "⌃" else "⌄"}")
+            }
+            if (specsOpen) {
+                sheet.gender?.let { DetailRow("For", it.humanized) }
+                specs.forEach { (key, value) -> DetailRow(key.humanized, value) }
+            }
+        }
+    }
+    if (sheet.body.isNotEmpty()) {
+        SectionCard {
+            TextButton(onClick = { measurementsOpen = !measurementsOpen }, modifier = Modifier.fillMaxWidth()) {
+                Text("Measurements", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                Text("${sheet.body.size}  ${if (measurementsOpen) "⌃" else "⌄"}")
+            }
+            if (measurementsOpen) sheet.body.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    row.forEachIndexed { index, (key, value) ->
+                        Column(Modifier.weight(1f).background(MaterialTheme.hub.canvas, RoundedCornerShape(10.dp)).padding(Space.s), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.Straighten, contentDescription = null, tint = if (index == 0) Palette.brand else Palette.info, modifier = Modifier.size(16.dp))
+                                Text(key.humanized, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+                            }
+                            Text(value, style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TailorStageOverview(group: TaskOrderGroup, history: Boolean, onNote: (Record) -> Unit) {
+    val complete = group.tasks.count { it.status == "completed" }
+    SectionCard("Your stages") {
+        Text("$complete of ${group.tasks.size} complete", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+        LinearProgressIndicator(
+            progress = { complete.toFloat() / group.tasks.size },
+            modifier = Modifier.fillMaxWidth(),
+            color = if (complete == group.tasks.size) Palette.success else Palette.brandDeep,
+            trackColor = MaterialTheme.hub.line,
+        )
+        group.tasks.forEach { task ->
+            val name = task["stage"]["name"].str ?: "Stage"
+            val status = task.status ?: "pending"
+            val active = status == "completed" || status == "in_progress"
+            val icon = when {
+                name.contains("cut", true) -> Icons.Default.ContentCut
+                name.contains("payment", true) -> Icons.Default.AccountBalanceWallet
+                name.contains("material", true) -> Icons.Default.Inventory2
+                name.contains("information", true) -> Icons.Default.Storefront
+                name.contains("finish", true) -> Icons.Default.AutoFixHigh
+                name.contains("quality", true) || name.contains("inspection", true) -> Icons.Default.VerifiedUser
+                else -> Icons.Default.Build
+            }
+            val tint = if (!active) MaterialTheme.hub.textTertiary else when {
+                name.contains("payment", true) -> Palette.info
+                name.contains("material", true) -> Palette.amber
+                name.contains("quality", true) -> Palette.success
+                else -> Palette.brandDeep
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(34.dp).background(MaterialTheme.hub.canvas, RoundedCornerShape(9.dp)).padding(6.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(name, style = MaterialTheme.typography.bodyMedium, color = if (active) MaterialTheme.hub.text else MaterialTheme.hub.textSecondary)
+                    val label = when (status) { "completed" -> "Done"; "in_progress" -> "In progress"; "paused" -> "Paused"; "pending" -> "Not done"; else -> status.humanized }
+                    val stamp = when (status) { "completed" -> task["completed_at"].date; "in_progress", "paused" -> task["started_at"].date; else -> null }
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = if (status == "completed") Palette.success else MaterialTheme.hub.textSecondary)
+                    stamp?.let { Text(formatDate(it, DateStyle.DATE_TIME), style = MaterialTheme.typography.labelSmall, color = Palette.brand) }
+                }
+                if (!history && status == "completed" && ProductionStatus.acceptsFloorWork(group.order["status"].str)) {
+                    IconButton(onClick = { onNote(task) }) { Icon(Icons.Default.Note, contentDescription = "Add note to $name", tint = MaterialTheme.hub.textSecondary) }
+                }
+                Icon(if (status == "completed") Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked, contentDescription = null, tint = if (status == "completed") Palette.success else MaterialTheme.hub.textTertiary, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
 }
 
 @Composable

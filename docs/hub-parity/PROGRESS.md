@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Android task detail parity — 24 November 2026, Codex (verification open)
+
+- Reordered the Tailors task workspace to show the job identity and actionable stages first, followed by separate specification and measurement cards, bench note, stage overview, journey and conversation. Completed stages are summarized with status, recorded time and note action. Existing stage actions, endpoints and permission rules remain in place; Hub flavor layout is unchanged.
+- Tailors debug build, focused production tests and the full Tailors unit suite passed. On the signed-in Android emulator, visually checked the job heading, active-stage controls, overview status colors and recorded timestamps without changing any records. History, QC notices, measurement disclosure interactions, conversation navigation, dark appearance, large text, and stage actions still require device verification. Disclosure preference persistence and native iPhone navigation presentation remain parity gaps.
+
 ### Android navigation appearance — 24 November 2026, Codex (done)
 
 - Replaced the Tailors phone navigation's purple Material default with the app's orange selection and neutral indicator. The Hub flavor retains its existing colors. Tailors debug APK build and ShellRenderTest passed; visually checked the updated selected tab on the signed-in Android emulator. Dark mode and large text remain unverified.
