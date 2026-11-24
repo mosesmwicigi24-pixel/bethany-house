@@ -3,9 +3,15 @@ package ke.co.bethanyhouse.hub.ui.features.production
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +46,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -222,6 +231,7 @@ internal fun MyTasksScreen() {
                                     onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
                             }
                         }
+                        if (tailors && g.tasks.isNotEmpty()) StageJourney(g.tasks)
                         if (tailors && g.id > 0) JobConversation(g.id)
                     }
                 }
@@ -261,6 +271,36 @@ internal fun taskGroups(rows: List<Record>): List<TaskOrderGroup> {
     return order.map { oid ->
         val ts = byOrder[oid]!!.sortedBy { it["sequence"].int ?: 0 }
         TaskOrderGroup(oid, ts.firstOrNull()?.get("production_order"), ts)
+    }
+}
+
+@Composable
+private fun StageJourney(tasks: List<Record>) {
+    SectionCard("Stage journey") {
+        Text("Your assigned stages, in order", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.Top) {
+            tasks.forEachIndexed { index, task ->
+                val name = task["stage"]["name"].str ?: "Stage"
+                val status = when (task.status) { "completed" -> "Done"; "pending" -> "Not done"; "in_progress" -> "In progress"; "paused" -> "Paused"; else -> task.status?.humanized ?: "Not done" }
+                val tint = when (task.status) { "completed" -> Palette.success; "in_progress" -> Palette.brand; else -> MaterialTheme.hub.textTertiary }
+                val icon = when {
+                    name.contains("cut", true) -> Icons.Default.ContentCut
+                    name.contains("quality", true) || name.contains("inspection", true) -> Icons.Default.VerifiedUser
+                    else -> Icons.Default.Build
+                }
+                Column(Modifier.width(96.dp).semantics(mergeDescendants = true) { contentDescription = "$name, $status" }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.weight(1f).height(2.dp).background(if (index == 0) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.hub.line))
+                        Box(Modifier.size(44.dp).border(1.5.dp, tint, CircleShape).background(MaterialTheme.hub.canvas, CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                        }
+                        Spacer(Modifier.weight(1f).height(2.dp).background(if (index == tasks.lastIndex) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.hub.line))
+                    }
+                    Text(name, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+                    Text(status, style = MaterialTheme.typography.labelSmall, color = tint, textAlign = TextAlign.Center)
+                }
+            }
+        }
     }
 }
 
