@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### In progress — 24 November 2026, Codex
+
+- Unifying Apple Calendar and My Tasks navigation for an assigned production order. Existing worker and production-order permissions and Hub endpoints remain in force; manager views and unassigned orders need a safe fallback.
+
 ### Production-order layout — 24 November 2026
 
 - Reordered the order page to show its summary, work instructions and measurements, then compact stages; removed its PDF action and Details section at the owner's request. The removed Details section previously displayed fitting/collection dates and a sales-order link; those are no longer shown on this page.
