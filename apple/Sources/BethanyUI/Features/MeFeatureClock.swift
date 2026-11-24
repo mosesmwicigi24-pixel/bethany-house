@@ -142,8 +142,9 @@ struct ClockView: View {
 
     // MARK: The clock and the button
 
-    private var canPunch: Bool { data != nil && status?.state.error == nil && fix != nil && outlet != nil && !busy && (active != nil || verdict.inside || verdict.nearEdge) }
-    private var showForce: Bool { data != nil && status?.state.error == nil && active == nil && fix != nil && outlet != nil && canOverride && (serverAsksOverride || !(verdict.inside || verdict.nearEdge)) }
+    // Offline is not a reason to lock someone out: the punch is queued (ClockGate).
+    private var canPunch: Bool { ClockGate.statusUsable(hasStatus: data != nil, error: status?.state.error) && fix != nil && outlet != nil && !busy && (active != nil || verdict.inside || verdict.nearEdge) }
+    private var showForce: Bool { ClockGate.forceAllowed(hasStatus: data != nil, error: status?.state.error) && active == nil && fix != nil && outlet != nil && canOverride && (serverAsksOverride || !(verdict.inside || verdict.nearEdge)) }
 
     private var elapsedMinutes: Int {
         guard let active, let inAt = active["clock_in_at"]?.date else { return 0 }
@@ -364,7 +365,9 @@ struct ClockView: View {
             askReason = false; reason = ""; serverAsksOverride = false
             await status?.reload()
         } catch {
-            if isOfflineError(error) && !force, let offline = env.offline {
+            // The store resolved above: env.offline can still be unset just
+            // after sign-in, which would turn a saved punch into an error.
+            if isOfflineError(error) && !force {
                 let op = OfflineStore.PendingOperation(kind: "punch", method: "POST", path: path, body: .object(body), dedupeKey: "punch")
                 guard await offline.enqueue(op) else {
                     env.toasts.show("This punch could not be saved on this device. Try again.", tone: .danger)

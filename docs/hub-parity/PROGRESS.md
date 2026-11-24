@@ -146,3 +146,26 @@ payroll to Tailors Hub for those whose existing Hub permissions open them.
   simulator or device run from the cloud. A run on the owner's Mac (TailorsMobile
   in the iPhone simulator) is still to do: the Mac is not connected to this
   session.
+
+### Offline clock-in restored — 24 November 2026, Claude
+
+Codex reported, and the owner chose that Claude fix, before #588 merges.
+
+- **Regression (from 6d2d4455):** `canPunch` required the clock status to
+  load without error, so a failed refresh with no signal greyed out Clock in
+  even with the last status and a valid location on screen; the tap never
+  reached the offline queue.
+- **Second defect, same path:** the offline branch of `punch()` saved to
+  `env.offline`, which can still be unset just after sign-in, turning a saved
+  punch into an error. It now uses the store `punch()` resolved at its start.
+- **Rule:** `ClockGate` (BethanyKit). Clock in/out is available with the last
+  status on screen when it is fresh or failed only for being offline; a Hub
+  error or no status still blocks. A forced (override) punch still needs a
+  fresh status: it is never queued.
+- **Tests:** `ClockGateTests` (5) and `OfflineStoreTests` (9, including a
+  punch made offline: kept while offline, sent exactly once on reconnect with
+  its original `recorded_at`). 14 pass on Linux (Swift 6.0.3, APIClient
+  stubbed). Putting the strict rule back fails the offline-gate test.
+- **Not verified here:** the screen itself. On the PR head, on a simulator:
+  network off → Clock in saves "waiting to be sent"; network on → sent once,
+  the Hub shows the original time.
