@@ -46,6 +46,18 @@ struct MyTasksView: View {
         .navigationTitle("My Tasks")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text("TAILORS HUB")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(Theme.Palette.brandDeep)
+                    Text("My Tasks").font(.headline)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
         #endif
         .task(id: history) { await load() }
         .onChange(of: env.connection.isOnline) { _, online in
@@ -94,11 +106,23 @@ struct MyTasksView: View {
     private func queue(_ groups: [OrderGroup], selection: Int?) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(greeting)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Your workshop, at a glance.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
+
                 HStack(alignment: .center, spacing: 8) {
                     Label("Workshop", systemImage: "scissors")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.Palette.brandDeep)
-                        .accessibilityHidden(true)
                     Spacer(minLength: 4)
                     if !pending.isEmpty {
                         Button {
@@ -155,6 +179,11 @@ struct MyTasksView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
         .refreshable { await refresh() }
+    }
+
+    private var greeting: String {
+        let name = env.session.me?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Hello" : "Hello, \(name)"
     }
 
     private func jobRow(_ group: OrderGroup, selected: Bool) -> some View {

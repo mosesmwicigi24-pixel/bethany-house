@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Personalized My Tasks header — 24 November 2026, Codex
+
+- Added Tailors Hub branding above the My Tasks navigation title and a greeting using the signed-in account name above the workshop list. Offline and pending-sync controls remain in place.
+- TailorsMobile iPhone 17 Pro simulator build passed. The header, sample account greeting and populated task list were visually inspected using a fictional local Hub. No live Hub data was changed. Dark mode, larger text, iPad and missing-name states remain unverified in the simulator.
+
 ### My Tasks workspace — 24 November 2026, Codex
 
 - Removed Calendar's open-work-by-stage section. My Tasks now opens specifications and measurements by default, groups the bench note in a themed card, and previews up to three recent messages from the existing membership-scoped production channel. Opening the preview uses the existing full Messages conversation; previews do not mark messages read. Missing or dismissed channels are not created or rejoined automatically.
