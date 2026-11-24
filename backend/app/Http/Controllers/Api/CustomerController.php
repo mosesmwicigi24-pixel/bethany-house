@@ -186,7 +186,7 @@ class CustomerController extends Controller
         // for every door, App\Support\CustomerOrderHistory::of. It used to
         // read user_id alone, null for a walk-in, so every walk-in's history
         // showed empty while their orders sat in the table.
-        $ordersQuery = \App\Support\CustomerOrderHistory::of($customer);
+        $ordersQuery = \App\Support\CustomerOrderHistory::of($customer, $request->user());
 
         // What a customer has SPENT is recognised income — Order::scopeRecognised,
         // the one definition every report in this system uses: a human accepted
@@ -528,7 +528,7 @@ class CustomerController extends Controller
         // The same "this customer's orders" as the profile (customer_id, or
         // their web account). Reading user_id alone made `user_id IS NULL`
         // for a walk-in: every OTHER walk-in's orders listed under them.
-        $orders = \App\Support\CustomerOrderHistory::of($customer)->with(['items', 'payments'])
+        $orders = \App\Support\CustomerOrderHistory::of($customer, request()->user())->with(['items', 'payments'])
             ->orderBy('created_at', 'desc')
             ->paginate(20);
 
@@ -547,7 +547,9 @@ class CustomerController extends Controller
      * 254712… and +254712… are one number, a number with no country code is
      * Kenyan, and +256712… is somebody else. Matched on the customer record,
      * its web account, and the phone typed on a sale with no customer record
-     * (a walk-in). Orders are read through the caller's own order scope.
+     * (a walk-in). Customers are the caller's own (Customer::visibleTo) and
+     * orders are bounded by their customers.insights scope
+     * (CustomerOrderHistory::readableBy) — never by orders.view.
      */
     public function ordersByPhone(Request $request)
     {
@@ -564,16 +566,20 @@ class CustomerController extends Controller
             ], 422);
         }
 
-        $customers = Customer::query()
-            ->whereRaw('normalize_phone(customers.phone) = normalize_phone(?)', [$phone])
-            ->orWhereHas('user', fn ($u) => $u->whereRaw('normalize_phone(users.phone) = normalize_phone(?)', [$phone]))
+        // The caller's own customers only (Customer::visibleTo): a manager of
+        // one shop is not told who holds a number at another, even with no
+        // orders to show. The orders below are bounded the same way.
+        $customers = Customer::visibleTo($request->user())
+            ->where(fn ($m) => $m
+                ->whereRaw('normalize_phone(customers.phone) = normalize_phone(?)', [$phone])
+                ->orWhereHas('user', fn ($u) => $u->whereRaw('normalize_phone(users.phone) = normalize_phone(?)', [$phone])))
             ->orderBy('id')
             ->get(['id', 'customer_number', 'user_id', 'first_name', 'last_name', 'phone']);
 
         $customerIds = $customers->pluck('id')->all();
         $userIds     = $customers->pluck('user_id')->filter()->values()->all();
 
-        $orders = Order::where(function ($q) use ($customerIds, $userIds, $phone) {
+        $orders = \App\Support\CustomerOrderHistory::readableBy($request->user())->where(function ($q) use ($customerIds, $userIds, $phone) {
             $q->whereRaw('normalize_phone(orders.customer_phone) = normalize_phone(?)', [$phone]);
             if ($customerIds) {
                 $q->orWhereIn('orders.customer_id', $customerIds);

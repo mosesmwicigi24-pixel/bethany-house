@@ -23,7 +23,9 @@ use Tests\TestCase;
  * came back with identity only — no orders, no stats — and an own-only data
  * scope, so a customer the search found by phone answered 404. The
  * `customer_history_reader` role, held BESIDE the working role, opens both to
- * read and nothing to write.
+ * read and nothing to write — and, because history has its own scope
+ * (customers.insights) rather than borrowing orders.view, it widens no order
+ * ACTION: the account still opens, links and takes payment on its own orders only.
  *
  * Made-up fixture, every figure worked by hand. One customer, "Amani Test",
  * phone 0712 000 111:
@@ -272,7 +274,7 @@ class CustomerOrderHistoryTest extends TestCase
 
         // The reader role grants nothing that writes.
         $perms = Role::findByName('customer_history_reader', 'sanctum')->permissions->pluck('name')->sort()->values()->all();
-        $this->assertSame(['customers.insights', 'customers.view', 'orders.view'], $perms);
+        $this->assertSame(['customers.insights', 'customers.view'], $perms);
 
         $this->app['auth']->forgetGuards();
         $this->getJson('/api/v1/admin/orders/by-phone?phone=0712000111')->assertUnauthorized();
@@ -324,6 +326,97 @@ class CustomerOrderHistoryTest extends TestCase
 
         Artisan::call('orders:phone-coverage', ['--days' => 5]);
         $this->assertStringContainsString('Till sales, last 5 days: 0', Artisan::output());
+    }
+
+    public function test_reading_history_business_wide_widens_no_order_action(): void
+    {
+        $theirs = $this->o['T'];   // a cashier's till sale, in the agent's history
+        $mine   = $this->o['C'];   // the agent's own chat order
+        DB::table('orders')->where('id', $theirs->id)->update(['status' => 'pending', 'payment_status' => 'pending']);
+
+        // It can READ the cashier's sale as history …
+        $this->assertContains('T-HIST-T', array_column(
+            $this->getJson("/api/v1/admin/customers/{$this->amani->id}")->assertOk()->json('customer.orders'), 'order_number'));
+
+        // … and cannot open it, mint its payment link, or take payment on it.
+        $this->getJson("/api/v1/admin/orders/{$theirs->id}")->assertNotFound();
+        $this->getJson("/api/v1/admin/orders/{$theirs->id}/payment-link")->assertNotFound();
+        $this->postJson("/api/v1/admin/orders/{$theirs->id}/payments", ['method' => 'cash', 'amount' => 3000])
+            ->assertStatus(404);
+        $this->postJson("/api/v1/admin/orders/{$theirs->id}/payment", ['payment_method' => 'mpesa', 'phone' => '0712000111'])
+            ->assertStatus(404);
+
+        $row = DB::table('orders')->where('id', $theirs->id)->first();
+        $this->assertNull($row->payment_token, 'no payment link was minted');
+        $this->assertSame(0, DB::table('payments')->where('order_id', $theirs->id)->count());
+
+        // Its own order is still its to open, exactly as before.
+        $this->getJson("/api/v1/admin/orders/{$mine->id}")->assertOk();
+
+        // The orders list is still its own sales only.
+        $listed = array_column($this->getJson('/api/v1/admin/orders')->assertOk()->json('data'), 'order_number');
+        $this->assertSame(['T-HIST-C'], $listed);
+    }
+
+    public function test_the_order_detail_carries_no_cost_for_a_cost_blind_viewer(): void
+    {
+        DB::table('order_items')->update(['cost_price' => 1234.56, 'cost_source' => 'product_price']);
+
+        $body = (string) $this->getJson("/api/v1/admin/orders/{$this->o['C']->id}")->assertOk()->getContent();
+        $this->assertStringNotContainsString('cost_price', $body);
+        $this->assertStringNotContainsString('cost_source', $body);
+        $this->assertStringNotContainsString('1234.56', $body);
+
+        // The orders list carries the same items; the same rule.
+        $list = $this->getJson('/api/v1/admin/orders')->assertOk();
+        $this->assertSame(['T-HIST-C'], array_column($list->json('data'), 'order_number'));
+        $this->assertStringNotContainsString('cost_price', (string) $list->getContent());
+        foreach (['data', 'current_page', 'per_page', 'total', 'last_page'] as $key) {
+            $this->assertArrayHasKey($key, $list->json(), 'the list keeps its paginated shape');
+        }
+
+        Sanctum::actingAs($this->person('super_admin'));
+        $this->assertEquals(1234.56, $this->getJson("/api/v1/admin/orders/{$this->o['C']->id}")
+            ->assertOk()->json('order.items.0.cost_price'));
+        $this->assertStringContainsString('cost_price', (string) $this->getJson('/api/v1/admin/orders')->assertOk()->getContent());
+    }
+
+    public function test_by_phone_tells_a_shop_manager_nothing_about_another_shops_customer(): void
+    {
+        $here  = \App\Models\Outlet::factory()->create();
+        $there = \App\Models\Outlet::factory()->create();
+
+        $manager = $this->person('outlet_manager');   // holds customers.insights, outlet-scoped
+        $manager->outlets()->attach($here->id);
+
+        // A customer of the OTHER shop, with an order there.
+        $elsewhere = Customer::create(['first_name' => 'Zawadi', 'last_name' => 'Test', 'phone' => '0733111222']);
+        $elsewhere->forceFill(['created_outlet_id' => $there->id])->save();
+        $this->order('E', 2000, ['order_type' => 'pos', 'status' => 'confirmed', 'payment_status' => 'paid',
+            'customer_id' => $elsewhere->id, 'outlet_id' => $there->id, 'created_by' => $this->cashier->id], '2026-11-01 10:00:00');
+
+        // A customer of THIS shop.
+        $mine = Customer::create(['first_name' => 'Neema', 'last_name' => 'Test', 'phone' => '0733111333']);
+        $mine->forceFill(['created_outlet_id' => $here->id])->save();
+        $this->order('H', 1500, ['order_type' => 'pos', 'status' => 'confirmed', 'payment_status' => 'paid',
+            'customer_id' => $mine->id, 'outlet_id' => $here->id, 'created_by' => $this->cashier->id], '2026-11-03 10:00:00');
+
+        Sanctum::actingAs($manager->fresh());
+
+        $other = $this->getJson('/api/v1/admin/orders/by-phone?phone=0733111222')->assertOk();
+        $this->assertSame([], $other->json('customers'), 'not even the id, name or phone');
+        $this->assertSame([], $other->json('orders'));
+        $other->assertJsonPath('stats.total_orders', 0);
+        $this->assertStringNotContainsString('Zawadi', (string) $other->getContent());
+
+        $own = $this->getJson('/api/v1/admin/orders/by-phone?phone=0733111333')->assertOk();
+        $this->assertSame([$mine->id], array_column($own->json('customers'), 'id'));
+        $this->assertSame(['T-HIST-H'], array_column($own->json('orders'), 'order_number'));
+
+        // And the business-wide reader sees both.
+        Sanctum::actingAs($this->agent);
+        $this->assertSame(['T-HIST-E'], array_column(
+            $this->getJson('/api/v1/admin/orders/by-phone?phone=0733111222')->assertOk()->json('orders'), 'order_number'));
     }
 
     public function test_the_orders_tab_no_longer_lists_other_walk_ins_orders(): void

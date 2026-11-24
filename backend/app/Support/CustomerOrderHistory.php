@@ -2,9 +2,12 @@
 
 namespace App\Support;
 
+use App\Enums\DataScope;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\SalesDocument;
+use App\Models\User;
+use App\Services\DataScopeResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -19,18 +22,43 @@ use Illuminate\Support\Collection;
  * for a walk-in (no web account) `user_id IS NULL` listed every other
  * walk-in's orders under them.
  *
- * Read through Order, so the caller's own data scope (ViewerScope) bounds
- * what comes back — this never shows an order the caller could not open.
+ * HISTORY HAS ITS OWN SCOPE (review of #590, 2026-11-24). It is read
+ * outside the order viewer scope and bounded by how widely the caller holds
+ * `customers.insights` — the capability that IS "a customer's order history".
+ * Widening who may READ a history must never ride on `orders.view`: that
+ * scope is also what every order ACTION resolves an order through (payment
+ * links, recording a payment), so a wider orders.view would have let a till
+ * account act on other cashiers' orders.
  */
 final class CustomerOrderHistory
 {
     /** The most recent orders returned; the stats beside them cover all. */
     public const LIMIT = 50;
 
-    /** Orders placed as this customer, or by their web account. */
-    public static function of(Customer $customer): Builder
+    /**
+     * Every order this caller may read AS HISTORY: all of them, those of
+     * their outlets, their own team's, or none — the widest data scope among
+     * the roles that grant them customers.insights (DataScopeResolver).
+     */
+    public static function readableBy(?User $user): Builder
     {
-        return Order::where(function ($q) use ($customer) {
+        $orders = Order::withoutViewerScope();
+        $model  = $orders->getModel();
+
+        match (DataScopeResolver::for($user, 'customers.insights')) {
+            DataScope::All    => null,
+            DataScope::None   => $orders->whereRaw('1 = 0'),
+            DataScope::Own    => $orders->whereIn('orders.' . $model->ownerColumn(), $user->teamIds()),
+            DataScope::Outlet => $model->constrainToOutlets($orders, DataScopeResolver::outletIds($user)),
+        };
+
+        return $orders;
+    }
+
+    /** Orders placed as this customer, or by their web account. */
+    public static function of(Customer $customer, ?User $viewer): Builder
+    {
+        return self::readableBy($viewer)->where(function ($q) use ($customer) {
             $q->where('orders.customer_id', $customer->id);
             if ($customer->user_id) {
                 $q->orWhere('orders.user_id', $customer->user_id);

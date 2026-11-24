@@ -250,7 +250,7 @@ class RoleCatalogueV2Test extends TestCase
         // role (owner's ask, 2026-11-24): what a customer has ordered, across
         // every channel. Nothing that writes; no bundle, so no @self grants.
         'customer_history_reader' => [
-            'customers.insights', 'customers.view', 'orders.view',
+            'customers.insights', 'customers.view',
         ],
         // A role added after v2 (owner's ask, 2026-10-15) — created by sync,
         // so its whole shape lives here. products.view arrives as

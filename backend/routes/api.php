@@ -998,6 +998,15 @@ Route::prefix('v1')->group(function () {
             });
 
             // ── Orders ───────────────────────────────────────────────────────
+            // What whoever holds this phone number has ordered — read-only, one
+            // call for the chat agent (2026-11-24). Registered BEFORE the orders
+            // group so "by-phone" is never read as an order {id}. Order history
+            // is the customer's financial profile: customers.insights, whose
+            // data scope bounds it (CustomerOrderHistory) — not orders.view.
+            // Whole numbers only, so it is not a way to walk the phone book.
+            Route::get('/orders/by-phone', [CustomerController::class, 'ordersByPhone'])
+                ->middleware(['permission:customers.insights,sanctum', 'contacts.mask:customers.view']);
+
             Route::middleware(['permission:orders.view,sanctum', 'contacts.mask:orders.view'])->prefix('orders')->group(function () {
                 Route::get('/',                          [OrderController::class, 'index']);
                 // Must come before GET /{id} - otherwise Laravel matches
@@ -1005,14 +1014,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('/export',                    [OrderController::class, 'exportCsv'])->middleware('step.up');
                 // Also before /{id} for the same reason as /export.
                 Route::get('/pending-queue',             [OrderController::class, 'pendingQueue']);
-                // What whoever holds this phone number has ordered — read-only,
-                // one call for the chat agent (2026-11-24). Before /{id}, like
-                // /export. Order history is the customer's financial profile
-                // (customers.insights) on top of the group's orders.view, whose
-                // data scope bounds the orders. Whole numbers only, so it is
-                // not a way to walk the phone book.
-                Route::get('/by-phone',                  [CustomerController::class, 'ordersByPhone'])
-                    ->middleware('permission:customers.insights,sanctum');
                 // The shipping-fee modal's method picker: active methods only,
                 // read-only. Gated by the action it serves, not settings.view —
                 // the Setup endpoint it used to call is what dragged Setup into

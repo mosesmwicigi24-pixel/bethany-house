@@ -566,14 +566,17 @@ class SyncPermissions extends Command
         // What a customer has bought, read-only and business-wide (owner's
         // ask, 2026-11-24): for the chat agent's service account, which must
         // know the person it is talking to — till, chat and invoice orders
-        // alike. Held BESIDE its working role: scope is the widest among the
-        // roles granting a capability, so this opens customers and orders to
-        // read and changes nothing about what the account may create. No
-        // write permission, by design.
+        // alike. Held BESIDE its working role.
+        //
+        // Deliberately NOT orders.view (review of #590): scope is the widest
+        // among the roles granting a capability, and orders.view is the scope
+        // every order ACTION resolves through — a business-wide orders.view
+        // would let the account mint payment links for, and record payments
+        // on, other cashiers' orders. History has its own scope instead
+        // (CustomerOrderHistory::readableBy, on customers.insights).
         'customer_history_reader' => [
             'customers.view',
             'customers.insights',
-            'orders.view',
         ],
 
         // Runs the production floor (owner's ask, 2026-10-15): decides who

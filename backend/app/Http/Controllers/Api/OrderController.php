@@ -251,7 +251,10 @@ class OrderController extends Controller
             $order->unsetRelation('payments');
         });
 
-        return response()->json($orders);
+        // Each row carries its items, and each item what it cost us — not the
+        // reader's without products.view_cost (CostVisibility), same as the
+        // order detail.
+        return response()->json(\App\Support\CostVisibility::forViewer($orders->toArray(), $request->user()));
     }
 
     /**
@@ -548,7 +551,10 @@ class OrderController extends Controller
             }, $data['status_history']);
         }
 
-        return response()->json(['order' => $data]);
+        // What each line COST us rides on the items. Not the reader's without
+        // products.view_cost — the owner's rule everywhere (CostVisibility);
+        // every cashier opening an order used to be handed it.
+        return response()->json(['order' => \App\Support\CostVisibility::forViewer($data, request()->user())]);
     }
 
     /**

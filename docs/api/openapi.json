@@ -20338,7 +20338,6 @@
                     }
                 ],
                 "x-permissions": [
-                    "orders.view",
                     "customers.insights"
                 ],
                 "x-staff-only": true,
