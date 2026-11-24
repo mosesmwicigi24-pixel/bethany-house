@@ -3,6 +3,8 @@ package ke.co.bethanyhouse.hub.render
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
+import ke.co.bethanyhouse.hub.BuildConfig
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.NavCatalogue
 import ke.co.bethanyhouse.hub.core.Route
@@ -70,7 +72,8 @@ class RouteRenderTest(private val name: String, private val route: Route) {
                 Route.Product(1), Route.Product(null, new = true), Route.People(1), Route.Comms(1),
                 Route.Updates(1), Route.Handbook(1), Route.Courses(1), Route.Sign(1),
             ) + Route.ReportPage.entries.map { Route.Report(it) } + Route.OrderChannel.entries.map { Route.Orders(it) }
-            return (sidebar + details).distinct().map { arrayOf(it.toString(), it) }
+            val flavor = AppFlavor.valueOf(BuildConfig.APP_FLAVOR)
+            return (sidebar + details).distinct().filter(flavor::allows).map { arrayOf(it.toString(), it) }
         }
     }
 }
