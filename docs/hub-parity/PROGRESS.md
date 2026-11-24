@@ -1,5 +1,91 @@
 # Tailors Hub audit progress
 
+### Cleaner My Tasks and stage colors — 24 November 2026, Codex
+
+- Refined My Tasks spacing and white cards; stage icons use distinct theme colors when active, unfinished stages are subdued, and completed status is green. Recorded dates and times are orange. The stage journey uses the same icon colors. Existing stage actions and status labels remain.
+- TailorsMobile iPhone simulator build passed, including the green status and orange timestamp change. Visually inspected the task list with fictional data. A separate timestamp fixture verified the stage accessibility values show a known completion date/time and first-start date/time in Nairobi; absent timestamps are not invented. Stage colors and dark appearance still need visual inspection in the simulator.
+
+### Cleaner task and calendar surfaces — 24 November 2026, Codex
+
+- Applied the More screen's lighter grouped-card treatment to My Tasks detail, its stage list and journey, task rows, and Calendar summary tiles. Stage names use lighter weight and more vertical spacing; work actions, measurements, statuses and message behavior remain unchanged.
+- TailorsMobile iPhone simulator build passed. Using fictional data, visually inspected the task-detail header and cards; accessibility inspection showed the stage rows and actions. Simulator control disconnected before the stage card and calendar could be visually inspected. Dark mode, large text, iPad and the remaining app pages have not been reviewed for this visual treatment.
+
+### Stage spacing and text size — 24 November 2026, Codex
+
+- Added spacing and hierarchy to task stage rows. The status line shows the Hub's completion time for completed stages or the first start time for in-progress/paused stages, when available, using Nairobi time; no timestamp is fabricated.
+- Added Tailors Hub Text size settings in iPhone More and the iPad sidebar. A 9–36 pt sample slider maps to iOS Dynamic Type sizes, with a device-setting option. The sample uses the exact selected point size; individual app text styles scale differently. The choice is stored on the device.
+- TailorsMobile iPhone simulator build passed. With fictional data, opened the settings, moved the slider to 9 and 36, saw the preview and app text scale without navigating away, and restored the device setting. The sample order did not include timestamps, so the timestamp display remains unverified in the simulator. iPad, dark mode and other screens at large text sizes remain unverified.
+
+### Stage journey overview — 24 November 2026, Codex
+
+- Added a horizontal, connected stage journey card below Your stages. It uses the existing assigned-stage sequence, stage icons and explicit statuses; the detailed stage rows and their actions remain available. The connecting line is neutral and does not imply that intermediate stages are complete.
+- TailorsMobile iPhone simulator build passed. The simulator window changed during sign-in, so the card's visual layout, horizontal scrolling, accessibility sizes and dark appearance remain unverified. No live data was changed.
+
+### Task stage rows — 24 November 2026, Codex
+
+- Stage rows now use the existing stage-specific icons, a name and explicit status, with a completion tick at the far end. Pending stages say “Not done”; paused, failed and in-progress states retain their accurate labels. Existing add-note actions are preserved.
+- TailorsMobile iPhone simulator build passed. With fictional data, accessibility inspection confirmed four Done stages and one In progress stage and their note actions. Simulator control disconnected when attempting to scroll for a visual inspection; pending, dark mode, larger text and the final card appearance remain unverified.
+
+### Tailors Hub header — 24 November 2026, Codex
+
+- Replaced the two-line My Tasks heading on the Tailors Hub task list with the app's existing scissors-and-thread icon and a larger Tailors Hub name. The system navigation title remains My Tasks for back navigation; Bethany Hub retains its My Tasks heading.
+- TailorsMobile simulator build passed; visually checked the header and task list on iPhone 17 Pro with fictional Hub data. Dark mode, larger accessibility text and iPad remain unverified.
+
+### Task detail redesign — in progress, 24 November 2026, Codex
+
+- Replaced the compact-width task overlay with navigation-stack detail, preserving the wide split and the Calendar sheet entry; added a product navigation title, selectable order reference, scoped customer label where present, and labeled due date. Separated specifications and measurements into expandable sections, with locally stored per-account disclosure preferences. Made measurement icons consistent, styled the note quietly, and presented the assigned stages as a vertical timeline. Existing stage actions and job conversation remain.
+- TailorsMobile iPhone 17 Pro simulator build succeeded. With a fictional local Hub, visually checked the in-progress shirt, separate expanded sections and system Back to My Tasks. No live data was changed.
+- **Still open:** measurement units remain UNKNOWN — NEEDS VERIFICATION and are not invented; order and fitting dates are absent from the existing task payload. Verify per-user disclosure persistence, empty/offline/error states, completed and sparse orders, Calendar-to-detail return, VoiceOver, Dynamic Type, dark mode, iPad/Mac and tab-bar clearance. Relative due-date indicators, full before/after screenshot set and the requested broader simulator matrix remain unfinished. Do not describe this redesign as fully verified.
+
+### Personalized My Tasks header — 24 November 2026, Codex
+
+- Added Tailors Hub branding above the My Tasks navigation title and a greeting using the signed-in account name above the workshop list. Offline and pending-sync controls remain in place.
+- TailorsMobile iPhone 17 Pro simulator build passed. The header, sample account greeting and populated task list were visually inspected using a fictional local Hub. No live Hub data was changed. Dark mode, larger text, iPad and missing-name states remain unverified in the simulator.
+
+### My Tasks workspace — 24 November 2026, Codex
+
+- Removed Calendar's open-work-by-stage section. My Tasks now opens specifications and measurements by default, groups the bench note in a themed card, and previews up to three recent messages from the existing membership-scoped production channel. Opening the preview uses the existing full Messages conversation; previews do not mark messages read. Missing or dismissed channels are not created or rejoined automatically.
+- TailorsMobile simulator build succeeded. With a fictional local Hub on iPhone 17 Pro, verified the expanded measurement sheet, bench note, recent message, and opening the same conversation. No live Hub data was changed. The screenshot inspection showed the top of the workspace; the conversation was also checked via accessibility navigation.
+- Calendar removal was checked in source but not visually rechecked after the simulator control disconnected. Empty/dismissed channel, error/retry, dark mode, accessibility sizes, iPad and live Hub behavior remain unverified. No Android offline files or Hub permission logic changed.
+
+### Calendar and My Tasks navigation — 24 November 2026, Codex
+
+- Calendar now opens the same My Tasks job view when an order is in the signed-in worker's task list. A Calendar back control returns to the calendar. Other orders retain the existing production-order route; no Hub endpoints or permission gates changed.
+- The TailorsMobile simulator build succeeded. On iPhone 17 Pro (iOS 27.2), using a fictional local Hub, the assigned shirt opened from Calendar with its stitching progress, measurements and stages, and returned to Calendar. No live Hub data was changed.
+- Unassigned-order fallback, assignment changes between requests, network failures, iPad layout, accessibility sizes and live Hub behavior remain unverified in the simulator.
+
+### Production-order layout — 24 November 2026
+
+- Reordered the order page to show its summary, work instructions and measurements, then compact stages; removed its PDF action and Details section at the owner's request. The removed Details section previously displayed fitting/collection dates and a sales-order link; those are no longer shown on this page.
+- Added restrained color to the shared measurement icons. The iPhone simulator build succeeded and a fictional order's summary, measurement grid and section sequence were checked. Dark appearance and large text remain unverified.
+
+### Production calendar — 24 November 2026, Codex
+
+- Restyled open-stage workload rows with relevant existing production icons and task-count badges. Checked four fictional stage types on iPhone 17 Pro; an empty `by_stage` response still hides the section.
+- Reordered the production-order page so its status and actions come first, followed by stages, work instructions (notes, measurements, specifications and preferences), batches/materials, administrative details and thread. Verified the section sequence with a fictional order in the simulator. No Hub data or permission logic changed.
+- Refined calendar styling with quieter summary tiles, a today outline, selected-day contrast for light and dark appearance, a deadline legend and piece counts where provided. iPhone simulator build and sample date selection checked; dark appearance and larger text remain unverified.
+- Redesigned `ProductionBoards.swift` with a selectable month grid, due-order agenda, past-due summary and open-stage workload. Existing schedule data is scoped by the server. Tapping a card uses the permission-scoped production-order search and exact order number to resolve its ID; if lookup fails the app reports it.
+- On an iPhone 17 Pro simulator with a fictional Hub, selecting 24 November filtered the agenda to one order; tapping the sample card opened the matching order and Back returned to the calendar. No live data was changed.
+- Open: the schedule response does not include fitting or collection dates. Those dates appear in order details when available, but are not shown as calendar events. Simulator coverage does not establish live Hub parity or all permissions, failure and accessibility states.
+
+### Tailors Hub app icon — 23 November 2026
+
+- Added a terracotta scissors-and-thread icon to the Apple TailorsMobile app icon catalog. The iPhone simulator build succeeded and the installed icon was inspected on the iPhone 17 Pro home screen. App Store distribution remains separate and unverified.
+
+### In progress — 23 November 2026, Codex
+
+- Refining the Apple production-order Details and Thread UI in `ProductionOrderDetail.swift`, reviewing the time-clock UI in `MeFeatureClock.swift` against the Hub, and auditing the Apple More pages one by one; preserving existing Hub APIs and permissions. Claude has claimed Android offline files separately.
+- Local slice: order header separates status badges from the order number; details use labelled rows; the thread composer uses a separate type selector and guards repeated sends. Clock shows an error and retry when status cannot load, and avoids presenting absent summary data as zero. iPhone simulator build succeeded and 121 Swift tests passed. The finished layouts, thread sending/failure and clock actions still need simulator verification. The full More-page audit remains in progress.
+
+### iPhone simulator review — 23 November 2026
+
+- Reviewed commit `571a6dc4` on iPhone 17 Pro simulator, iOS 27.2, against the live Hub. The review used read-only navigation and no task, attendance or employee data was submitted.
+- Xcode `TailorsMobile` Debug simulator build succeeded. Its sole warning was: `warning: Metadata extraction skipped, no AppIntents.framework dependency found`.
+- The signed-in account showed My Tasks, Calendar, Messages and Clock in, plus More. More showed workday links and no People section. The account's assigned role was not independently verified; the menu and access test reflect its observed permissions.
+- A task showed a Men badge before nine measurements, in the same order as the previously supplied screenshot. Independent comparison against the Hub's original measurement sheet remains unverified.
+- The custom-scheme link `tailorshub://hub/admin/people/5` displayed `You don't have access to this page`. An actual HTTPS universal link was not tested.
+- HR/payroll account navigation and employee-file access remain unverified pending an appropriate sign-in. Screenshots of the task, measurements, More and access-denied screens were saved locally under `/private/tmp/tailors-review-571a6dc4-screens/`; they contain live data and are not committed.
+
 ## 23 November 2026
 
 - Inspected the user-provided brief, repository governance, existing working tree, prior native checklist and audit backlog, route allowlist and registrations.
@@ -102,3 +188,53 @@ payroll to Tailors Hub for those whose existing Hub permissions open them.
   simulator or device run from the cloud. A run on the owner's Mac (TailorsMobile
   in the iPhone simulator) is still to do: the Mac is not connected to this
   session.
+
+### Offline clock-in restored — 24 November 2026, Claude
+
+Codex reported, and the owner chose that Claude fix, before #588 merges.
+
+- **Regression (from 6d2d4455):** `canPunch` required the clock status to
+  load without error, so a failed refresh with no signal greyed out Clock in
+  even with the last status and a valid location on screen; the tap never
+  reached the offline queue.
+- **Second defect, same path:** the offline branch of `punch()` saved to
+  `env.offline`, which can still be unset just after sign-in, turning a saved
+  punch into an error. It now uses the store `punch()` resolved at its start.
+- **Rule:** `ClockGate` (BethanyKit). Clock in/out is available with the last
+  status on screen when it is fresh or failed only for being offline; a Hub
+  error or no status still blocks. A forced (override) punch still needs a
+  fresh status: it is never queued.
+- **Tests:** `ClockGateTests` (5) and `OfflineStoreTests` (9, including a
+  punch made offline: kept while offline, sent exactly once on reconnect with
+  its original `recorded_at`). 14 pass on Linux (Swift 6.0.3, APIClient
+  stubbed). Putting the strict rule back fails the offline-gate test.
+- **Not verified here:** the screen itself. On the PR head, on a simulator:
+  network off → Clock in saves "waiting to be sent"; network on → sent once,
+  the Hub shows the original time.
+
+### Offline clock-in simulator check for #588 — 24 November 2026, Codex
+
+TailorsMobile Debug built from `94227319` in a clean snapshot and ran on an
+iPhone 17 Pro simulator with iOS 27.2 and a fictional, local Hub.
+
+1. Opened Time clock online. It showed “Not clocked in,” a location fix at
+   the fixture workshop, and an enabled Clock in button.
+2. Shut off the fixture's HTTP listener and confirmed the connection was
+   refused. The simulator's network interface stayed up.
+3. Tapped Clock in. The app showed that the punch was saved and “waiting to
+   be sent.” The on-disk queue contained one punch, with `recorded_at`
+   `2026-11-24T09:54:54.326Z`. The fixture had received zero punches.
+4. Restored the listener and foregrounded the app. Automatic replay sent one
+   clock-in POST. The fixture received it at `09:55:46.955Z`, recorded the
+   original timestamp, and the app's on-disk queue cleared.
+5. The open screen still showed the pending banner after automatic replay.
+   Tapping Send now refreshed the screen to “Clocked in at 12:54” Nairobi
+   time. The fixture's total stayed at one POST.
+
+This verifies saving during a Hub transport outage, automatic foreground
+replay, and timestamp preservation. The simulator gestures did not establish
+a failed status refresh before the tap. The five `ClockGateTests` and nine
+`OfflineStoreTests` passed on the same head, including the failed-refresh gate
+and replay timestamp cases. Airplane-mode reachability changes and production
+attendance processing were outside this fixture run. Dark appearance, larger
+text, iPad, empty, and offline job-detail states remain open.

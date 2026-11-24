@@ -68,8 +68,19 @@ struct ClockView: View {
                     Button("Send now") { Task { await sendPending() } }.disabled(!env.connection.isOnline)
                 }
             }
-            clockCard
-            summaryCard
+            if status?.state.error != nil, data != nil {
+                NoticeText("Time clock couldn't refresh. The details shown may be out of date.", tone: .warning)
+                Button("Try again") { status?.load() }.tint(Theme.Palette.brandDeep)
+            }
+            if let error = status?.state.error, data == nil {
+                SectionCard {
+                    NoticeText("Couldn't load your time clock: \(error.message)", tone: .danger)
+                    Button("Try again") { status?.load() }.tint(Theme.Palette.brandDeep)
+                }
+            } else {
+                clockCard
+                if data != nil { summaryCard }
+            }
             if let today = data?["today_entries"]?.array, !today.isEmpty {
                 Text("TODAY'S PUNCHES").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
                 ListCard {
@@ -131,8 +142,9 @@ struct ClockView: View {
 
     // MARK: The clock and the button
 
-    private var canPunch: Bool { fix != nil && outlet != nil && !busy && (active != nil || verdict.inside || verdict.nearEdge) }
-    private var showForce: Bool { active == nil && fix != nil && outlet != nil && canOverride && (serverAsksOverride || !(verdict.inside || verdict.nearEdge)) }
+    // Offline is not a reason to lock someone out: the punch is queued (ClockGate).
+    private var canPunch: Bool { ClockGate.statusUsable(hasStatus: data != nil, error: status?.state.error) && fix != nil && outlet != nil && !busy && (active != nil || verdict.inside || verdict.nearEdge) }
+    private var showForce: Bool { ClockGate.forceAllowed(hasStatus: data != nil, error: status?.state.error) && active == nil && fix != nil && outlet != nil && canOverride && (serverAsksOverride || !(verdict.inside || verdict.nearEdge)) }
 
     private var elapsedMinutes: Int {
         guard let active, let inAt = active["clock_in_at"]?.date else { return 0 }
@@ -142,6 +154,11 @@ struct ClockView: View {
     private var clockCard: some View {
         SectionCard {
             VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 7) {
+                    Image(systemName: active == nil ? "clock" : "clock.fill")
+                    Text(data == nil ? "TIME CLOCK" : active == nil ? "READY FOR YOUR SHIFT" : "YOUR SHIFT")
+                }
+                .font(.caption.weight(.semibold)).foregroundStyle(Theme.Palette.brandDeep)
                 TimelineView(.periodic(from: .now, by: 1)) { ctx in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(MeFormat.time(ctx.date)).font(.largeTitle.weight(.semibold)).monospacedDigit()
@@ -238,6 +255,10 @@ struct ClockView: View {
         let last = data?["last_entry"].flatMap { $0.object == nil ? nil : $0 }
         let todayMinutes = (data?["today_worked_minutes"]?.int ?? 0) + (active != nil ? max(0, elapsedMinutes - (active?["elapsed_minutes"]?.int ?? 0)) : 0)
         return ListCard {
+            ListRow {
+                Label("Your time", systemImage: "calendar.badge.clock")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.Palette.brandDeep)
+            }
             row("Today's shift") {
                 Button { env.navigator.go(.myShifts) } label: {
                     Text(today.map { "\($0["starts_at"]?.string ?? "") – \($0["ends_at"]?.string ?? "")\($0["label"]?.string.map { " · \($0)" } ?? "")\($0["outlet"]?.string.map { " · \($0)" } ?? "")" }
@@ -344,7 +365,9 @@ struct ClockView: View {
             askReason = false; reason = ""; serverAsksOverride = false
             await status?.reload()
         } catch {
-            if isOfflineError(error) && !force, let offline = env.offline {
+            // The store resolved above: env.offline can still be unset just
+            // after sign-in, which would turn a saved punch into an error.
+            if isOfflineError(error) && !force {
                 let op = OfflineStore.PendingOperation(kind: "punch", method: "POST", path: path, body: .object(body), dedupeKey: "punch")
                 guard await offline.enqueue(op) else {
                     env.toasts.show("This punch could not be saved on this device. Try again.", tone: .danger)

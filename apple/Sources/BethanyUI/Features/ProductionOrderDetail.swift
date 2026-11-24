@@ -26,17 +26,20 @@ struct ProductionOrderDetailView: View {
                     let o = ProductionOrderRecord(r)
                     header(o)
                     actions(o)
+                    workInstructions(o)
                     tasks(o)
                     if !o.batches.isEmpty || canEdit(o) { batchesSection(o) }
                     MaterialSourcingPanel(orderId: orderId, closed: ["completed", "cancelled"].contains(o.status ?? ""))
                     if !o.allocations.isEmpty || r["material_requirements"]?.array?.isEmpty == false { materials(o) }
-                    details(o)
                     ProductionMessagesSection(orderId: orderId)
                     if showAudit { ModuleAuditLog(path: "/v1/admin/production-orders/\(orderId)/audit-log") }
                     else { Button("Show audit log") { showAudit = true }.font(Theme.Font.secondary) }
                 }
             }
         }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task { if res == nil { load() } }
         .refreshable { await res?.reload() }
         // A failed inspection leads straight to "Send back for rework", with the
@@ -91,7 +94,7 @@ struct ProductionOrderDetailView: View {
                         .frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.field))
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text(o.number).font(Theme.Font.display(20)); StatusBadge(o.status); PriorityBadge(priority: o.priority); if o.isOverdue { StatusBadge("overdue", tone: .danger) } }
+                    Text(o.number).font(Theme.Font.display(20)).fixedSize(horizontal: false, vertical: true)
                     Text("\(o.quantity) × \(o.productName)").font(Theme.Font.body)
                     if let sku = o.productSku { Text("SKU \(sku)").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                     if let c = o.customerLabel {
@@ -105,11 +108,16 @@ struct ProductionOrderDetailView: View {
                     if let p = o.r["progress"], let f = p["finished"]?.int, let s = p["stages"]?.int { Text("\(f)/\(s) stages").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                 }
             }
-            ProgressView(value: Double(o.percent), total: 100).tint(Theme.Palette.brand)
-            HStack {
-                DetailRow("Due") { DateText(o.dueDate, style: .date) }
-                DetailRow("Started") { DateText(o.r.date("started_at"), style: .date) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    StatusBadge(o.status)
+                    PriorityBadge(priority: o.priority)
+                    if o.isOverdue { StatusBadge("overdue", tone: .danger) }
+                }.fixedSize()
             }
+            ProgressView(value: Double(o.percent), total: 100).tint(Theme.Palette.brand)
+            DetailRow("Due") { DateText(o.dueDate, style: .date) }
+            DetailRow("Started") { DateText(o.r.date("started_at"), style: .date) }
         }
     }
 
@@ -149,7 +157,6 @@ struct ProductionOrderDetailView: View {
                     if status != "completed", s.can("production.delete_order") {
                         ConfirmButton("Delete permanently", message: "Removes the order and its tasks, batches and allocations; serials are voided and the linked sales line unlinked. This cannot be undone.", destructive: true, action: { await forceDelete() }) { Label("Delete", systemImage: "trash") }
                     }
-                    DocumentButton("PDF", path: "/v1/admin/pdf/production-orders/\(orderId)", suggestedName: "\(o.number).pdf")
                 }
             }
         }
@@ -159,9 +166,9 @@ struct ProductionOrderDetailView: View {
     private func tasks(_ o: ProductionOrderRecord) -> some View {
         SectionCard("Stages") {
             if o.tasks.isEmpty { Text(o.status == "draft" ? "Tasks are created when the order is confirmed." : "No tasks on this order.").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary) }
-            ForEach(Array(o.tasks.enumerated()), id: \.offset) { _, t in
+            ForEach(Array(o.tasks.enumerated()), id: \.offset) { index, t in
                 ProductionTaskRow(task: t, order: o, onChanged: reload)
-                Divider()
+                if index < o.tasks.count - 1 { Divider() }
             }
         }
     }
@@ -202,28 +209,29 @@ struct ProductionOrderDetailView: View {
         }
     }
 
-    private func details(_ o: ProductionOrderRecord) -> some View {
-        SectionCard("Details") {
-            DetailRow("Outlet", o.r["outlet"]?["name"]?.string)
-            DetailRow("Raised by", Names.person(o.r["created_by"]))
-            DetailRow("Created") { DateText(o.r.date("created_at")) }
-            DetailRow("Fitting") { DateText(o.r.date("fitting_date"), style: .date) }
-            DetailRow("Collection") { DateText(o.r.date("collection_date"), style: .date) }
-            if let n = o.r.string("notes"), !n.isEmpty { DetailRow("Notes", n) }
-            if let sale = o.r["customer_order"]?["order_number"]?.string, let sid = o.r.int("customer_order_id") {
-                HStack { Text("Sales order").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary); Spacer(); Button(sale) { env.navigator.push(.order(id: sid)) } }
-            }
-            let measurements = MeasurementSheet.of(o.r["measurements"])
-            if measurements.gender != nil || !measurements.body.isEmpty {
-                Text("Measurements").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                    .accessibilityAddTraits(.isHeader)
-                WorkshopMeasurements(measurements: measurements)
-            }
-            ForEach([("Specifications", "specifications"), ("Preferences", "customer_preferences")], id: \.0) { title, key in
-                let pairs = o.r[key]?.stringPairs ?? []
-                if !pairs.isEmpty {
-                    Text(title).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).textCase(.uppercase).padding(.top, 4)
-                    ForEach(pairs, id: \.0) { k, v in DetailRow(k.humanized, v) }
+    @ViewBuilder private func workInstructions(_ o: ProductionOrderRecord) -> some View {
+        let measurements = MeasurementSheet.of(o.r["measurements"])
+        let notes = o.r.string("notes")
+        let specifications = o.r["specifications"]?.stringPairs ?? []
+        let preferences = o.r["customer_preferences"]?.stringPairs ?? []
+        if notes?.isEmpty == false || measurements.gender != nil || !measurements.body.isEmpty || !specifications.isEmpty || !preferences.isEmpty {
+            SectionCard("Work instructions") {
+                if let notes, !notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Notes", systemImage: "text.alignleft").font(.caption.weight(.medium)).foregroundStyle(Theme.textSecondary)
+                        Text(notes).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(12).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
+                }
+                if measurements.gender != nil || !measurements.body.isEmpty {
+                    Text("Measurements").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                        .accessibilityAddTraits(.isHeader)
+                    WorkshopMeasurements(measurements: measurements)
+                }
+                ForEach([("Specifications", specifications), ("Preferences", preferences)], id: \.0) { title, pairs in
+                    if !pairs.isEmpty {
+                        Text(title).font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).textCase(.uppercase).padding(.top, 4)
+                        ForEach(pairs, id: \.0) { key, value in DetailRow(key.humanized, value) }
+                    }
                 }
             }
         }
@@ -271,19 +279,19 @@ struct ProductionTaskRow: View {
         let status = task["status"]?.string ?? "pending"
         let assignee = Names.person(task["assigned_to_user"] ?? task["assigned_to"])
         let done = task["quantity_done"]?.int ?? 0
-        HStack(alignment: .top) {
-            ProductionStageIcon(stage: task["stage"])
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
+        HStack(alignment: .center, spacing: 9) {
+            ProductionStageIcon(stage: task["stage"], tint: status == "completed" ? Theme.Palette.success : Theme.Palette.brandDeep)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
                     if let seq = task["sequence"]?.int { Text("\(seq).").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
-                    Text(task["stage"]?["name"]?.string ?? "Stage").font(Theme.Font.body.weight(.semibold))
-                    StatusBadge(status)
+                    Text(task["stage"]?["name"]?.string ?? "Stage").font(.subheadline.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                     if task["concurrent_allowed"]?.bool == true { StatusBadge("unlocked", tone: .accent) }
                 }
-                Text(assignee.map { "Assigned to \($0)" } ?? "Unassigned").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                Text("\(done) of \(order.quantity) pieces").font(Theme.Font.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
+                Text("\(assignee ?? "Unassigned") · \(done) of \(order.quantity) pieces")
+                    .font(.caption).monospacedDigit().foregroundStyle(Theme.textSecondary)
             }
-            Spacer()
+            Spacer(minLength: 2)
+            StatusBadge(status)
             if env.session.can("production.manage_assignees"), ProductionStatus.acceptsFloorWork(order.status) {
                 Menu {
                     if status == "pending" || status == "paused" { Button("Start") { Task { await act("start") } } }
@@ -297,7 +305,7 @@ struct ProductionTaskRow: View {
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 
     private func act(_ action: String) async {
@@ -380,27 +388,45 @@ struct ProductionMessagesSection: View {
     @State private var res: Resource<[Record]>?
     @State private var text = ""
     @State private var type = "message"
+    @State private var sending = false
 
     var body: some View {
         SectionCard("Thread") {
             if let res {
                 LoadableView(res.state, retry: { res.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No messages yet", symbol: "bubble.left") }) { msgs in
                     ForEach(msgs) { m in
-                        HStack(alignment: .top, spacing: Theme.Space.s) {
-                            Text(m["user"]?["initials"]?.string ?? "?").font(Theme.Font.caption).frame(width: 28, height: 28).background(Theme.Palette.neutralSoft, in: Circle())
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack { Text(Names.person(m["user"]) ?? "").font(Theme.Font.caption.weight(.semibold)); if m.string("type") == "note" { StatusBadge("note", tone: .amber) }; Spacer(); DateText(m.date("created_at"), style: .relative) }
-                                Text(m.string("body") ?? "").font(Theme.Font.secondary)
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(m["user"]?["initials"]?.string ?? "?").font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.Palette.brandDeep).frame(width: 32, height: 32)
+                                .background(Theme.Palette.brandDeep.opacity(0.09), in: Circle())
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(Names.person(m["user"]) ?? "Team member").font(.caption.weight(.semibold))
+                                    if m.string("type") == "note" { StatusBadge("note", tone: .amber) }
+                                    Spacer(minLength: 4)
+                                    DateText(m.date("created_at"), style: .relative).font(.caption).foregroundStyle(Theme.textSecondary)
+                                }
+                                Text(m.string("body") ?? "").font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                        .padding(.vertical, 3)
+                        .padding(10).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
                     }
                 }
             }
-            HStack {
-                Picker("", selection: $type) { Text("Message").tag("message"); Text("Note").tag("note") }.frame(maxWidth: 130)
-                TextField("Write to the people on this order…", text: $text).textFieldStyle(.roundedBorder).onSubmit { Task { await send() } }
-                Button("Send") { Task { await send() } }.disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Type", selection: $type) { Text("Message").tag("message"); Text("Note").tag("note") }
+                    .pickerStyle(.segmented).accessibilityLabel("Message type").disabled(sending)
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField(type == "note" ? "Write a note…" : "Write a message…", text: $text, axis: .vertical)
+                        .lineLimit(1...4).textFieldStyle(.roundedBorder).disabled(sending)
+                    Button { Task { await send() } } label: {
+                        if sending { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.up").font(.subheadline.weight(.semibold)) }
+                    }
+                    .buttonStyle(.borderedProminent).tint(Theme.Palette.brandDeep)
+                    .disabled(sending || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Send \(type)")
+                }
             }
         }
         .task {
@@ -414,7 +440,9 @@ struct ProductionMessagesSection: View {
 
     private func send() async {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return }
+        guard !body.isEmpty, !sending else { return }
+        sending = true
+        defer { sending = false }
         do {
             _ = try await env.session.client.post("/v1/admin/production-orders/\(orderId)/messages", json: .object(["body": .string(body), "type": .string(type)]))
             text = ""

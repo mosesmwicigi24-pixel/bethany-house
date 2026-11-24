@@ -4,6 +4,7 @@ import BethanyKit
 struct WorkshopMeasurements: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let measurements: MeasurementSheet.Measured
+    var showsGender = true
 
     private var columns: [GridItem] {
         typeSize.isAccessibilitySize
@@ -14,7 +15,7 @@ struct WorkshopMeasurements: View {
     var body: some View {
         if measurements.gender != nil || !measurements.body.isEmpty {
             VStack(alignment: .leading, spacing: 9) {
-                if let gender = measurements.gender {
+                if showsGender, let gender = measurements.gender {
                     Label(gender.capitalized, systemImage: "person")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.Palette.brandDeep)
@@ -25,19 +26,21 @@ struct WorkshopMeasurements: View {
                 }
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                     ForEach(measurements.body, id: \.0) { key, value in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label(key.humanized, systemImage: symbol(for: key))
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-                                .labelStyle(.titleAndIcon)
-                                .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(alignment: .top, spacing: 5) {
+                                Image(systemName: symbol(for: key))
+                                    .foregroundStyle(Theme.Palette.brandDeep)
+                                    .accessibilityHidden(true)
+                                Text(key.humanized).foregroundStyle(Theme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }.font(.caption)
                             Text(value)
                                 .font(.headline)
                                 .monospacedDigit()
                                 .foregroundStyle(Theme.text)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(9)
+                        .padding(8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 8))
                         .accessibilityElement(children: .ignore)
@@ -56,7 +59,7 @@ struct WorkshopMeasurements: View {
         let rank = MeasurementSheet.rank(key)
         guard MeasurementSheet.order.indices.contains(rank) else { return "ruler" }
         switch MeasurementSheet.order[rank] {
-        case "neck": return "tshirt"
+        case "neck": return "ruler"
         case "shoulders": return "arrow.left.and.right"
         case "sleeves", "shirt_length", "blouse_length", "full_length": return "arrow.up.and.down"
         default: return "ruler"

@@ -5,6 +5,7 @@ import BethanyKit
 /// including per batch, and only a Hub response can advance an order to QC.
 struct MyTasksView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
@@ -15,13 +16,28 @@ struct MyTasksView: View {
     @State private var pending: [OfflineStore.PendingOperation] = []
     @State private var syncing = false
     @State private var noteFor: Record?
+    @State private var specsExpanded = true
+    @State private var measurementsExpanded = true
+    @State private var preferencesLoaded = false
+    private let initialOrderID: Int?
+
+    init(initialOrderID: Int? = nil) {
+        self.initialOrderID = initialOrderID
+        _selectedID = State(initialValue: initialOrderID)
+        _showsDetail = State(initialValue: false)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             let wide = geometry.size.width >= (typeSize.isAccessibilitySize ? 760 : 580)
             if let tasks {
                 LoadableView(tasks.state, retry: { tasks.load() }) { rows in
-                    workspace(groups(rows), wide: wide)
+                    let orders = groups(rows)
+                    if let initialOrderID, !orders.contains(where: { $0.id == initialOrderID }) {
+                        EmptyState("This job is no longer on your task list", message: "Return to the calendar and refresh to see the latest work.", symbol: "scissors")
+                    } else {
+                        workspace(orders, wide: wide)
+                    }
                 }
             } else {
                 ProgressView("Loading your work")
@@ -32,6 +48,30 @@ struct MyTasksView: View {
         .navigationTitle("My Tasks")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                if !showsDetail && initialOrderID == nil {
+                    if env.session.flavor == .tailors {
+                        HStack(spacing: 9) {
+                            Image("TailorsMark")
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 36, height: 36)
+                                .clipShape(RoundedRectangle(cornerRadius: 9))
+                                .accessibilityHidden(true)
+                            Text("Tailors Hub")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .accessibilityElement(children: .combine)
+                    } else {
+                        Text("My Tasks").font(.headline)
+                    }
+                }
+            }
+        }
         #endif
         .task(id: history) { await load() }
         .onChange(of: env.connection.isOnline) { _, online in
@@ -52,39 +92,50 @@ struct MyTasksView: View {
 
     private func workspace(_ groups: [OrderGroup], wide: Bool) -> some View {
         let selection = groups.first { $0.id == selectedID } ?? (wide ? groups.first : nil)
-        let detailVisible = showsDetail && selection != nil
-        return HStack(spacing: 0) {
-            queue(groups, selection: selection?.id)
+        return Group {
+          if !wide, initialOrderID != nil, let selection {
+              orderDetail(selection, back: false).id(selection.id)
+          } else {
+          HStack(spacing: 0) {
+            queue(groups, selection: selection?.id, wide: wide)
                 .frame(width: wide ? 215 : nil)
-                .opacity(!wide && detailVisible ? 0 : 1)
-                .allowsHitTesting(wide || !detailVisible)
-                .accessibilityHidden(!wide && detailVisible)
-                .overlay {
-                    if !wide && detailVisible, let selection {
-                        orderDetail(selection, back: true)
-                            .id(selection.id)
-                    }
+                .navigationDestination(isPresented: $showsDetail) {
+                    if let selection { orderDetail(selection, back: false).id(selection.id) }
                 }
             if wide {
                 Divider()
                 if let selection {
-                    orderDetail(selection, back: false).id(selection.id)
+                    orderDetail(selection, back: true).id(selection.id)
                 } else {
                     EmptyState("Select an order", symbol: "scissors")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+          }
+          }
         }
     }
 
-    private func queue(_ groups: [OrderGroup], selection: Int?) -> some View {
+    private func queue(_ groups: [OrderGroup], selection: Int?, wide: Bool) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(greeting)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Your workshop, at a glance.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
+
                 HStack(alignment: .center, spacing: 8) {
                     Label("Workshop", systemImage: "scissors")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.Palette.brandDeep)
-                        .accessibilityHidden(true)
                     Spacer(minLength: 4)
                     if !pending.isEmpty {
                         Button {
@@ -117,19 +168,19 @@ struct MyTasksView: View {
                     ForEach(QueueLane.allCases) { lane in
                         let orders = groups.filter { $0.lane == lane }
                         if !orders.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 7) {
                                 HStack(spacing: 7) {
                                     Circle()
                                         .fill(laneColor(lane))
                                         .frame(width: 6, height: 6)
                                         .accessibilityHidden(true)
                                     Text(lane.rawValue)
-                                        .font(.caption.weight(.semibold))
+                                        .font(.caption.weight(.medium))
                                         .foregroundStyle(Theme.textSecondary)
                                 }
                                 .accessibilityAddTraits(.isHeader)
                                 ForEach(orders) { group in
-                                    jobRow(group, selected: selection == group.id)
+                                    jobRow(group, selected: selection == group.id, wide: wide)
                                 }
                             }
                         }
@@ -137,17 +188,23 @@ struct MyTasksView: View {
                 }
             }
             .padding(Theme.Space.l)
+            .padding(.bottom, 36)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
         .refreshable { await refresh() }
     }
 
-    private func jobRow(_ group: OrderGroup, selected: Bool) -> some View {
+    private var greeting: String {
+        let name = env.session.me?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Hello" : "Hello, \(name)"
+    }
+
+    private func jobRow(_ group: OrderGroup, selected: Bool, wide: Bool) -> some View {
         Button {
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                 selectedID = group.id
-                showsDetail = true
+                if !wide { showsDetail = true }
             }
         } label: {
             HStack(spacing: 10) {
@@ -157,16 +214,16 @@ struct MyTasksView: View {
                     .frame(width: 30, height: 32)
                     .background(laneColor(group.lane).opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(group.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                    Text(group.name).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
                     Text(group.summary).font(.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.textSecondary)
             }
             .frame(maxWidth: .infinity, minHeight: Theme.tapTarget, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(selected ? Theme.Palette.brand.opacity(0.10) : Theme.card, in: RoundedRectangle(cornerRadius: 9))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(selected && wide ? Theme.Palette.brand.opacity(0.08) : Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -185,33 +242,26 @@ struct MyTasksView: View {
     private func orderDetail(_ group: OrderGroup, back: Bool) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 5) {
-                    if back {
-                        Button {
-                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { showsDetail = false }
-                        } label: {
-                            Label("Task list", systemImage: "chevron.left")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(minHeight: Theme.tapTarget)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.Palette.brandDeep)
+                VStack(alignment: .leading, spacing: 6) {
+                    if back { Text(group.name).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader) }
+                    if let customer = group.order["customer_label"]?.string, !customer.isEmpty {
+                        Text("For \(customer)").font(.subheadline).foregroundStyle(Theme.textSecondary)
                     }
-                    Text(group.name).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { orderMetadata(group) }
-                        VStack(alignment: .leading, spacing: 4) { orderMetadata(group) }
+                    if let number = group.order["order_number"]?.string {
+                        Text(number).font(.caption).monospacedDigit().textSelection(.enabled)
+                            .foregroundStyle(Theme.textSecondary)
                     }
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                    if let due = group.order["due_date"]?.date {
+                        Label { HStack { Text("Due"); DateText(due, style: .date) } } icon: { Image(systemName: "calendar") }
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
+                    }
                 }
+                .padding(.bottom, 2)
 
                 if let notice = group.notice {
                     Label(notice, systemImage: group.lane == .inspection ? "checkmark.shield" : "hourglass")
                         .font(.subheadline)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.Palette.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        .foregroundStyle(Theme.textSecondary)
                 }
 
                 ForEach(group.openStages) { task in
@@ -220,61 +270,108 @@ struct MyTasksView: View {
 
                 let specs = group.order["specifications"]?.stringPairs ?? []
                 let measurements = MeasurementSheet.of(group.order["measurements"])
-                if !specs.isEmpty || measurements.gender != nil || !measurements.body.isEmpty {
+                if !specs.isEmpty || measurements.gender != nil {
                     VStack(spacing: 0) {
-                        Divider()
-                        DisclosureGroup {
+                        DisclosureGroup(isExpanded: $specsExpanded) {
                             VStack(alignment: .leading, spacing: 12) {
-                                WorkshopMeasurements(measurements: measurements)
+                                if let gender = measurements.gender { DetailRow("For", gender.capitalized) }
                                 if !specs.isEmpty {
-                                    Text("Specifications").font(.caption.weight(.semibold))
-                                        .foregroundStyle(Theme.textSecondary)
-                                        .accessibilityAddTraits(.isHeader)
                                     ForEach(Array(specs.enumerated()), id: \.offset) { _, spec in
                                         DetailRow(spec.0.humanized, spec.1)
                                     }
                                 }
                             }
-                            .padding(.bottom, 12)
+                            .padding(.top, 10)
                         } label: {
                             HStack(spacing: 8) {
-                                Label("Specs & measurements", systemImage: "ruler")
+                                Label("Specifications", systemImage: "list.bullet.rectangle")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(Theme.text)
                                 Spacer(minLength: 4)
-                                if !measurements.body.isEmpty {
-                                    Text("\(measurements.body.count)")
+                                if !specs.isEmpty || measurements.gender != nil {
+                                    Text("\(specs.count + (measurements.gender == nil ? 0 : 1))")
                                         .font(.caption.weight(.medium))
                                         .monospacedDigit()
                                         .foregroundStyle(Theme.textSecondary)
-                                        .accessibilityLabel("\(measurements.body.count) measurements")
+                                        .accessibilityLabel("\(specs.count + (measurements.gender == nil ? 0 : 1)) specification fields")
                                 }
                             }
                             .frame(minHeight: Theme.tapTarget, alignment: .leading)
                         }
                         .tint(Theme.Palette.brandDeep)
-                        Divider()
                     }
+                    .padding(14)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
 
-                if let notes = group.order["notes"]?.string, !notes.isEmpty {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Bench note").font(.subheadline.weight(.semibold))
+                if !measurements.body.isEmpty {
+                    DisclosureGroup(isExpanded: $measurementsExpanded) {
+                        WorkshopMeasurements(measurements: measurements, showsGender: false)
+                            .padding(.top, 8)
+                    } label: {
+                        HStack {
+                            Label("Measurements", systemImage: "ruler").font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text("\(measurements.body.count)").font(.caption).foregroundStyle(Theme.textSecondary)
+                                .accessibilityLabel("\(measurements.body.count) measurements")
+                        }.frame(minHeight: Theme.tapTarget)
+                    }
+                    .tint(Theme.Palette.brandDeep)
+                    .padding(14)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+
+                if let notes = group.order["notes"]?.string, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Label("Bench note", systemImage: "text.alignleft")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.Palette.brandDeep)
                         Text(notes).font(.subheadline).foregroundStyle(Theme.textSecondary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
 
                 if !group.tasks.isEmpty {
                     stageTimeline(group)
+                    stageJourney(group)
                 }
+
+                WorkshopConversation(orderID: group.id)
             }
             .padding(Theme.Space.l)
             .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.card)
+        .background(Theme.canvas)
         .refreshable { await refresh() }
+        .onAppear { loadDisclosurePreferences() }
+        .onChange(of: specsExpanded) { _, value in saveDisclosurePreference("specs", value: value) }
+        .onChange(of: measurementsExpanded) { _, value in saveDisclosurePreference("measurements", value: value) }
+        .navigationTitle(group.name)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
+    }
+
+    private func preferenceKey(_ name: String) -> String? {
+        guard let userID = env.session.me?.id else { return nil }
+        return "tailors.job.\(userID).\(name).expanded"
+    }
+
+    private func loadDisclosurePreferences() {
+        preferencesLoaded = false
+        let defaults = UserDefaults.standard
+        if let key = preferenceKey("specs"), let value = defaults.object(forKey: key) as? Bool { specsExpanded = value }
+        if let key = preferenceKey("measurements"), let value = defaults.object(forKey: key) as? Bool { measurementsExpanded = value }
+        preferencesLoaded = true
+    }
+
+    private func saveDisclosurePreference(_ name: String, value: Bool) {
+        guard preferencesLoaded, let key = preferenceKey(name) else { return }
+        UserDefaults.standard.set(value, forKey: key)
     }
 
     private func stageTimeline(_ group: OrderGroup) -> some View {
@@ -283,6 +380,7 @@ struct MyTasksView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Label("Your stages", systemImage: "list.bullet.clipboard")
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
                     .accessibilityAddTraits(.isHeader)
                 ProgressView(value: Double(complete), total: Double(group.tasks.count)) {
                     Text("\(complete) of \(group.tasks.count) complete")
@@ -290,22 +388,26 @@ struct MyTasksView: View {
                 }
                 .tint(complete == group.tasks.count ? Theme.Palette.success : Theme.Palette.brandDeep)
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, 14)
 
             ForEach(group.tasks) { task in
                 let status = task.status
                 let finished = status == "completed"
-                HStack(spacing: 10) {
-                    ProductionStageIcon(stage: task["stage"], tint: stageTint(status), completed: finished)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(stageName(task)).font(.subheadline.weight(finished ? .regular : .semibold))
-                        if !finished {
-                            Text(stageLabel(status)).font(.caption).foregroundStyle(Theme.textSecondary)
-                        }
+                let active = finished || status == "in_progress"
+                HStack(spacing: 12) {
+                    ProductionStageIcon(stage: task["stage"], tint: stageIconColor(task, active: active))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(stageName(task))
+                            .font(.body.weight(status == "in_progress" ? .medium : .regular))
+                            .foregroundStyle(active ? Theme.text : Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        stageDetailsText(task)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(stageName(task))
-                    .accessibilityValue(stageLabel(status))
+                    .accessibilityValue(stageDetails(task))
                     Spacer(minLength: 0)
                     if !group.history, finished, ProductionStatus.acceptsFloorWork(group.order["status"]?.string) {
                         Button { noteFor = task } label: {
@@ -317,25 +419,134 @@ struct MyTasksView: View {
                         .foregroundStyle(Theme.textSecondary)
                         .accessibilityLabel("Add note to \(stageName(task))")
                     }
+                    Image(systemName: finished ? "checkmark.circle.fill" : "circle")
+                        .font(.body)
+                        .foregroundStyle(finished ? Theme.Palette.success : Theme.textSecondary.opacity(0.45))
+                        .accessibilityHidden(true)
                 }
-                .padding(.vertical, 4)
-                .frame(minHeight: 33)
+                .padding(.vertical, 14)
+                .frame(minHeight: Theme.tapTarget)
                 if task.id != group.tasks.last?.id {
                     Divider().padding(.leading, 38)
                 }
             }
         }
-        .padding(14)
-        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+        .padding(16)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func stageTint(_ status: String?) -> Color {
-        switch status {
-        case "in_progress": return Theme.Palette.brandDeep
-        case "paused": return Theme.Palette.warning
-        case "failed": return Theme.Palette.danger
-        default: return Theme.textSecondary
+    private func stageIconColor(_ task: Record, active: Bool) -> Color {
+        guard active else { return Theme.textSecondary }
+        let stage = task["stage"]
+        let key = (stage?["slug"]?.string ?? stage?["name"]?.string ?? "")
+            .lowercased().split { !$0.isLetter && !$0.isNumber }.joined(separator: "-")
+        let dark = colorScheme == .dark
+        switch key {
+        case "information-desk", "info-desk": return dark ? Color(hex: 0xAABFDC) : Theme.Palette.nav
+        case "payment", "payments": return dark ? Color(hex: 0x80D99B) : Theme.Palette.success
+        case "material-sourcing", "materials-sourcing", "sourcing": return dark ? Color(hex: 0xE8B56A) : Theme.Palette.amber
+        case "stitching", "sewing": return dark ? Color(hex: 0x92B5FF) : Theme.Palette.info
+        case "button", "buttons", "buttoning": return dark ? Color(hex: 0xC5A7F4) : Theme.Palette.accent
+        case "finishing": return dark ? Color(hex: 0xE8B56A) : Theme.Palette.amber
+        case "quality-check", "quality-control", "inspection", "qc": return dark ? Color(hex: 0x80D99B) : Theme.Palette.success
+        default: return dark ? Theme.Palette.brandTint : Theme.Palette.brandDeep
         }
+    }
+
+    private func stageDetails(_ task: Record) -> String {
+        let status = task.status
+        let timestamp: Date?
+        let label: String
+        if status == "completed" {
+            timestamp = task["completed_at"]?.date
+            label = "Done"
+        } else if status == "in_progress" || status == "paused" {
+            timestamp = task["started_at"]?.date
+            label = "\(stageTimelineLabel(status)) · Started"
+        } else {
+            return stageTimelineLabel(status)
+        }
+        guard let timestamp else { return stageTimelineLabel(status) }
+        let formatter = DateFormatter()
+        formatter.timeZone = HubDates.nairobi
+        formatter.locale = Locale(identifier: "en_KE")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return "\(label) · \(formatter.string(from: timestamp))"
+    }
+
+    private func stageDetailsText(_ task: Record) -> Text {
+        let details = stageDetails(task)
+        let done = task.status == "completed"
+        let base = done ? (colorScheme == .dark ? Color(hex: 0x80D99B) : Theme.Palette.success) : Theme.textSecondary
+        let hasTimestamp = done ? task["completed_at"]?.date != nil
+            : (["in_progress", "paused"].contains(task.status ?? "") && task["started_at"]?.date != nil)
+        if hasTimestamp, let separator = details.range(of: " · ", options: .backwards) {
+            let prefix = String(details[..<separator.lowerBound])
+            let timestamp = String(details[separator.upperBound...])
+            let accent = colorScheme == .dark ? Theme.Palette.brandTint : Theme.Palette.brandDeep
+            return Text(prefix).foregroundColor(base) + Text(" · ").foregroundColor(Theme.textSecondary) + Text(timestamp).foregroundColor(accent)
+        }
+        return Text(details).foregroundColor(base)
+    }
+
+    private func stageTimelineLabel(_ status: String?) -> String {
+        switch status {
+        case "completed": return "Done"
+        case "pending": return "Not done"
+        default: return stageLabel(status)
+        }
+    }
+
+    private func stageJourney(_ group: OrderGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Stage journey", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                .font(.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text("Your assigned stages, in order")
+                .font(.caption).foregroundStyle(Theme.textSecondary)
+            ScrollView(.horizontal) {
+                ZStack(alignment: .top) {
+                    if group.tasks.count > 1 {
+                        Rectangle()
+                            .fill(Theme.line)
+                            .frame(height: 2)
+                            .padding(.horizontal, 50)
+                            .padding(.top, 22)
+                            .accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(group.tasks) { task in
+                            let completed = task.status == "completed"
+                            let current = task.status == "in_progress"
+                            VStack(spacing: 6) {
+                                ProductionStageIcon(stage: task["stage"], tint: stageIconColor(task, active: completed || current))
+                                    .frame(width: 44, height: 44)
+                                    .background(Theme.canvas, in: Circle())
+                                    .overlay(Circle().strokeBorder(completed ? Theme.Palette.success : (current ? Theme.Palette.brandDeep : Theme.line), lineWidth: 1.5))
+                                Text(stageName(task))
+                                    .font(.caption.weight(.medium))
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(stageTimelineLabel(task.status))
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(width: 100, alignment: .top)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(stageName(task))
+                            .accessibilityValue(stageTimelineLabel(task.status))
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .scrollIndicators(.visible)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
@@ -561,6 +772,101 @@ private func stageLabel(_ status: String?) -> String {
     }
 }
 
+/// Uses the same membership-scoped production channel as Messages; previews do
+/// not mark the conversation read. Opening it uses the existing conversation UI.
+private struct WorkshopConversation: View {
+    @Environment(AppEnvironment.self) private var env
+    let orderID: Int
+    @State private var channel: ChatChannel?
+    @State private var messages: [ChatMessage] = []
+    @State private var loading = true
+    @State private var error: String?
+    @State private var showingConversation = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Job conversation", systemImage: "bubble.left.and.bubble.right")
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                if let channel, channel.unread > 0 {
+                    Text("\(channel.unread) new").font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.Palette.brandDeep)
+                }
+            }
+            if loading {
+                ProgressView("Loading conversation").font(.caption)
+            } else if let error {
+                Text(error).font(.caption).foregroundStyle(Theme.textSecondary)
+                Button("Try again") { Task { await load() } }.font(.caption.weight(.semibold))
+            } else if channel == nil {
+                Text("No conversation is available for this job in Messages.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+            } else if messages.isEmpty {
+                Text("No messages yet.").font(.caption).foregroundStyle(Theme.textSecondary)
+            } else {
+                ForEach(messages) { message in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(message.userName).font(.caption.weight(.semibold))
+                            Spacer(minLength: 8)
+                            if let date = message.createdAt {
+                                DateText(date, style: .relative).font(.caption).foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                        Text(message.parsed.text.isEmpty ? "Attachment" : message.parsed.text)
+                            .font(.subheadline).foregroundStyle(Theme.text)
+                            .lineLimit(3)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            if channel != nil {
+                Button { showingConversation = true } label: {
+                    Label("Open conversation", systemImage: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: Theme.tapTarget)
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.Palette.brandDeep)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .task(id: orderID) { await load() }
+        .sheet(isPresented: $showingConversation, onDismiss: { Task { await load() } }) {
+            NavigationStack {
+                CommsView(initialChannelId: channel?.id)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { showingConversation = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    private func load() async {
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let data = try await env.session.client.json("/v1/admin/channels")
+            channel = (data["channels"]?.array ?? []).map(ChatChannel.init(json:))
+                .first { $0.contextType == "production_order" && $0.contextId == orderID }
+            guard let channel else { messages = []; return }
+            let thread = try await env.session.client.json("/v1/admin/channels/\(channel.id)/messages", query: ["per_page": "3"])
+            messages = (thread["messages"]?.array ?? []).map(ChatMessage.init(json:))
+        } catch {
+            messages = []
+            self.error = "Couldn't load this conversation. Check your connection and try again."
+        }
+    }
+}
+
 private struct WorkshopStageCard: View {
     @Environment(AppEnvironment.self) private var env
     let task: Record
@@ -600,8 +906,7 @@ private struct WorkshopStageCard: View {
             actions
         }
         .padding(12)
-        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .disabled(busy)
     }
 

@@ -121,6 +121,42 @@ final class OfflineStoreTests: XCTestCase {
         XCTAssertTrue(gone.isEmpty)
     }
 
+    /// A punch saved with no signal is sent once on reconnect, with the time
+    /// it was made (`recorded_at`), not the time it was sent (owner, 2026-11-24).
+    func testAnOfflinePunchIsSentOnceWithItsOriginalTime() async {
+        let (store, root) = makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let madeAt = "2026-11-24T07:58:00+03:00"
+        let op = OfflineStore.PendingOperation(kind: "punch", method: "POST", path: "/v1/admin/time-clock/clock-in",
+                                               body: .object(["recorded_at": .string(madeAt), "outlet_id": .number(2)]), dedupeKey: "punch")
+        let saved = await store.enqueue(op)
+        XCTAssertTrue(saved)
+
+        // Still offline: replay keeps it.
+        let offlineTry = await store.replay(using: { _ in throw APIError.transport("offline") })
+        XCTAssertTrue(offlineTry.sent.isEmpty)
+        let waiting = await OfflineStore(root: root).pending()
+        XCTAssertEqual(waiting.map(\.id), [op.id], "the punch survives on disk while offline")
+
+        // Back online: sent once, with the original time.
+        let seen = Recorder()
+        let bodies = BodyRecorder()
+        let online: @Sendable (OfflineStore.PendingOperation) async throws -> Void = { sent in
+            await seen.append(sent.id)
+            await bodies.append(sent.body)
+        }
+        let first = await store.replay(using: online)
+        let second = await store.replay(using: online)
+        XCTAssertEqual(first.sent.map(\.id), [op.id])
+        XCTAssertTrue(second.sent.isEmpty)
+        let ids = await seen.ids
+        XCTAssertEqual(ids, [op.id], "sent exactly once")
+        let sentBody = await bodies.values.first
+        XCTAssertEqual(sentBody?["recorded_at"]?.string, madeAt)
+        let left = await store.pending()
+        XCTAssertTrue(left.isEmpty)
+    }
+
     // MARK: Accepted, but the queue file could not be rewritten
 
     /// If the server accepted a change but the queue could not be updated,
@@ -207,4 +243,9 @@ private actor Counter {
 private actor Recorder {
     private(set) var ids: [UUID] = []
     func append(_ id: UUID) { ids.append(id) }
+}
+
+private actor BodyRecorder {
+    private(set) var values: [JSONValue] = []
+    func append(_ v: JSONValue) { values.append(v) }
 }

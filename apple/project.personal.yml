@@ -18,10 +18,9 @@ include:
 name: BethanyHubPersonal
 targets:
   HubMobile:
-    entitlements:
-      path: Apps/HubMobile/HubMobile.personal.entitlements
     settings:
       base:
+        CODE_SIGN_ENTITLEMENTS: Apps/HubMobile/HubMobile.personal.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.hub.test
   TailorsMobile:
     settings:
