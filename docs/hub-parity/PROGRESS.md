@@ -206,3 +206,30 @@ Codex reported, and the owner chose that Claude fix, before #588 merges.
 - **Not verified here:** the screen itself. On the PR head, on a simulator:
   network off → Clock in saves "waiting to be sent"; network on → sent once,
   the Hub shows the original time.
+
+### Offline clock-in simulator check for #588 — 24 November 2026, Codex
+
+TailorsMobile Debug built from `94227319` in a clean snapshot and ran on an
+iPhone 17 Pro simulator with iOS 27.2 and a fictional, local Hub.
+
+1. Opened Time clock online. It showed “Not clocked in,” a location fix at
+   the fixture workshop, and an enabled Clock in button.
+2. Shut off the fixture's HTTP listener and confirmed the connection was
+   refused. The simulator's network interface stayed up.
+3. Tapped Clock in. The app showed that the punch was saved and “waiting to
+   be sent.” The on-disk queue contained one punch, with `recorded_at`
+   `2026-11-24T09:54:54.326Z`. The fixture had received zero punches.
+4. Restored the listener and foregrounded the app. Automatic replay sent one
+   clock-in POST. The fixture received it at `09:55:46.955Z`, recorded the
+   original timestamp, and the app's on-disk queue cleared.
+5. The open screen still showed the pending banner after automatic replay.
+   Tapping Send now refreshed the screen to “Clocked in at 12:54” Nairobi
+   time. The fixture's total stayed at one POST.
+
+This verifies saving during a Hub transport outage, automatic foreground
+replay, and timestamp preservation. The simulator gestures did not establish
+a failed status refresh before the tap. The five `ClockGateTests` and nine
+`OfflineStoreTests` passed on the same head, including the failed-refresh gate
+and replay timestamp cases. Airplane-mode reachability changes and production
+attendance processing were outside this fixture run. Dark appearance, larger
+text, iPad, empty, and offline job-detail states remain open.
