@@ -1,0 +1,52 @@
+name: Till sales with a phone number (counts)
+
+# orders:phone-coverage on the VPS (owner, 2026-11-24): how many till sales
+# in the last N days carry a phone number, and how many do not. Read-only.
+#
+# The repository is public: the command prints six counts and nothing else —
+# no name, number, order or amount — and only those count lines are shown.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days back"
+        type: choice
+        options: ["30", "60", "90"]
+        default: "30"
+
+concurrency:
+  group: orders-phone-coverage
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Count till sales with a phone number
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Count (counts only)
+        env:
+          DAYS: ${{ inputs.days }}
+        run: |
+          [[ "$DAYS" =~ ^(30|60|90)$ ]] || { echo "::error::days must be 30, 60 or 90"; exit 1; }
+          KEEP='^(Till sales, last [0-9]+ days|With a phone number|Without a phone number|Phone typed on the sale itself|Attached to a customer record|Phone typed but no customer record): [0-9]+$'
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel php artisan orders:phone-coverage --days=$DAYS 2>&1 | grep -E '$KEEP'"
+        timeout-minutes: 10

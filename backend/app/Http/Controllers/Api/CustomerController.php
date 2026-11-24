@@ -181,21 +181,12 @@ class CustomerController extends Controller
 
         $customer = Customer::visibleTo($request->user())->with(['user', 'addresses'])->findOrFail($id);
 
-        // A customer's orders are the ones placed AS that customer. That is
-        // customer_id — restored 2026-09-25, after mass assignment had been
-        // dropping it since the POS was written.
-        //
-        // This used to read user_id alone, which is null for 683 of 684
-        // customers (a walk-in has no login), so `user_id = NULL` matched
-        // nothing and every walk-in's history showed empty while their orders
-        // sat in the table. user_id stays as a second arm for the web accounts
-        // that do have one, and for orders placed before the link was repaired.
-        $ordersQuery = Order::where(function ($q) use ($customer) {
-            $q->where('customer_id', $customer->id);
-            if ($customer->user_id) {
-                $q->orWhere('user_id', $customer->user_id);
-            }
-        });
+        // A customer's orders are the ones placed AS that customer
+        // (customer_id), or by their web account (user_id) — one definition
+        // for every door, App\Support\CustomerOrderHistory::of. It used to
+        // read user_id alone, null for a walk-in, so every walk-in's history
+        // showed empty while their orders sat in the table.
+        $ordersQuery = \App\Support\CustomerOrderHistory::of($customer);
 
         // What a customer has SPENT is recognised income — Order::scopeRecognised,
         // the one definition every report in this system uses: a human accepted
@@ -237,15 +228,27 @@ class CustomerController extends Controller
             'cancelled_orders'    => (clone $ordersQuery)->whereIn('status', Order::DEAD_STATUSES)->count(),
         ];
 
-        // Attach recent orders to the customer object for the frontend
-        $customer->setRelation(
-            'orders',
-            $ordersQuery->with(['items'])->latest()->limit(10)->get()
-        );
+        // The most recent orders, newest first, on the customer object —
+        // every channel (till, web, chat, invoice). At most LIMIT of them;
+        // `orders_truncated` says when there were more, and the stats above
+        // cover them all either way. (It was the latest 10, silently.)
+        [$orders, $truncated, $total] = \App\Support\CustomerOrderHistory::recent($ordersQuery);
+        $invoices = \App\Support\CustomerOrderHistory::invoiceNumbers($orders);
+        $orders->each(function (Order $o) use ($invoices) {
+            $o->setAttribute('channel', $o->sales_bucket ?: (Order::LEGACY_CHANNEL_MAP[$o->order_type] ?? $o->order_type));
+            $o->setAttribute('invoice_number', $invoices[$o->id] ?? null);
+        });
+        $customer->setRelation('orders', $orders);
 
         return response()->json([
-            'customer' => $customer,
-            'stats'    => $stats,
+            // What an item COST us rides on every order line. It is not the
+            // reader's to see without products.view_cost — the owner's rule
+            // everywhere else (CostVisibility), and here it would hand our
+            // costs to whoever, or whatever, reads a customer's history.
+            'customer'         => \App\Support\CostVisibility::forViewer($customer->toArray(), $request->user()),
+            'stats'            => $stats,
+            'orders_total'     => $total,
+            'orders_truncated' => $truncated,
         ]);
     }
 
@@ -522,12 +525,90 @@ class CustomerController extends Controller
     {
         $customer = Customer::visibleTo(request()->user())->findOrFail($id);
 
-        $orders = Order::with(['items', 'payments'])
-            ->where('user_id', $customer->user_id)
+        // The same "this customer's orders" as the profile (customer_id, or
+        // their web account). Reading user_id alone made `user_id IS NULL`
+        // for a walk-in: every OTHER walk-in's orders listed under them.
+        $orders = \App\Support\CustomerOrderHistory::of($customer)->with(['items', 'payments'])
             ->orderBy('created_at', 'desc')
             ->paginate(20);
 
-        return response()->json($orders);
+        return response()->json(\App\Support\CostVisibility::forViewer($orders->toArray(), request()->user()));
+    }
+
+    /**
+     * GET /admin/orders/by-phone?phone=<number>&since=<date>
+     *
+     * The orders of whoever holds this phone number — one call instead of
+     * "search, then open each customer" (2026-11-24, for the chat agent).
+     * Read-only.
+     *
+     * The number must be WHOLE (9+ digits): it is compared through
+     * normalize_phone, the one rule for "the same person's number" — 0712…,
+     * 254712… and +254712… are one number, a number with no country code is
+     * Kenyan, and +256712… is somebody else. Matched on the customer record,
+     * its web account, and the phone typed on a sale with no customer record
+     * (a walk-in). Orders are read through the caller's own order scope.
+     */
+    public function ordersByPhone(Request $request)
+    {
+        $validated = $request->validate([
+            'phone' => 'required|string|max:32',
+            'since' => 'nullable|date',
+        ]);
+
+        $phone = \App\Support\CustomerSearch::wholePhone(trim($validated['phone']));
+        if ($phone === null) {
+            return response()->json([
+                'message' => 'Give the whole phone number (at least 9 digits).',
+                'errors'  => ['phone' => ['Give the whole phone number (at least 9 digits).']],
+            ], 422);
+        }
+
+        $customers = Customer::query()
+            ->whereRaw('normalize_phone(customers.phone) = normalize_phone(?)', [$phone])
+            ->orWhereHas('user', fn ($u) => $u->whereRaw('normalize_phone(users.phone) = normalize_phone(?)', [$phone]))
+            ->orderBy('id')
+            ->get(['id', 'customer_number', 'user_id', 'first_name', 'last_name', 'phone']);
+
+        $customerIds = $customers->pluck('id')->all();
+        $userIds     = $customers->pluck('user_id')->filter()->values()->all();
+
+        $orders = Order::where(function ($q) use ($customerIds, $userIds, $phone) {
+            $q->whereRaw('normalize_phone(orders.customer_phone) = normalize_phone(?)', [$phone]);
+            if ($customerIds) {
+                $q->orWhereIn('orders.customer_id', $customerIds);
+            }
+            if ($userIds) {
+                $q->orWhereIn('orders.user_id', $userIds);
+            }
+        });
+
+        // Stats cover every order of the number; `since` narrows the list only.
+        $stats = \App\Support\CustomerOrderHistory::stats($orders);
+
+        $listed = clone $orders;
+        if (!empty($validated['since'])) {
+            // Stored in Nairobi wall-clock time; the boundary stays there.
+            $listed->where('orders.created_at', '>=',
+                \Illuminate\Support\Carbon::parse($validated['since'], config('app.timezone')));
+        }
+        [$rows, $truncated, $total] = \App\Support\CustomerOrderHistory::recent($listed);
+        $invoices = \App\Support\CustomerOrderHistory::invoiceNumbers($rows);
+
+        return response()->json([
+            'phone'     => DB::selectOne('SELECT normalize_phone(?) AS p', [$phone])->p,
+            'customers' => $customers->map(fn (Customer $c) => [
+                'id'              => $c->id,
+                'customer_number' => $c->customer_number,
+                'name'            => trim(($c->first_name ?? '') . ' ' . ($c->last_name ?? '')) ?: "Customer #{$c->id}",
+                'phone'           => $c->phone,
+            ])->values(),
+            'orders'           => $rows->map(fn (Order $o) => \App\Support\CustomerOrderHistory::row($o, $invoices))->values(),
+            'orders_total'     => $total,
+            'orders_truncated' => $truncated,
+            'since'            => $validated['since'] ?? null,
+            'stats'            => $stats,
+        ]);
     }
 
     // ============= Customer Address Management =============

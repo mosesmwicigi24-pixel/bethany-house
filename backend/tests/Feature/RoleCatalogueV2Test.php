@@ -246,6 +246,12 @@ class RoleCatalogueV2Test extends TestCase
             // 3C (2026_10_03_530001): proposes cost changes.
             'products.edit_cost',
         ],
+        // Read-only, for the chat agent's service account beside its working
+        // role (owner's ask, 2026-11-24): what a customer has ordered, across
+        // every channel. Nothing that writes; no bundle, so no @self grants.
+        'customer_history_reader' => [
+            'customers.insights', 'customers.view', 'orders.view',
+        ],
         // A role added after v2 (owner's ask, 2026-10-15) — created by sync,
         // so its whole shape lives here. products.view arrives as
         // production.raise_order's dependency (the product picker).

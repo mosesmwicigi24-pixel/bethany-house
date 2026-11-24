@@ -563,6 +563,19 @@ class SyncPermissions extends Command
      */
     const EXTRA_ROLES = [
 
+        // What a customer has bought, read-only and business-wide (owner's
+        // ask, 2026-11-24): for the chat agent's service account, which must
+        // know the person it is talking to — till, chat and invoice orders
+        // alike. Held BESIDE its working role: scope is the widest among the
+        // roles granting a capability, so this opens customers and orders to
+        // read and changes nothing about what the account may create. No
+        // write permission, by design.
+        'customer_history_reader' => [
+            'customers.view',
+            'customers.insights',
+            'orders.view',
+        ],
+
         // Runs the production floor (owner's ask, 2026-10-15): decides who
         // sews what, keeps the queue moving, inspects and signs off quality.
         // Floor-wide — no data scope, so every production order, not only

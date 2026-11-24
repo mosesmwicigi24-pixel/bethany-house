@@ -20325,6 +20325,54 @@
                 }
             }
         },
+        "/api/v1/admin/orders/by-phone": {
+            "get": {
+                "operationId": "get_v1_admin_orders_by_phone",
+                "summary": "Orders By Phone (Customer)",
+                "tags": [
+                    "orders"
+                ],
+                "security": [
+                    {
+                        "bearer": []
+                    }
+                ],
+                "x-permissions": [
+                    "orders.view",
+                    "customers.insights"
+                ],
+                "x-staff-only": true,
+                "x-throttle": [
+                    "api",
+                    "admin-api"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/Unauthenticated"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/Forbidden"
+                    },
+                    "423": {
+                        "$ref": "#/components/responses/Locked"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/RateLimited"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/orders/export": {
             "get": {
                 "operationId": "get_v1_admin_orders_export",
