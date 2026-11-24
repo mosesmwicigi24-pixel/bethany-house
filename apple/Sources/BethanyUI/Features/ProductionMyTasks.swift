@@ -335,6 +335,7 @@ struct MyTasksView: View {
 
                 if !group.tasks.isEmpty {
                     stageTimeline(group)
+                    stageJourney(group)
                 }
 
                 WorkshopConversation(orderID: group.id)
@@ -442,6 +443,57 @@ struct MyTasksView: View {
         case "pending": return "Not done"
         default: return stageLabel(status)
         }
+    }
+
+    private func stageJourney(_ group: OrderGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Stage journey", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                .font(.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text("Your assigned stages, in order")
+                .font(.caption).foregroundStyle(Theme.textSecondary)
+            ScrollView(.horizontal) {
+                ZStack(alignment: .top) {
+                    if group.tasks.count > 1 {
+                        Rectangle()
+                            .fill(Theme.line)
+                            .frame(height: 2)
+                            .padding(.horizontal, 50)
+                            .padding(.top, 22)
+                            .accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(group.tasks) { task in
+                            let completed = task.status == "completed"
+                            let current = task.status == "in_progress"
+                            VStack(spacing: 6) {
+                                ProductionStageIcon(stage: task["stage"], tint: completed || current ? Theme.Palette.brandDeep : Theme.textSecondary)
+                                    .frame(width: 44, height: 44)
+                                    .background(Theme.card, in: Circle())
+                                    .overlay(Circle().strokeBorder(completed ? Theme.Palette.success : (current ? Theme.Palette.brandDeep : Theme.line), lineWidth: 1.5))
+                                Text(stageName(task))
+                                    .font(.caption.weight(.semibold))
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(stageTimelineLabel(task.status))
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(width: 100, alignment: .top)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(stageName(task))
+                            .accessibilityValue(stageTimelineLabel(task.status))
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .scrollIndicators(.visible)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
     }
 
     @ViewBuilder

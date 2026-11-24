@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Stage journey overview — 24 November 2026, Codex
+
+- Added a horizontal, connected stage journey card below Your stages. It uses the existing assigned-stage sequence, stage icons and explicit statuses; the detailed stage rows and their actions remain available. The connecting line is neutral and does not imply that intermediate stages are complete.
+- TailorsMobile iPhone simulator build passed. The simulator window changed during sign-in, so the card's visual layout, horizontal scrolling, accessibility sizes and dark appearance remain unverified. No live data was changed.
+
 ### Task stage rows — 24 November 2026, Codex
 
 - Stage rows now use the existing stage-specific icons, a name and explicit status, with a completion tick at the far end. Pending stages say “Not done”; paused, failed and in-progress states retain their accurate labels. Existing add-note actions are preserved.
