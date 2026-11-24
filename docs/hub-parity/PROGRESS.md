@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### Android profile presentation — 25 November 2026, Codex (claimed)
+### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking a read-only side-by-side review of Profile, My Employment and My Activity. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/ProfileFeature.kt` and related Android profile presentation tests. Authentication/security logic, server permissions and production configuration are outside this claim.
+- Aligned Tailors profile navigation labels, avatar, outlet placement and action hierarchy with the iPhone reference; removed the duplicate in-page title. Hub presentation and security operations were not changed.
+- Both Android debug variants built and focused profile-identifier and shell tests passed. In the signed-in test emulator, verified the profile controls and opened employment and activity tabs without editing data. Pixel comparison, photo upload, security actions, populated activity, large text, accessibility and failure states remain unverified. Claim released.
 
 ### Android messages presentation — 25 November 2026, Codex (claim released; verification open)
 

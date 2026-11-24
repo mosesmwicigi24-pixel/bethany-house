@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,9 +14,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +40,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
@@ -122,9 +134,15 @@ fun ProfileScreen() {
     // Opening the page re-reads the person, so the sign-in safety badges are current.
     LaunchedEffect(Unit) { env.session.refreshMe(false) }
 
-    Page("My profile", refresh = { env.session.refreshMe(false) }) {
+    Page("My profile", refresh = { env.session.refreshMe(false) }, showTitle = env.flavor != AppFlavor.TAILORS) {
         if (env.flavor == AppFlavor.TAILORS) {
-            SegmentedTabs(listOf(0 to "Profile", 1 to "Employment", 2 to "Activity"), profileTab) { profileTab = it }
+            Row(Modifier.fillMaxWidth().background(MaterialTheme.hub.line, CircleShape).padding(2.dp)) {
+                listOf("Profile & security", "My employment", "My activity").forEachIndexed { index, label ->
+                    Box(Modifier.weight(1f).background(if (profileTab == index) MaterialTheme.hub.card else androidx.compose.ui.graphics.Color.Transparent, CircleShape).semantics { selected = profileTab == index }.clickable { profileTab = index }.heightIn(min = 48.dp).padding(horizontal = 4.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(label, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, color = MaterialTheme.hub.text, maxLines = 2)
+                    }
+                }
+            }
         }
         when (profileTab) {
           1 -> OwnEmployment()
@@ -132,20 +150,21 @@ fun ProfileScreen() {
           else -> {
         SectionCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (env.flavor == AppFlavor.TAILORS) PersonAvatar(me.name, me.avatarUrl, 56.dp)
+                if (env.flavor == AppFlavor.TAILORS) PersonAvatar(me.name, me.avatarUrl, 64.dp)
                 else Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Palette.brand, modifier = Modifier.size(44.dp))
                 Spacer(Modifier.width(Space.l))
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(me.name, style = MaterialTheme.typography.titleLarge)
                     Text(me.email, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                    if (env.flavor == AppFlavor.TAILORS) me.outlet?.let { Text(it.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary) }
                     if (env.flavor == AppFlavor.HUB) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { me.roleNames.forEach { StatusBadge(it, StatusTone.INFO) } }
                 }
             }
             if (env.flavor == AppFlavor.TAILORS) {
-                OutlinedButton(onClick = { showEdit = true }, modifier = Modifier.fillMaxWidth()) { Text("Edit details & preferences") }
-                OutlinedButton(onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !photoBusy, modifier = Modifier.fillMaxWidth()) { Text(if (photoBusy) "Uploading photo…" else "Change photo") }
+                Button(onClick = { showEdit = true }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(Space.s)); Text("Edit details & preferences") }
+                OutlinedButton(onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !photoBusy, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(Space.s)); Text(if (photoBusy) "Uploading photo…" else "Change photo") }
             }
-            me.outlet?.let { DetailRow("Outlet", it.name) }
+            if (env.flavor == AppFlavor.HUB) me.outlet?.let { DetailRow("Outlet", it.name) }
             if (env.flavor == AppFlavor.HUB) {
                 me.sessionPolicy?.let { p -> DetailRow("Session limits", "Idle ${p.idleMinutes} min (${if (p.onIdle == SessionPolicy.OnIdle.PIN_LOCK) "PIN lock" else "sign out"}), ${p.absoluteMinutes / 60} h absolute") }
                 snapshot.tokenExpiresAt?.let { exp -> DetailRow("This sign-in renews until") { DateText(exp) } }
