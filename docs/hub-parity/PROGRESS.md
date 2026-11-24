@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android task-detail actions — 25 November 2026, Codex (claimed)
+
+- Taking Android task-detail control comparison against the iPhone 17. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt` and related Android production tests. Compare update-count, batch and offline flows before changing the controls. Test environment confirmed by owner; no production writes.
+
 ### My Tasks visual parity — 25 November 2026, Codex (claim released; verification open)
 
 - Matched the task list's centered Tailors mark, greeting, workshop icon, segmented Active/History control, lane dots, task-row icons and chevrons. Tailors phone navigation now uses a floating card and remains visible on nested pages. Hub flavor keeps its existing navigation. The owner confirmed the simulator account is a test environment; no records were changed in this slice.
