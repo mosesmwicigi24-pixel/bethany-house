@@ -1,6 +1,7 @@
 package ke.co.bethanyhouse.hub.ui.features.production
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -24,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,6 +39,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalConfiguration
@@ -219,6 +224,8 @@ internal fun ProductionCalendarScreen() {
     val scope = rememberCoroutineScope()
     val schedule = remember { Resource(scope) { env.client.get("/v1/admin/production/schedule").json ?: JsonNull } }
     var month by remember { mutableStateOf(HubDates.today().withDayOfMonth(1)) }
+    var assignedOrder by remember { mutableStateOf<Int?>(null) }
+    var openingOrder by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { schedule.load() }
 
     Page("Production Calendar", subtitle = if (env.session.current.permissions.isFloorWorker) "Your jobs by due date" else "Delivery promises against the floor's load", refresh = { schedule.reload() }) {
@@ -238,16 +245,45 @@ internal fun ProductionCalendarScreen() {
             if (!tailors && byStage.isNotEmpty()) SectionCard("Open work per stage") {
                 byStage.keys.sorted().forEach { k -> DetailRow(s["stage_names"][k].str ?: "Stage $k", byStage[k].str) }
             }
-            CalendarMonth(s["upcoming_orders"].records, month, tailors, onPrev = { month = month.minusMonths(1) }, onNext = { month = month.plusMonths(1) }, onToday = { month = HubDates.today().withDayOfMonth(1) }, onSelectMonth = { month = it.withDayOfMonth(1) })
+            CalendarMonth(s["upcoming_orders"].records, month, tailors, onPrev = { month = month.minusMonths(1) }, onNext = { month = month.plusMonths(1) }, onToday = { month = HubDates.today().withDayOfMonth(1) }, onSelectMonth = { month = it.withDayOfMonth(1) }, onOpen = if (tailors && env.session.current.can("production.view")) { order ->
+                val number = order["order_number"].str
+                if (!number.isNullOrBlank() && !openingOrder) {
+                    openingOrder = true
+                    scope.launch {
+                        try {
+                            val response = env.client.get("/v1/admin/production-orders", mapOf("search" to number, "per_page" to "100")).json
+                            val id = calendarOrderId(response, number)
+                            if (id == null) env.toasts.show("Couldn't find this order. Refresh the calendar and try again.", StatusTone.WARNING)
+                            else {
+                                val assigned = if (env.session.current.can("production.worker")) {
+                                    val result = env.client.get("/v1/tailor/tasks", mapOf("include_order_context" to "true")).json
+                                    (result.records.ifEmpty { result["data"].records }).any { (it["production_order"]["id"].int ?: it["production_order_id"].int) == id }
+                                } else false
+                                if (assigned) assignedOrder = id else env.navigator.push(Route.ProductionOrder(id))
+                            }
+                        } catch (e: Exception) { env.toasts.error(e) } finally { openingOrder = false }
+                    }
+                }
+            } else null)
             if (tailors && floorWorker) {
                 TextButton(onClick = { env.navigator.push(Route.ProductionMyTasks) }) { Text("Open My Tasks") }
             }
         }
     }
+    assignedOrder?.let { id ->
+        Dialog(onDismissRequest = { assignedOrder = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize()) { MyTasksScreen(initialOrderId = id, onClose = { assignedOrder = null }) }
+        }
+    }
 }
 
+/** Schedule rows omit IDs; only one exact search match can identify a job. */
+internal fun calendarOrderId(response: JsonElement?, number: String): Int? =
+    (response.records.ifEmpty { response["data"].records })
+        .filter { it["order_number"].str == number }.singleOrNull()?.get("id").int
+
 @Composable
-private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: Boolean, onPrev: () -> Unit, onNext: () -> Unit, onToday: () -> Unit, onSelectMonth: (LocalDate) -> Unit) {
+private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: Boolean, onPrev: () -> Unit, onNext: () -> Unit, onToday: () -> Unit, onSelectMonth: (LocalDate) -> Unit, onOpen: ((JsonElement) -> Unit)?) {
     var selected by remember { mutableStateOf<LocalDate?>(null) }
     val byDay = orders.filter { it["due_date"].date != null }.groupBy { HubDates.dayString(it["due_date"].date!!) }
     val title = start.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale.UK))
@@ -308,7 +344,7 @@ private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: 
                     if (date.isBefore(today)) StatusBadge("past due", StatusTone.DANGER)
                 }
                 due.forEach { o ->
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth().then(if (onOpen != null && !o["order_number"].str.isNullOrBlank()) Modifier.clickable { onOpen(o) } else Modifier)) {
                         Text(o["order_number"].str ?: "", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         StatusBadge(o["status"].str)
                         PriorityBadge(o["priority"].str)

@@ -70,4 +70,10 @@ class ProductionParityTest {
         assertEquals("Awaiting inspection · No action needed", taskSummary(group("qc_pending", "completed"), false))
         assertEquals("Finished stages", taskLane(group("completed", "completed"), true))
     }
+    @Test fun calendarOpensOnlyAnUnambiguousExactOrderNumber() {
+        val results = json("""{"data":[{"id":7,"order_number":"PRD-7"},{"id":70,"order_number":"PRD-70"}]}""")
+        assertEquals(7, calendarOrderId(results, "PRD-7"))
+        assertNull(calendarOrderId(results, "PRD-8"))
+        assertNull(calendarOrderId(json("""{"data":[{"id":7,"order_number":"PRD-7"},{"id":8,"order_number":"PRD-7"}]}"""), "PRD-7"))
+    }
 }

@@ -110,13 +110,13 @@ import kotlinx.serialization.json.JsonNull
  * `AppEnvironment.replayPending` sends it when the connection returns.
  */
 @Composable
-internal fun MyTasksScreen() {
+internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? = null) {
     val env = LocalEnv.current
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     var history by remember { mutableStateOf(false) }
-    var selectedOrder by remember { mutableStateOf<Int?>(null) }
-    BackHandler(enabled = selectedOrder != null) { selectedOrder = null }
+    var selectedOrder by remember(initialOrderId) { mutableStateOf(initialOrderId) }
+    BackHandler(enabled = selectedOrder != null) { if (initialOrderId != null && onClose != null) onClose() else selectedOrder = null }
     var pendingKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     var noteFor by remember { mutableStateOf<Record?>(null) }
     var completed by remember { mutableStateOf<Record?>(null) }
@@ -198,7 +198,7 @@ internal fun MyTasksScreen() {
                 Spacer(Modifier.weight(1f))
                 if (queued > 0 || pendingKeys.isNotEmpty()) Text("${maxOf(queued, pendingKeys.size)} waiting to send", style = MaterialTheme.typography.labelSmall, color = Palette.amber)
             }
-        } else TextButton(onClick = { selectedOrder = null }) { Text("‹  Task list") }
+        } else TextButton(onClick = { if (initialOrderId != null && onClose != null) onClose() else selectedOrder = null }) { Text(if (initialOrderId != null) "‹  Calendar" else "‹  Task list") }
         LoadableView(tasks.state, retry = { tasks.load() }, isEmpty = { it.isEmpty() }, empty = {
             EmptyState(if (history) "No finished stages yet" else "Nothing on your bench", if (history) null else "When a stage is assigned to you it shows here.", Icons.Default.ContentCut)
         }) { rows ->
@@ -232,7 +232,7 @@ internal fun MyTasksScreen() {
                             }
                         }
                         if (tailors && g.tasks.isNotEmpty()) StageJourney(g.tasks)
-                        if (tailors && g.id > 0) JobConversation(g.id)
+                        if (tailors && g.id > 0) JobConversation(g.id, onBeforeOpen = if (initialOrderId != null) onClose else null)
                     }
                 }
             }
@@ -305,7 +305,7 @@ private fun StageJourney(tasks: List<Record>) {
 }
 
 @Composable
-private fun JobConversation(orderId: Int) {
+private fun JobConversation(orderId: Int, onBeforeOpen: (() -> Unit)? = null) {
     val env = LocalEnv.current
     val scope = rememberCoroutineScope()
     val conversation = remember(orderId) {
@@ -335,7 +335,7 @@ private fun JobConversation(orderId: Int) {
                     }
                 }
             }
-            if (channel != null) TextButton(onClick = { env.navigator.push(Route.Comms(channel.id)) }) { Text("Open conversation") }
+            if (channel != null) TextButton(onClick = { onBeforeOpen?.invoke(); env.navigator.push(Route.Comms(channel.id)) }) { Text("Open conversation") }
         }
     }
 }
