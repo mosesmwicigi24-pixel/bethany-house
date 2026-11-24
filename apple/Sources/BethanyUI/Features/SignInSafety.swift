@@ -11,6 +11,7 @@ struct SignInSafetySection: View {
     @Environment(AppEnvironment.self) private var env
     let twoFactorOn: Bool
     let pinSet: Bool
+    let changePassword: () -> Void
     @State private var settingUp = false
     @State private var turningOff = false
     @State private var settingPin = false
@@ -19,7 +20,9 @@ struct SignInSafetySection: View {
     @State private var addingPasskey = false
 
     var body: some View {
-        SectionCard("Two-step sign-in") {
+        SectionCard("Sign-in safety") {
+            Text("Manage how you sign in and protect your account.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            Text("Two-step sign-in").font(Theme.Font.body)
             if twoFactorOn {
                 Text("On. You are asked for a code from your authenticator app when you sign in.").font(Theme.Font.secondary)
                 HStack {
@@ -33,8 +36,8 @@ struct SignInSafetySection: View {
                 Text("Off. Turn it on to be asked for a code from an authenticator app at sign-in.").font(Theme.Font.secondary)
                 Button("Turn on…") { settingUp = true }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
             }
-        }
-        SectionCard("Passkeys") {
+            Divider()
+            Text("Passkeys").font(Theme.Font.body)
             Text("Sign in and confirm it's you with Touch ID or Face ID. Passkeys added here or in the console work in both.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
             if let passkeys {
                 LoadableView(passkeys.state, retry: { passkeys.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No passkeys yet", symbol: "person.badge.key") }) { rows in
@@ -57,10 +60,12 @@ struct SignInSafetySection: View {
                 }
             }
             Button("Add a passkey…") { addingPasskey = true }
-        }
-        SectionCard("Terminal PIN") {
+            Divider()
+            Text("Terminal PIN").font(Theme.Font.body)
             Text(pinSet ? "Set. It unlocks a shared till without your password." : "Not set. A PIN unlocks a shared till without your password.").font(Theme.Font.secondary)
             Button(pinSet ? "Change PIN…" : "Set a PIN…") { settingPin = true }
+            Divider()
+            Button("Change password…", action: changePassword)
         }
         .task {
             if passkeys == nil {
