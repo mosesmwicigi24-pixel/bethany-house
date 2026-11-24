@@ -33,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ke.co.bethanyhouse.hub.LocalEnv
@@ -47,6 +49,8 @@ import ke.co.bethanyhouse.hub.core.records
 import ke.co.bethanyhouse.hub.core.str
 import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.SessionPolicy
+import ke.co.bethanyhouse.hub.core.TerminalPinRule
+import ke.co.bethanyhouse.hub.core.TerminalPinClient
 import ke.co.bethanyhouse.hub.core.get
 import ke.co.bethanyhouse.hub.core.jsonOf
 import ke.co.bethanyhouse.hub.ui.Palette
@@ -89,6 +93,7 @@ fun ProfileScreen() {
     val snapshot by env.session.snapshot.collectAsStateWithLifecycle()
     val me = snapshot.me ?: return
     var showPassword by remember { mutableStateOf(false) }
+    var showPin by remember { mutableStateOf(false) }
     var showEdit by remember { mutableStateOf(false) }
     var photoBusy by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -151,14 +156,16 @@ fun ProfileScreen() {
             DetailRow("Two-step sign-in") { StatusBadge(if (me.twoFactorEnabled) "on" else if (me.twoFactorRequired) "required" else "off", if (me.twoFactorEnabled) StatusTone.SUCCESS else if (me.twoFactorRequired) StatusTone.WARNING else StatusTone.NEUTRAL) }
             if (me.twoFactorEnabled) me.recoveryCodesLeft?.let { DetailRow("Recovery codes left", it.toString()) }
             DetailRow("Terminal PIN") { StatusBadge(if (me.terminalPinSet) "set" else "not set", if (me.terminalPinSet) StatusTone.SUCCESS else StatusTone.NEUTRAL) }
+            if (env.flavor == AppFlavor.TAILORS) OutlinedButton(onClick = { showPin = true }) { Text(if (me.terminalPinSet) "Change PIN" else "Set a PIN") }
             OutlinedButton(onClick = { showPassword = true }) { Text("Change password…") }
-            Text("Two-step setup, passkeys and the terminal PIN are managed from Setup › Profile in the console.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
+            Text(if (env.flavor == AppFlavor.TAILORS) "Two-step setup and passkeys are managed from Setup › Profile in the console." else "Two-step setup, passkeys and the terminal PIN are managed from Setup › Profile in the console.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
         }
           }
         }
     }
 
     if (showPassword) ChangePasswordDialog { showPassword = false }
+    if (showPin) TerminalPinDialog { showPin = false }
     if (showEdit) EditOwnProfile { showEdit = false }
 }
 
@@ -358,6 +365,46 @@ private fun OwnActivity() {
             }
         }
     }
+}
+
+@Composable
+private fun TerminalPinDialog(onDismiss: () -> Unit) {
+    val env = LocalEnv.current
+    val scope = rememberCoroutineScope()
+    var pin by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<ApiError?>(null) }
+    val problem = pin.takeIf { it.isNotEmpty() }?.let(TerminalPinRule::problem)
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Terminal PIN") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Text("Use this PIN on a shared terminal. Your password is required to set or change it.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(pin, { pin = it; error = null }, label = { Text("New PIN (4–6 digits)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+                FieldError(problem ?: error?.field("pin"))
+                OutlinedTextField(confirmation, { confirmation = it }, label = { Text("Repeat PIN") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+                if (confirmation.isNotEmpty() && confirmation != pin) FieldError("The two PINs differ.")
+                OutlinedTextField(password, { password = it }, label = { Text("Your password") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                FieldError(error?.field("current_password"))
+                error?.let { if (it.errors.isEmpty()) Text(it.message, color = Palette.danger, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy && pin.isNotEmpty() && problem == null && pin == confirmation && password.isNotEmpty(), onClick = {
+                busy = true
+                scope.launch {
+                    try {
+                        TerminalPinClient(env.client).set(pin, confirmation, password)
+                        env.session.refreshMe(false); env.toasts.show("Your PIN is saved."); onDismiss()
+                    } catch (e: ApiError) { error = e } finally { busy = false }
+                }
+            }) { Text(if (busy) "Saving…" else "Save PIN") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
