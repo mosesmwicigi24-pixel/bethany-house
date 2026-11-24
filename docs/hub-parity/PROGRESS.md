@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Profile and employment redesign — 24 November 2026, Codex (verification open)
+
+- Apple profile groups the existing sign-in controls, removes sessions and named devices from the page, adds a photo-library picker, and displays only populated employment fields and identifiers. Activity remains one tab with the latest 20 actions. Existing server security and permission rules remain in place.
+- TailorsMobile simulator build and HubMac build passed. The iPhone 17 Pro simulator launched to sign-in; signed-in screens, photo upload, security actions and employment states have not been verified. Deduction enrollment is not established by the presence of an identifier; the current display only hides missing identifiers, so enrollment-based filtering remains open.
+
 ### Cleaner My Tasks and stage colors — 24 November 2026, Codex
 
 - Refined My Tasks spacing and white cards; stage icons use distinct theme colors when active, unfinished stages are subdued, and completed status is green. Recorded dates and times are orange. The stage journey uses the same icon colors. Existing stage actions and status labels remain.

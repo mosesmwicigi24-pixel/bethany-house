@@ -91,12 +91,12 @@ struct MyEmploymentPanel: View {
         RemoteJSON("/v1/admin/me/file", version: version) { j, _ in
             let me = MyEmployment(json: j)
             SectionCard("Employment") {
-                DetailRow("Job title", me.jobTitle ?? "—")
-                DetailRow("Department", me.department ?? "—")
-                DetailRow("Type", (me.employmentType ?? "—").humanized)
-                DetailRow("Since", me.hireDate.map(PayrollText.date) ?? "—")
-                DetailRow("Reports to", me.reportsTo ?? "—")
-                DetailRow("Pay method", me.payMethodText)
+                if let value = me.jobTitle, !value.isEmpty { DetailRow("Job title", value) }
+                if let value = me.department, !value.isEmpty { DetailRow("Department", value) }
+                if let value = me.employmentType, !value.isEmpty { DetailRow("Type", value.humanized) }
+                if let value = me.hireDate { DetailRow("Since", PayrollText.date(value)) }
+                if let value = me.reportsTo, !value.isEmpty { DetailRow("Reports to", value) }
+                if let value = me.payMethod, !value.isEmpty { DetailRow("Pay method", me.payMethodText) }
                 Text("Something wrong here? Ask whoever keeps the employee files; only they can change it.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
             }
             SectionCard("Mine to keep") {
@@ -104,15 +104,19 @@ struct MyEmploymentPanel: View {
                 DetailRow("Emergency contact", [me.emergencyName, me.emergencyRelationship, me.emergencyPhone].compactMap { $0 }.joined(separator: " · ").nilIfEmpty ?? "—")
                 Button("Edit…") { editing = true }.font(Theme.Font.secondary)
             }
-            SectionCard("Identifiers") {
-                ForEach(Array(me.masked.enumerated()), id: \.offset) { i, m in
-                    let key = MyEmployment.identifierLabels[i].key
-                    DetailRow(m.label, revealed?[key]?.string ?? m.value ?? "—")
-                }
-                if revealed == nil {
-                    AsyncButton(action: { revealed = try await env.session.client.get("/v1/admin/me/file/sensitive").json?["sensitive"] }) { Text("Show in full") }
-                        .font(Theme.Font.secondary)
-                    Text("Shown masked until you confirm it is you.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            if me.masked.contains(where: { !($0.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                SectionCard("Identifiers") {
+                    ForEach(Array(me.masked.enumerated()), id: \.offset) { i, m in
+                        if let value = m.value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            let key = MyEmployment.identifierLabels[i].key
+                            DetailRow(m.label, revealed?[key]?.string ?? value)
+                        }
+                    }
+                    if revealed == nil {
+                        AsyncButton(action: { revealed = try await env.session.client.get("/v1/admin/me/file/sensitive").json?["sensitive"] }) { Text("Show in full") }
+                            .font(Theme.Font.secondary)
+                        Text("Shown masked until you confirm it is you.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+                    }
                 }
             }
             SectionCard("My documents") {
