@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
@@ -418,13 +419,19 @@ private fun TailorJobHeading(order: JsonElement?) {
 
 @Composable
 private fun TailorJobSpecifications(order: JsonElement?) {
+    val context = LocalContext.current
+    val userId = LocalEnv.current.session.current.me?.id
+    val preferences = remember(context) { context.getSharedPreferences("tailors_job_display", android.content.Context.MODE_PRIVATE) }
     val sheet = MeasurementSheet.of(order["measurements"])
     val specs = order["specifications"].stringPairs
-    var specsOpen by remember { mutableStateOf(true) }
-    var measurementsOpen by remember { mutableStateOf(true) }
+    var specsOpen by remember(userId) { mutableStateOf(userId?.let { preferences.getBoolean("$it.specifications", true) } ?: true) }
+    var measurementsOpen by remember(userId) { mutableStateOf(userId?.let { preferences.getBoolean("$it.measurements", true) } ?: true) }
     if (specs.isNotEmpty() || sheet.gender != null) {
         SectionCard {
-            TextButton(onClick = { specsOpen = !specsOpen }, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = {
+                specsOpen = !specsOpen
+                userId?.let { preferences.edit().putBoolean("$it.specifications", specsOpen).apply() }
+            }, modifier = Modifier.fillMaxWidth()) {
                 Text("Specifications", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                 Text("${specs.size + if (sheet.gender == null) 0 else 1}  ${if (specsOpen) "⌃" else "⌄"}")
             }
@@ -436,7 +443,10 @@ private fun TailorJobSpecifications(order: JsonElement?) {
     }
     if (sheet.body.isNotEmpty()) {
         SectionCard {
-            TextButton(onClick = { measurementsOpen = !measurementsOpen }, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = {
+                measurementsOpen = !measurementsOpen
+                userId?.let { preferences.edit().putBoolean("$it.measurements", measurementsOpen).apply() }
+            }, modifier = Modifier.fillMaxWidth()) {
                 Text("Measurements", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                 Text("${sheet.body.size}  ${if (measurementsOpen) "⌃" else "⌄"}")
             }

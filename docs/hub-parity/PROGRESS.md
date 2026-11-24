@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android task disclosure preferences — 24 November 2026, Codex (verification open)
+
+- Specifications and measurements expansion choices are stored locally per signed-in user, matching the iPhone behavior. Tailors debug build and focused production tests passed; account switching, persistence across restart and accessibility announcement need device verification.
+
 ### Android task detail parity — 24 November 2026, Codex (verification open)
 
 - Reordered the Tailors task workspace to show the job identity and actionable stages first, followed by separate specification and measurement cards, bench note, stage overview, journey and conversation. Completed stages are summarized with status, recorded time and note action. Existing stage actions, endpoints and permission rules remain in place; Hub flavor layout is unchanged.
