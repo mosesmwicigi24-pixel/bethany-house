@@ -286,3 +286,22 @@ Users (a manager's per-person sessions) is unchanged. The page re-reads the
 person on open so the sign-in safety badges are current (and the route render
 test still sees a Hub request). App tests 265/265; both flavours build.
 Not verified on a device.
+
+### Punch duplicates: server checked, Android guard — 24 November 2026, Claude
+
+- **Server (verified in code):** a replayed punch cannot create a second
+  shift. `TimeClockController::clockIn` refuses with 422 when the person is
+  already clocked in, and the partial unique index
+  `time_entries_one_active_per_user` (one `active` row per user) rejects a
+  racing second insert. A replayed clock-out after one that landed gets 404.
+  Both are final refusals, so the app drops the duplicate; the person sees a
+  red "could not be recorded" toast, which is harmless but reads as an error.
+  A racing insert that hits the index is not caught in the controller, so it
+  would surface as a 5xx (kept, then refused with 422 on the next replay).
+  Not exercised against a live database here.
+- **Android:** a second punch while one is saved is now refused ("Send the
+  saved punch before recording another"), as on iOS. Before, a second offline
+  tap replaced the saved clock-in with a later one and lost the true time. The
+  pending badge refreshes after an offline punch. App tests 265/265, core
+  46/46, both flavours build. No UI test: the clock needs a location fix the
+  render harness cannot fake. Not verified on a device.
