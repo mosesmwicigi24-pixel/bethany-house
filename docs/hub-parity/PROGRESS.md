@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android messages presentation — 25 November 2026, Codex (claimed)
+
+- Taking Android message-list and conversation presentation comparison against iPhone. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/people/CommsFeature.kt`, `CommsThread.kt`, and relevant Android message tests. Preserve channel membership, unread behavior and send semantics; use test data for any message writes.
+
 ### Android calendar presentation — 25 November 2026, Codex (claim released; verification open)
 
 - Added iPhone-style summary tiles, today outline and selected-date styling, monthly order count, compact order cards and a separate past-due list using existing schedule data. Android keeps 48dp date targets. Existing order resolution and permission checks remain in place.
