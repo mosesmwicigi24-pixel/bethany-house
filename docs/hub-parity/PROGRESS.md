@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Android task queue ordering — 25 November 2026, Codex (verification open)
+
+- Android now checks the current user's readable saved queue before sending a stage status or count. When that stage has saved work, the new change is saved for replay; an unavailable or unreadable queue blocks the update with an explanation. This aligns with the existing iPhone behavior and does not change server rules.
+- Tailors debug build, focused production and queue tests, and full Tailors unit suite passed. The new queue test checks exact task scoping and unreadable storage. End-to-end replay with a simultaneous in-flight update, process restart, server refusal and emulator offline transitions remain unverified; deduplication and concurrent replay deserve separate review on both platforms before claiming strict ordering. No live task was changed.
+
 ### Android More and text size — 24 November 2026, Codex (verification open)
 
 - Tailors phone More is a grouped page with the iPhone's Workshop, My workday, Time & pay, App settings and account sections. Existing permission-filtered routes and the offline sign-out warning are preserved. The signed-in Android emulator showed More and returned to it from Production Orders; the final divider and heading polish has built but has not been visually rechecked. Other roles, deep links, tablet, dark appearance and accessibility sizes remain open.

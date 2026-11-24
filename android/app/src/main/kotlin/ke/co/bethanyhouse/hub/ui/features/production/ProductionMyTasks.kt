@@ -162,12 +162,29 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
             env.toasts.show("Offline, and this change could not be saved on this device. Try again when you are back online.", StatusTone.DANGER); return
         }
         pendingKeys = pendingKeys + key
-        env.toasts.show("You're offline — saved on this device and sent when the connection returns.", StatusTone.WARNING)
+        env.toasts.show("Saved on this device. Waiting to sync.", StatusTone.WARNING)
+        if (env.connection.isOnline.value) scope.launch { env.replayPending(); refreshPending(); tasks.load() }
+    }
+
+    suspend fun hasPendingForTask(taskId: String): Boolean? {
+        val offline = env.offline
+        if (offline == null) {
+            env.toasts.show("Can't check saved work on this device. Try again.", StatusTone.DANGER)
+            return null
+        }
+        return try {
+            taskHasPendingChanges(offline, taskId)
+        } catch (e: OfflineStore.QueueUnreadable) {
+            env.toasts.show("Can't read saved work on this device. Ask a manager for help before updating this task.", StatusTone.DANGER)
+            null
+        }
     }
 
     suspend fun act(t: Record, action: String) {
         val path = "/v1/tailor/tasks/${t.id}/status"
         val body = jsonOf("action" to action)
+        val pending = hasPendingForTask(t.id) ?: return
+        if (pending) { enqueue("task_status", "PUT", path, body, "task-${t.id}-status"); return }
         try {
             env.client.put(path, body)
             if (action == "complete") completed = t else env.toasts.show(if (action == "pause") "Stage paused" else "Stage started")
@@ -183,6 +200,8 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
         val body = jsonOf("quantity_done" to qty, "batch_id" to batch)
         val stage = t["stage"]["id"].int ?: t.int("production_stage_id") ?: 0
         val key = "task-${t.id}-progress-$stage" + (batch?.let { "-batch-$it" } ?: "")
+        val pending = hasPendingForTask(t.id) ?: return
+        if (pending) { enqueue("task_progress", "POST", path, body, key); return }
         try {
             env.client.post(path, body)
             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -283,6 +302,11 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
 }
 
 // ── Grouping (one card per order, stages in sequence) ───────────────────────
+
+internal suspend fun taskHasPendingChanges(store: OfflineStore, taskId: String): Boolean {
+    val prefix = "/v1/tailor/tasks/$taskId/"
+    return store.pendingChecked().any { it.path.startsWith(prefix) }
+}
 
 internal class TaskOrderGroup(val id: Int, val order: JsonElement?, val tasks: List<Record>)
 
