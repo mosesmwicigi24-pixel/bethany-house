@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Task stage rows — 24 November 2026, Codex
+
+- Stage rows now use the existing stage-specific icons, a name and explicit status, with a completion tick at the far end. Pending stages say “Not done”; paused, failed and in-progress states retain their accurate labels. Existing add-note actions are preserved.
+- TailorsMobile iPhone simulator build passed. With fictional data, accessibility inspection confirmed four Done stages and one In progress stage and their note actions. Simulator control disconnected when attempting to scroll for a visual inspection; pending, dark mode, larger text and the final card appearance remain unverified.
+
 ### Tailors Hub header — 24 November 2026, Codex
 
 - Replaced the two-line My Tasks heading on the Tailors Hub task list with the app's existing scissors-and-thread icon and a larger Tailors Hub name. The system navigation title remains My Tasks for back navigation; Bethany Hub retains its My Tasks heading.

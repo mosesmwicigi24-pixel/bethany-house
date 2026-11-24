@@ -391,21 +391,15 @@ struct MyTasksView: View {
             ForEach(group.tasks) { task in
                 let status = task.status
                 let finished = status == "completed"
+                let active = finished || status == "in_progress"
                 HStack(spacing: 10) {
-                    VStack(spacing: 0) {
-                        Image(systemName: finished ? "checkmark.circle.fill" : (status == "in_progress" ? "circle.inset.filled" : "circle"))
-                            .foregroundStyle(finished ? Theme.Palette.success : stageTint(status))
-                            .font(.title3)
-                            .accessibilityHidden(true)
-                        if task.id != group.tasks.last?.id {
-                            Rectangle().fill(Theme.line).frame(width: 1, height: 18)
-                        }
-                    }
-                    .frame(width: 30)
+                    ProductionStageIcon(stage: task["stage"], tint: active ? Theme.Palette.brandDeep : Theme.textSecondary)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(stageName(task)).font(.subheadline.weight(finished ? .regular : .semibold))
+                        Text(stageName(task))
+                            .font(.subheadline.weight(active ? .semibold : .regular))
+                            .foregroundStyle(active ? Theme.text : Theme.textSecondary)
                         HStack(spacing: 5) {
-                            Text(stageLabel(status))
+                            Text(stageTimelineLabel(status))
                             if finished, let completed = task["completed_at"]?.date {
                                 Text("·")
                                 DateText(completed, style: .date)
@@ -414,7 +408,7 @@ struct MyTasksView: View {
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(stageName(task))
-                    .accessibilityValue(stageLabel(status))
+                    .accessibilityValue(stageTimelineLabel(status))
                     Spacer(minLength: 0)
                     if !group.history, finished, ProductionStatus.acceptsFloorWork(group.order["status"]?.string) {
                         Button { noteFor = task } label: {
@@ -426,21 +420,27 @@ struct MyTasksView: View {
                         .foregroundStyle(Theme.textSecondary)
                         .accessibilityLabel("Add note to \(stageName(task))")
                     }
+                    Image(systemName: finished ? "checkmark.circle.fill" : "circle")
+                        .font(.body)
+                        .foregroundStyle(finished ? Theme.Palette.success : Theme.textSecondary.opacity(0.45))
+                        .accessibilityHidden(true)
                 }
-                .padding(.vertical, 4)
-                .frame(minHeight: 33)
+                .padding(.vertical, 6)
+                .frame(minHeight: Theme.tapTarget)
+                if task.id != group.tasks.last?.id {
+                    Divider().padding(.leading, 38)
+                }
             }
         }
         .padding(14)
         .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func stageTint(_ status: String?) -> Color {
+    private func stageTimelineLabel(_ status: String?) -> String {
         switch status {
-        case "in_progress": return Theme.Palette.brandDeep
-        case "paused": return Theme.Palette.warning
-        case "failed": return Theme.Palette.danger
-        default: return Theme.textSecondary
+        case "completed": return "Done"
+        case "pending": return "Not done"
+        default: return stageLabel(status)
         }
     }
 
