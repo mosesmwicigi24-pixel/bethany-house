@@ -249,13 +249,12 @@ struct ProductionCalendarView: View {
             Image(systemName: icon).font(.caption.weight(.semibold)).foregroundStyle(tint)
                 .frame(width: 28, height: 28).background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(value).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(Theme.text)
+                Text(value).font(.title2.weight(.medium)).monospacedDigit().foregroundStyle(Theme.text)
                 Text(title).font(.caption).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-        .padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line))
+        .padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -359,7 +358,7 @@ struct ProductionCalendarView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "calendar").foregroundStyle(Theme.Palette.brandDeep).frame(width: 28, height: 28).background(Theme.Palette.brandDeep.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             VStack(alignment: .leading, spacing: 4) {
-                Text(order["product_name"]?.string ?? "Production order").font(.subheadline.weight(.semibold))
+                Text(order["product_name"]?.string ?? "Production order").font(.subheadline.weight(.medium))
                 Text(order["order_number"]?.string ?? "").font(.caption).foregroundStyle(Theme.textSecondary)
                 if let date = order["due_date"]?.date { HStack(spacing: 3) { Text("Due"); DateText(date, style: .date) }.font(.caption).foregroundStyle(Theme.textSecondary) }
                 if let quantity = order["quantity"]?.int, quantity > 0 {

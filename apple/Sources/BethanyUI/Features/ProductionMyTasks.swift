@@ -214,7 +214,7 @@ struct MyTasksView: View {
                     .frame(width: 30, height: 32)
                     .background(laneColor(group.lane).opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(group.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                    Text(group.name).font(.subheadline.weight(.medium)).foregroundStyle(Theme.text)
                     Text(group.summary).font(.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Spacer(minLength: 4)
@@ -301,7 +301,7 @@ struct MyTasksView: View {
                         .tint(Theme.Palette.brandDeep)
                     }
                     .padding(14)
-                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
 
                 if !measurements.body.isEmpty {
@@ -318,7 +318,7 @@ struct MyTasksView: View {
                     }
                     .tint(Theme.Palette.brandDeep)
                     .padding(14)
-                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
 
                 if let notes = group.order["notes"]?.string, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -330,7 +330,7 @@ struct MyTasksView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
 
                 if !group.tasks.isEmpty {
@@ -345,7 +345,7 @@ struct MyTasksView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.card)
+        .background(Theme.canvas)
         .refreshable { await refresh() }
         .onAppear { loadDisclosurePreferences() }
         .onChange(of: specsExpanded) { _, value in saveDisclosurePreference("specs", value: value) }
@@ -380,7 +380,7 @@ struct MyTasksView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Label("Your stages", systemImage: "list.bullet.clipboard")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.Palette.brandDeep)
+                    .foregroundStyle(Theme.text)
                     .accessibilityAddTraits(.isHeader)
                 ProgressView(value: Double(complete), total: Double(group.tasks.count)) {
                     Text("\(complete) of \(group.tasks.count) complete")
@@ -398,7 +398,7 @@ struct MyTasksView: View {
                     ProductionStageIcon(stage: task["stage"], tint: active ? Theme.Palette.brandDeep : Theme.textSecondary)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(stageName(task))
-                            .font(.body.weight(active ? .semibold : .medium))
+                            .font(.body.weight(status == "in_progress" ? .medium : .regular))
                             .foregroundStyle(active ? Theme.text : Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(stageDetails(task))
@@ -425,15 +425,15 @@ struct MyTasksView: View {
                         .foregroundStyle(finished ? Theme.Palette.success : Theme.textSecondary.opacity(0.45))
                         .accessibilityHidden(true)
                 }
-                .padding(.vertical, 11)
+                .padding(.vertical, 14)
                 .frame(minHeight: Theme.tapTarget)
                 if task.id != group.tasks.last?.id {
                     Divider().padding(.leading, 38)
                 }
             }
         }
-        .padding(14)
-        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+        .padding(16)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func stageDetails(_ task: Record) -> String {
@@ -490,10 +490,10 @@ struct MyTasksView: View {
                             VStack(spacing: 6) {
                                 ProductionStageIcon(stage: task["stage"], tint: completed || current ? Theme.Palette.brandDeep : Theme.textSecondary)
                                     .frame(width: 44, height: 44)
-                                    .background(Theme.card, in: Circle())
+                                    .background(Theme.canvas, in: Circle())
                                     .overlay(Circle().strokeBorder(completed ? Theme.Palette.success : (current ? Theme.Palette.brandDeep : Theme.line), lineWidth: 1.5))
                                 Text(stageName(task))
-                                    .font(.caption.weight(.semibold))
+                                    .font(.caption.weight(.medium))
                                     .multilineTextAlignment(.center)
                                     .fixedSize(horizontal: false, vertical: true)
                                 Text(stageTimelineLabel(task.status))
@@ -514,7 +514,7 @@ struct MyTasksView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
@@ -789,7 +789,7 @@ private struct WorkshopConversation: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
                 }
             }
             if channel != nil {
@@ -803,7 +803,7 @@ private struct WorkshopConversation: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .task(id: orderID) { await load() }
         .sheet(isPresented: $showingConversation, onDismiss: { Task { await load() } }) {
             NavigationStack {
@@ -874,8 +874,7 @@ private struct WorkshopStageCard: View {
             actions
         }
         .padding(12)
-        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .disabled(busy)
     }
 

@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Cleaner task and calendar surfaces — 24 November 2026, Codex
+
+- Applied the More screen's lighter grouped-card treatment to My Tasks detail, its stage list and journey, task rows, and Calendar summary tiles. Stage names use lighter weight and more vertical spacing; work actions, measurements, statuses and message behavior remain unchanged.
+- TailorsMobile iPhone simulator build passed. Using fictional data, visually inspected the task-detail header and cards; accessibility inspection showed the stage rows and actions. Simulator control disconnected before the stage card and calendar could be visually inspected. Dark mode, large text, iPad and the remaining app pages have not been reviewed for this visual treatment.
+
 ### Stage spacing and text size — 24 November 2026, Codex
 
 - Added spacing and hierarchy to task stage rows. The status line shows the Hub's completion time for completed stages or the first start time for in-progress/paused stages, when available, using Nairobi time; no timestamp is fabricated.
