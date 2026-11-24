@@ -176,6 +176,11 @@ struct ProductionCalendarView: View {
     @State private var selectedDay: Date?
     @State private var showAllOverdue = false
     @State private var openingOrder = false
+    @State private var assignedOrder: AssignedCalendarOrder?
+
+    private struct AssignedCalendarOrder: Identifiable {
+        let id: Int
+    }
 
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -221,6 +226,16 @@ struct ProductionCalendarView: View {
             }
         }
         .refreshable { await schedule?.reload() }
+        .sheet(item: $assignedOrder) { order in
+            NavigationStack {
+                MyTasksView(initialOrderID: order.id)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { assignedOrder = nil }
+                        }
+                    }
+            }
+        }
     }
 
     private func summary(_ data: JSONValue, overdue: Int, floorWorker: Bool) -> some View {
@@ -368,6 +383,14 @@ struct ProductionCalendarView: View {
             guard matches.count == 1, let id = matches.first?.int("id") else {
                 env.toasts.show("Couldn't find this order. Refresh the calendar and try again.", tone: .warning)
                 return
+            }
+            if env.session.can("production.worker") {
+                let response = try await env.session.client.get("/v1/tailor/tasks", query: ["include_order_context": "true"])
+                let tasks = response.json?.records ?? []
+                if tasks.contains(where: { ($0["production_order"]?["id"]?.int ?? $0.int("production_order_id")) == id }) {
+                    assignedOrder = AssignedCalendarOrder(id: id)
+                    return
+                }
             }
             let route = Route.productionOrder(id: id)
             if let currentRoutePath { currentRoutePath.wrappedValue.append(route) }

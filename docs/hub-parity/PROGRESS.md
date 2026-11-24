@@ -1,8 +1,10 @@
 # Tailors Hub audit progress
 
-### In progress — 24 November 2026, Codex
+### Calendar and My Tasks navigation — 24 November 2026, Codex
 
-- Unifying Apple Calendar and My Tasks navigation for an assigned production order. Existing worker and production-order permissions and Hub endpoints remain in force; manager views and unassigned orders need a safe fallback.
+- Calendar now opens the same My Tasks job view when an order is in the signed-in worker's task list. A Calendar back control returns to the calendar. Other orders retain the existing production-order route; no Hub endpoints or permission gates changed.
+- The TailorsMobile simulator build succeeded. On iPhone 17 Pro (iOS 27.2), using a fictional local Hub, the assigned shirt opened from Calendar with its stitching progress, measurements and stages, and returned to Calendar. No live Hub data was changed.
+- Unassigned-order fallback, assignment changes between requests, network failures, iPad layout, accessibility sizes and live Hub behavior remain unverified in the simulator.
 
 ### Production-order layout — 24 November 2026
 

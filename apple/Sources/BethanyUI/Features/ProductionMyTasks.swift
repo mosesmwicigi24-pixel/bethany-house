@@ -5,6 +5,7 @@ import BethanyKit
 /// including per batch, and only a Hub response can advance an order to QC.
 struct MyTasksView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
@@ -15,13 +16,25 @@ struct MyTasksView: View {
     @State private var pending: [OfflineStore.PendingOperation] = []
     @State private var syncing = false
     @State private var noteFor: Record?
+    private let initialOrderID: Int?
+
+    init(initialOrderID: Int? = nil) {
+        self.initialOrderID = initialOrderID
+        _selectedID = State(initialValue: initialOrderID)
+        _showsDetail = State(initialValue: initialOrderID != nil)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             let wide = geometry.size.width >= (typeSize.isAccessibilitySize ? 760 : 580)
             if let tasks {
                 LoadableView(tasks.state, retry: { tasks.load() }) { rows in
-                    workspace(groups(rows), wide: wide)
+                    let orders = groups(rows)
+                    if let initialOrderID, !orders.contains(where: { $0.id == initialOrderID }) {
+                        EmptyState("This job is no longer on your task list", message: "Return to the calendar and refresh to see the latest work.", symbol: "scissors")
+                    } else {
+                        workspace(orders, wide: wide)
+                    }
                 }
             } else {
                 ProgressView("Loading your work")
@@ -188,9 +201,10 @@ struct MyTasksView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     if back {
                         Button {
-                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { showsDetail = false }
+                            if initialOrderID != nil { dismiss() }
+                            else { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { showsDetail = false } }
                         } label: {
-                            Label("Task list", systemImage: "chevron.left")
+                            Label(initialOrderID == nil ? "Task list" : "Calendar", systemImage: "chevron.left")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(minHeight: Theme.tapTarget)
                         }
