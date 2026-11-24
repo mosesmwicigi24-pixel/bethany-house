@@ -44,6 +44,7 @@ import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.OfflineStore
 import ke.co.bethanyhouse.hub.core.Record
+import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.bool
 import ke.co.bethanyhouse.hub.core.get
 import ke.co.bethanyhouse.hub.core.humanized
@@ -74,6 +75,8 @@ import ke.co.bethanyhouse.hub.ui.components.StatusBadge
 import ke.co.bethanyhouse.hub.ui.components.TextPromptSheet
 import ke.co.bethanyhouse.hub.ui.components.stringPairs
 import ke.co.bethanyhouse.hub.ui.hub
+import ke.co.bethanyhouse.hub.ui.features.people.ChatChannel
+import ke.co.bethanyhouse.hub.ui.features.people.ChatMessage
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -214,6 +217,7 @@ internal fun MyTasksScreen() {
                                     onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
                             }
                         }
+                        if (tailors && g.id > 0) JobConversation(g.id)
                     }
                 }
             }
@@ -252,6 +256,42 @@ internal fun taskGroups(rows: List<Record>): List<TaskOrderGroup> {
     return order.map { oid ->
         val ts = byOrder[oid]!!.sortedBy { it["sequence"].int ?: 0 }
         TaskOrderGroup(oid, ts.firstOrNull()?.get("production_order"), ts)
+    }
+}
+
+@Composable
+private fun JobConversation(orderId: Int) {
+    val env = LocalEnv.current
+    val scope = rememberCoroutineScope()
+    val conversation = remember(orderId) {
+        Resource(scope) {
+            val channels = env.client.get("/v1/admin/channels").json
+            val channel = channels["channels"].records.map(::ChatChannel)
+                .firstOrNull { it.contextType == "production_order" && it.contextId == orderId }
+            val messages = if (channel == null) emptyList() else
+                env.client.get("/v1/admin/channels/${channel.id}/messages", mapOf("per_page" to "3")).json["messages"].records.map(::ChatMessage)
+            channel to messages
+        }
+    }
+    LaunchedEffect(orderId) { conversation.load() }
+    SectionCard("Job conversation") {
+        LoadableView(conversation.state, retry = { conversation.load() }) { (channel, messages) ->
+            when {
+                channel == null -> Text("No conversation is available for this job in Messages.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                messages.isEmpty() -> Text("No messages yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                else -> messages.forEach { message ->
+                    Column(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(message.userName, style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.weight(1f))
+                            message.createdAt?.let { DateText(it, DateStyle.RELATIVE) }
+                        }
+                        Text(message.parsed.text.ifBlank { "Attachment" }, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                    }
+                }
+            }
+            if (channel != null) TextButton(onClick = { env.navigator.push(Route.Comms(channel.id)) }) { Text("Open conversation") }
+        }
     }
 }
 
