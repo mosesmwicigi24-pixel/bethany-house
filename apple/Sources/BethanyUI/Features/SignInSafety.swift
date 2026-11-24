@@ -11,6 +11,7 @@ struct SignInSafetySection: View {
     @Environment(AppEnvironment.self) private var env
     let twoFactorOn: Bool
     let pinSet: Bool
+    let changePassword: () -> Void
     @State private var settingUp = false
     @State private var turningOff = false
     @State private var settingPin = false
@@ -19,7 +20,9 @@ struct SignInSafetySection: View {
     @State private var addingPasskey = false
 
     var body: some View {
-        SectionCard("Two-step sign-in") {
+        SectionCard("Sign-in safety") {
+            Text("Manage how you sign in and protect your account.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
+            Label("Two-step sign-in", systemImage: "checkmark.shield").font(Theme.Font.body)
             if twoFactorOn {
                 Text("On. You are asked for a code from your authenticator app when you sign in.").font(Theme.Font.secondary)
                 HStack {
@@ -33,11 +36,12 @@ struct SignInSafetySection: View {
                 Text("Off. Turn it on to be asked for a code from an authenticator app at sign-in.").font(Theme.Font.secondary)
                 Button("Turn on…") { settingUp = true }.buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
             }
-        }
-        SectionCard("Passkeys") {
+            Divider()
+            Label("Passkeys", systemImage: "key.horizontal").font(Theme.Font.body)
             Text("Sign in and confirm it's you with Touch ID or Face ID. Passkeys added here or in the console work in both.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
             if let passkeys {
-                LoadableView(passkeys.state, retry: { passkeys.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No passkeys yet", symbol: "person.badge.key") }) { rows in
+                LoadableView(passkeys.state, retry: { passkeys.load() }) { rows in
+                    if rows.isEmpty { Text("No passkeys added yet.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary) }
                     ForEach(rows) { p in
                         HStack {
                             Image(systemName: "person.badge.key").foregroundStyle(Theme.textTertiary)
@@ -56,11 +60,14 @@ struct SignInSafetySection: View {
                     }
                 }
             }
-            Button("Add a passkey…") { addingPasskey = true }
-        }
-        SectionCard("Terminal PIN") {
+            Button("Add a passkey…") { addingPasskey = true }.buttonStyle(.bordered).tint(Theme.Palette.brand)
+            Divider()
+            Label("Terminal PIN", systemImage: "number.square").font(Theme.Font.body)
             Text(pinSet ? "Set. It unlocks a shared till without your password." : "Not set. A PIN unlocks a shared till without your password.").font(Theme.Font.secondary)
-            Button(pinSet ? "Change PIN…" : "Set a PIN…") { settingPin = true }
+            Button(pinSet ? "Change PIN…" : "Set a PIN…") { settingPin = true }.buttonStyle(.bordered).tint(Theme.Palette.brand)
+            Divider()
+            Label("Password", systemImage: "lock").font(Theme.Font.body)
+            Button("Change password…", action: changePassword).buttonStyle(.bordered).tint(Theme.Palette.brand)
         }
         .task {
             if passkeys == nil {

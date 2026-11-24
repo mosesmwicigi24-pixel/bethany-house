@@ -183,23 +183,31 @@ internal fun ClockScreen() {
 
     // ── Pending punch ───────────────────────────────────────────────────────
     suspend fun loadPending() { pending = env.offline?.pending()?.firstOrNull { it.kind == "punch" } }
-    /** Sends the kept punch; a refusal drops it (the server said no), a transport failure keeps it for next time. */
+    /**
+     * Sends the kept punch through the store's one sending path, shared with
+     * the automatic replay, so it is never in flight twice. Only a final
+     * refusal drops it; offline, a server error or an ended session keep it.
+     */
     suspend fun sendPending() {
         val p = pending ?: return
         val store = env.offline ?: return
         val label = if (p.path.endsWith("clock-in")) "clock-in" else "clock-out"
-        try {
-            c.send(ApiClient.Request(ApiClient.Method.POST, p.path, body = ApiClient.Body.Json(p.body)))
-            store.dequeue(p.id)
-            pending = null
-            env.toasts.show("Your $label from ${MeFormat.whenAt(Instant.ofEpochSecond(p.recordedAt))} has been sent.")
-            status.reload()
-        } catch (e: ApiError) {
-            if (!e.isOffline) {
-                store.dequeue(p.id)
+        when (val outcome = store.send(p.id, OfflineStore.transport(c))) {
+            OfflineStore.SendOutcome.Sent, OfflineStore.SendOutcome.SentButNotCleared -> {
                 pending = null
-                env.toasts.show("The saved punch could not be recorded: ${e.message}", StatusTone.DANGER)
+                env.toasts.show("Your $label from ${MeFormat.whenAt(Instant.ofEpochSecond(p.recordedAt))} has been sent.")
+                status.reload()
             }
+            is OfflineStore.SendOutcome.Refused -> {
+                pending = null
+                env.toasts.show("The saved punch could not be recorded: ${outcome.message}", StatusTone.DANGER)
+            }
+            OfflineStore.SendOutcome.KeptForRetry ->
+                if (isOnline) env.toasts.show("Your saved punch is still on this device. Try sending it again.", StatusTone.WARNING)
+            OfflineStore.SendOutcome.AlreadySending -> Unit // the automatic replay has it
+            OfflineStore.SendOutcome.NotQueued -> { loadPending(); status.reload() }
+            OfflineStore.SendOutcome.Unreadable ->
+                env.toasts.show("Changes saved on this device could not be read. Ask a manager for help.", StatusTone.DANGER)
         }
     }
     LaunchedEffect(Unit) {
@@ -260,7 +268,10 @@ internal fun ClockScreen() {
                 val store = env.offline
                 if (e.isOffline && !force && store != null) {
                     val op = OfflineStore.PendingOperation(kind = "punch", method = "POST", path = path, body = json, dedupeKey = "punch")
-                    store.enqueue(op)
+                    if (!store.enqueue(op)) {
+                        env.toasts.show("No signal, and your punch could not be saved on this device. Try again when you are back online.", StatusTone.DANGER)
+                        return
+                    }
                     pending = op
                     env.toasts.show(if (active != null) "No signal. Your clock-out is saved and will be sent when you are back online." else "No signal. Your clock-in is saved and will be sent when you are back online.", StatusTone.INFO)
                 } else {

@@ -4,15 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,25 +33,24 @@ import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.SessionPolicy
 import ke.co.bethanyhouse.hub.core.get
 import ke.co.bethanyhouse.hub.core.jsonOf
-import ke.co.bethanyhouse.hub.core.toRecords
 import ke.co.bethanyhouse.hub.ui.Palette
 import ke.co.bethanyhouse.hub.ui.Space
 import ke.co.bethanyhouse.hub.ui.StatusTone
-import ke.co.bethanyhouse.hub.ui.components.ConfirmButton
 import ke.co.bethanyhouse.hub.ui.components.DateText
 import ke.co.bethanyhouse.hub.ui.components.DetailRow
-import ke.co.bethanyhouse.hub.ui.components.EmptyState
 import ke.co.bethanyhouse.hub.ui.components.FieldError
-import ke.co.bethanyhouse.hub.ui.components.LoadableView
 import ke.co.bethanyhouse.hub.ui.components.Page
-import ke.co.bethanyhouse.hub.ui.components.Resource
 import ke.co.bethanyhouse.hub.ui.components.SectionCard
 import ke.co.bethanyhouse.hub.ui.components.StatusBadge
 import ke.co.bethanyhouse.hub.ui.hub
 import ke.co.bethanyhouse.hub.ui.shell.FeatureRegistry
 import kotlinx.coroutines.launch
 
-/** Profile & security (/settings/profile): the person, sessions, named devices, password, sign-in safety. */
+/**
+ * Profile & security (/settings/profile): the person, password, sign-in safety.
+ * Sessions and named devices are not shown in the apps (owner, 2026-11-24,
+ * matching iOS); they stay on the console's Setup › Profile page.
+ */
 object ProfileFeature {
     fun register() { FeatureRegistry.register(Route.Profile) { ProfileScreen() } }
 }
@@ -64,15 +58,13 @@ object ProfileFeature {
 @Composable
 fun ProfileScreen() {
     val env = LocalEnv.current
-    val scope = rememberCoroutineScope()
     val snapshot by env.session.snapshot.collectAsStateWithLifecycle()
     val me = snapshot.me ?: return
-    val sessions = remember { Resource(scope) { env.client.get("/v1/admin/profile/sessions").json["data"].toRecords() } }
-    val devices = remember { Resource(scope) { val j = env.client.get("/v1/admin/profile/devices").json; (j["data"] ?: j).toRecords() } }
     var showPassword by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { sessions.load(); devices.load() }
+    // Opening the page re-reads the person, so the sign-in safety badges are current.
+    LaunchedEffect(Unit) { env.session.refreshMe(false) }
 
-    Page("My profile", refresh = { env.session.refreshMe(false); sessions.reload(); devices.reload() }) {
+    Page("My profile", refresh = { env.session.refreshMe(false) }) {
         SectionCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Palette.brand, modifier = Modifier.size(44.dp))
@@ -93,43 +85,7 @@ fun ProfileScreen() {
             if (me.twoFactorEnabled) me.recoveryCodesLeft?.let { DetailRow("Recovery codes left", it.toString()) }
             DetailRow("Terminal PIN") { StatusBadge(if (me.terminalPinSet) "set" else "not set", if (me.terminalPinSet) StatusTone.SUCCESS else StatusTone.NEUTRAL) }
             OutlinedButton(onClick = { showPassword = true }) { Text("Change password…") }
-            Text("Two-step setup, passkeys and the terminal PIN are managed from Setup › Profile in the console until their native screens ship.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
-        }
-
-        SectionCard("Sessions") {
-            LoadableView(sessions.state, retry = { sessions.load() }, isEmpty = { it.isEmpty() }, empty = { EmptyState("No other sessions", icon = Icons.Default.Computer) }) { rows ->
-                rows.forEach { s ->
-                    val current = s.bool("is_current") == true
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(if (current) Icons.Default.CheckCircle else Icons.Default.Computer, contentDescription = null, tint = if (current) Palette.success else MaterialTheme.hub.textTertiary)
-                        Spacer(Modifier.width(Space.m))
-                        Column(Modifier.weight(1f)) {
-                            Text(s.string("device") ?: s.string("agent") ?: "Session", style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                            Text("${s.string("ip") ?: ""} · last used ${s.string("last_used") ?: "—"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
-                        }
-                        if (!current) TextButton(onClick = { scope.launch { try { env.client.post("/v1/admin/profile/sessions/${s.id}/revoke"); env.toasts.show("Session revoked"); sessions.reload() } catch (e: ApiError) { env.toasts.error(e) } } }) { Text("Revoke") }
-                    }
-                }
-                ConfirmButton("Revoke all other sessions", "Every other device will be signed out.", destructive = true, action = {
-                    try { env.client.post("/v1/admin/profile/sessions/revoke-all"); env.toasts.show("Other sessions revoked"); sessions.reload() } catch (e: ApiError) { env.toasts.error(e) }
-                }) { Text("Revoke all other sessions") }
-            }
-        }
-
-        SectionCard("Named devices") {
-            LoadableView(devices.state, retry = { devices.load() }, isEmpty = { it.isEmpty() }, empty = { EmptyState("No named devices yet", icon = Icons.Default.PhoneAndroid) }) { rows ->
-                rows.forEach { d ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = MaterialTheme.hub.textTertiary)
-                        Spacer(Modifier.width(Space.m))
-                        Column(Modifier.weight(1f)) {
-                            Text(d.string("name") ?: d.string("label") ?: "Device", style = MaterialTheme.typography.bodyMedium)
-                            Text(d.string("last_seen") ?: d.string("agent") ?: "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
-                        }
-                        if (d.string("id") == env.device.id) StatusBadge("this device", StatusTone.SUCCESS)
-                    }
-                }
-            }
+            Text("Two-step setup, passkeys, the terminal PIN, signed-in sessions and named devices are managed from Setup › Profile in the console.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
         }
     }
 

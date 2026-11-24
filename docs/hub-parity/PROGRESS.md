@@ -1,5 +1,12 @@
 # Tailors Hub audit progress
 
+### Profile and employment redesign — 24 November 2026, Codex (verification open)
+
+- Profile polish: aligned profile action widths, compacted the passkey empty state, styled security actions, clarified the personal-details heading and placed the activity empty state in a card. TailorsMobile simulator build succeeded and the app was launched. Signed-in visual and interaction checks remain open.
+- Follow-up: profile editing now blocks saving when the profile cannot load and offers retry; missing emergency contact has an add/edit prompt, and recent activity shows date and time. TailorsMobile simulator build passed. The app launched to sign-in; the follow-up has not been checked in signed-in screens. Deduction enrollment, photo upload and security interactions remain unverified.
+- Apple profile groups the existing sign-in controls, removes sessions and named devices from the page, adds a photo-library picker, and displays only populated employment fields and identifiers. Activity remains one tab with the latest 20 actions. Existing server security and permission rules remain in place.
+- TailorsMobile simulator build and HubMac build passed. The iPhone 17 Pro simulator launched to sign-in; signed-in screens, photo upload, security actions and employment states have not been verified. Deduction enrollment is not established by the presence of an identifier; the current display only hides missing identifiers, so enrollment-based filtering remains open.
+
 ### Cleaner My Tasks and stage colors — 24 November 2026, Codex
 
 - Refined My Tasks spacing and white cards; stage icons use distinct theme colors when active, unfinished stages are subdued, and completed status is green. Recorded dates and times are orange. The stage journey uses the same icon colors. Existing stage actions and status labels remain.
@@ -238,3 +245,39 @@ a failed status refresh before the tap. The five `ClockGateTests` and nine
 and replay timestamp cases. Airplane-mode reachability changes and production
 attendance processing were outside this fixture run. Dark appearance, larger
 text, iPad, empty, and offline job-detail states remain open.
+
+### Android offline queue — 24 November 2026, Claude (done)
+
+Ported the iOS queue fixes to Android, same rules on both platforms:
+
+- **One sending path.** `OfflineStore.send(id, transport)` is used by the
+  automatic replay and by the clock's Send now; an operation already in
+  flight answers `AlreadySending` instead of being posted twice.
+- **No resend after a failed rewrite.** Accepted but not cleared from disk
+  (`SentButNotCleared`) is hidden and never sent again while the app runs; the
+  next successful write drops it. Writes go through a temporary file.
+- **Unreadable is not empty.** `pendingChecked()` throws `QueueUnreadable`;
+  replay reports it, enqueue refuses to overwrite it, the top bar says "saved
+  changes unreadable", and sign-out warns instead of reading 0.
+- **Only a final 4xx drops work.** Before, the clock deleted a saved punch on
+  any non-offline error, a 500 included. Now 401, 408, 423, 429 and 5xx keep
+  it (`isFinalRefusal`, same list as iOS).
+- A failed enqueue (clock punch, task update) now says it was not saved.
+
+Verified here: `OfflineStoreTest` 9/9, each case mutation-checked (in-flight
+guard, delivered set, unreadable-as-empty, old refusal list); core 46/46;
+app `testHubDebugUnitTest` 265/265 (one run failed `KioskSetUpTest` on
+timing; it passed alone on this tree and on the base, and on a full re-run);
+`assembleHubDebug` and `assembleTailorsDebug` build.
+**Not verified:** on a phone or emulator. Server idempotency for a replayed
+punch remains UNKNOWN — NEEDS VERIFICATION.
+
+### Profile: sessions and named devices removed on Android — 24 November 2026, Claude
+
+Owner decision (2026-11-24): the apps' own profile page no longer shows
+Sessions or Named devices, matching Codex's iOS change. People manage them on
+the console's Setup › Profile page; the Android note now says so. Setup ›
+Users (a manager's per-person sessions) is unchanged. The page re-reads the
+person on open so the sign-in safety badges are current (and the route render
+test still sees a Hub request). App tests 265/265; both flavours build.
+Not verified on a device.

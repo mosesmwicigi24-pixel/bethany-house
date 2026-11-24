@@ -1,6 +1,7 @@
 import SwiftUI
 import BethanyKit
 import UniformTypeIdentifiers
+import PhotosUI
 
 /// Profile & security (/settings/profile): the person, their sessions and
 /// named devices, password, and sign-in safety (2FA status, recovery codes).
@@ -13,11 +14,10 @@ enum ProfileFeature {
 
 struct ProfileView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var sessions: Resource<[Record]>?
-    @State private var devices: Resource<[ProfileDevice]>?
+    @State private var photoItem: PhotosPickerItem?
+    @State private var uploadingPhoto = false
     @State private var showPassword = false
     @State private var showEdit = false
-    @State private var renaming: ProfileDevice?
     /// The console's profile tabs, less 2FA/passkeys/PIN (their own slice): see docs/MIGRATION_PROGRESS.md.
     enum Tab: Hashable { case profile, employment, activity }
     @State private var tab: Tab = .profile
@@ -31,17 +31,12 @@ struct ProfileView: View {
             case .profile: profileTab
             }
         }
-        .task {
-            let c = env.session.client
-            if sessions == nil {
-                sessions = Resource { try (await c.get("/v1/admin/profile/sessions").json?["data"]?.decode([Record].self)) ?? [] }
-                devices = Resource { ProfileDevice.rows(try await c.get("/v1/admin/profile/devices").json ?? .null) }
-                sessions?.load(); devices?.load()
-            }
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            Task { await uploadPhoto(item) }
         }
         .sheet(isPresented: $showPassword) { ChangePasswordView() }
         .sheet(isPresented: $showEdit) { EditProfileSheet() }
-        .sheet(item: $renaming) { d in RenameDeviceSheet(device: d) { devices?.load() } }
     }
 
     @ViewBuilder
@@ -49,109 +44,51 @@ struct ProfileView: View {
             if let me = env.session.me {
                 SectionCard {
                     HStack(spacing: Theme.Space.l) {
-                        Image(systemName: "person.crop.circle.fill").font(.system(size: 44)).foregroundStyle(Theme.Palette.brand)
-                        VStack(alignment: .leading, spacing: 2) {
+                        PersonAvatar(name: me.name, url: me.avatarUrl, size: 64)
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(me.name).font(Theme.Font.display(20))
                             Text(me.email).font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary)
-                            HStack { ForEach(me.roleNames, id: \.self) { StatusBadge($0, tone: .info) } }
+                            if let outlet = me.outlet { Text(outlet.name).font(Theme.Font.caption).foregroundStyle(Theme.textTertiary) }
                         }
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
-                    if let outlet = me.outlet { DetailRow("Outlet", outlet.name) }
-                    if let policy = me.sessionPolicy {
-                        DetailRow("Session limits", "Idle \(policy.idleMinutes) min (\(policy.onIdle == .pinLock ? "PIN lock" : "sign out")), \(policy.absoluteMinutes / 60) h absolute")
+                    Button { showEdit = true } label: { Label("Edit details & preferences", systemImage: "pencil").frame(maxWidth: .infinity, minHeight: 32) }
+                        .buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        Label(uploadingPhoto ? "Uploading photo…" : "Change photo", systemImage: "camera").frame(maxWidth: .infinity, minHeight: 32)
                     }
-                    if let exp = env.session.tokenExpiresAt { DetailRow("This sign-in renews until") { DateText(exp) } }
-                    HStack {
-                        Button("Edit details & preferences…") { showEdit = true }
-                        // POST profile/avatar (multipart `avatar`): jpeg, png or webp, up to 2 MB — the server's rule.
-                        SalesFilePickButton(label: "Change photo", types: [.jpeg, .png, .webP]) { files in
-                            guard let f = files.first else { return }
-                            guard f.data.count <= 2 * 1024 * 1024 else { env.toasts.show("The photo must be 2 MB or smaller.", tone: .warning); return }
-                            Task {
-                                do {
-                                    let r = try await env.session.client.send(.init(.post, "/v1/admin/profile/avatar", body: .multipart([f.part(named: "avatar")])))
-                                    toastResult(env, r, fallback: "Photo updated"); await env.session.refreshMe()
-                                } catch { env.toasts.error(error) }
-                            }
-                        }
-                    }
-                    .font(Theme.Font.secondary)
+                    .buttonStyle(.bordered).disabled(uploadingPhoto)
                 }
+                SignInSafetySection(twoFactorOn: me.twoFactorEnabled, pinSet: me.terminalPinSet, changePassword: { showPassword = true })
 
-                SectionCard("Sign-in safety") {
-                    DetailRow("Two-step sign-in") {
-                        StatusBadge(me.twoFactorEnabled ? "on" : (me.twoFactorRequired ? "required" : "off"), tone: me.twoFactorEnabled ? .success : (me.twoFactorRequired ? .warning : .neutral))
-                    }
-                    if me.twoFactorEnabled, let left = me.recoveryCodesLeft {
-                        DetailRow("Recovery codes left", "\(left)")
-                    }
-                    DetailRow("Terminal PIN") { StatusBadge(me.terminalPinSet ? "set" : "not set", tone: me.terminalPinSet ? .success : .neutral) }
-                    Button("Change password…") { showPassword = true }
-                }
-                // Two-step sign-in, recovery codes, passkeys and the PIN (owner-approved slice 6).
-                SignInSafetySection(twoFactorOn: me.twoFactorEnabled, pinSet: me.terminalPinSet)
-
-                if let sessions {
-                    SectionCard("Sessions") {
-                        LoadableView(sessions.state, retry: { sessions.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No other sessions", symbol: "desktopcomputer") }) { rows in
-                            ForEach(rows) { s in
-                                HStack {
-                                    Image(systemName: s["is_current"]?.bool == true ? "checkmark.circle.fill" : "desktopcomputer").foregroundStyle(s["is_current"]?.bool == true ? Theme.Palette.success : Theme.textTertiary)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(s.string("device") ?? s.string("agent") ?? "Session").font(Theme.Font.body).lineLimit(1)
-                                        Text("\(s.string("ip") ?? "") · last used \(s.string("last_used") ?? "—")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                                    }
-                                    Spacer()
-                                    if s["is_current"]?.bool != true {
-                                        Button("Revoke") { Task { await revoke(s.id) } }.font(Theme.Font.secondary)
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            ConfirmButton("Revoke all other sessions", message: "Every other device will be signed out.", destructive: true, action: { await revokeAll() }) { Text("Revoke all other sessions") }
-                        }
-                    }
-                }
-
-                if let devices {
-                    SectionCard("Named devices") {
-                        LoadableView(devices.state, retry: { devices.load() }, isEmpty: { $0.isEmpty }, empty: { EmptyState("No named devices yet", symbol: "iphone") }) { rows in
-                            ForEach(rows) { d in
-                                HStack {
-                                    Image(systemName: "iphone").foregroundStyle(Theme.textTertiary)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(d.name ?? "Not named").font(Theme.Font.body).italic(d.name == nil)
-                                        Text([d.label, d.lastSeen.map { "last seen \($0)" }, d.nameSource == "admin" ? d.namedBy.map { "named by \($0)" } : nil].compactMap { $0 }.joined(separator: " · "))
-                                            .font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
-                                    }
-                                    Spacer()
-                                    if d.isCurrent { StatusBadge("this device", tone: .success) }
-                                    if d.canRename { Button(d.name == nil ? "Name it" : "Rename") { renaming = d }.font(Theme.Font.secondary) }
-                                    if d.canRemove {
-                                        ConfirmButton("Remove", message: "Remove \(d.label)? Its sessions end, and the next sign-in on it is treated as a new device.", destructive: true, action: { await remove(d) }) { Text("Remove") }
-                                            .font(Theme.Font.secondary)
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-                    }
-                }
             }
     }
 
-    private func remove(_ d: ProfileDevice) async {
-        do { let r = try await env.session.client.delete("/v1/admin/profile/devices/\(d.id)"); toastResult(env, r, fallback: "Device removed"); devices?.load() } catch { env.toasts.error(error) }
+    private func uploadPhoto(_ item: PhotosPickerItem) async {
+        uploadingPhoto = true
+        defer { uploadingPhoto = false; photoItem = nil }
+        do {
+            guard let original = try await item.loadTransferable(type: Data.self) else {
+                env.toasts.show("Could not read this photo. Please try another.", tone: .warning); return
+            }
+            #if os(macOS)
+            guard let image = NSImage(data: original), let tiff = image.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff), let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) else {
+                env.toasts.show("Could not prepare this photo. Please try another.", tone: .warning); return
+            }
+            #else
+            guard let image = UIImage(data: original), let data = image.jpegData(compressionQuality: 0.8) else {
+                env.toasts.show("Could not prepare this photo. Please try another.", tone: .warning); return
+            }
+            #endif
+            guard data.count <= 2 * 1024 * 1024 else { env.toasts.show("The photo must be 2 MB or smaller. Please choose a smaller photo.", tone: .warning); return }
+            let file = SalesPickedFile(data: data, filename: "avatar.jpg", mimeType: "image/jpeg")
+            let response = try await env.session.client.send(.init(.post, "/v1/admin/profile/avatar", body: .multipart([file.part(named: "avatar")])))
+            toastResult(env, response, fallback: "Photo updated")
+            await env.session.refreshMe()
+        } catch { env.toasts.error(error) }
     }
 
-    private func revoke(_ id: String) async {
-        do { _ = try await env.session.client.post("/v1/admin/profile/sessions/\(id)/revoke"); env.toasts.show("Session revoked"); sessions?.load() } catch { env.toasts.error(error) }
-    }
-
-    private func revokeAll() async {
-        do { _ = try await env.session.client.post("/v1/admin/profile/sessions/revoke-all"); env.toasts.show("Other sessions revoked"); sessions?.load() } catch { env.toasts.error(error) }
-    }
 }
 
 struct ChangePasswordView: View {

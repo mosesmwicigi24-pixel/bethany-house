@@ -5,12 +5,15 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonElement
 import java.io.File
 import java.time.Instant
@@ -26,8 +29,10 @@ import java.util.UUID
  * and purged on sign-out. Files live in the app's private storage (encrypted
  * at rest by Android file-based encryption).
  */
-class OfflineStore(context: Context, userId: Int) {
-    private val root: File = File(context.filesDir, "hub/user-$userId").apply { mkdirs() }
+class OfflineStore internal constructor(private val root: File) {
+    constructor(context: Context, userId: Int) : this(File(context.filesDir, "hub/user-$userId"))
+
+    init { root.mkdirs() }
 
     private fun fileFor(key: String) = File(root, key.replace('/', '_').replace('?', '_') + ".json")
 
@@ -64,49 +69,196 @@ class OfflineStore(context: Context, userId: Int) {
     )
 
     private val queueFile get() = File(root, "pending-queue.json")
+    private val queueSerializer = ListSerializer(PendingOperation.serializer())
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
+    /** The saved queue could not be read: `pendingCount` is not known. */
+    private val _pendingUnreadable = MutableStateFlow(false)
+    val pendingUnreadable: StateFlow<Boolean> = _pendingUnreadable.asStateFlow()
 
-    suspend fun pending(): List<PendingOperation> = withContext(Dispatchers.IO) {
-        if (!queueFile.exists()) return@withContext emptyList()
-        runCatching { HubJson.json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(PendingOperation.serializer()), queueFile.readText()) }.getOrDefault(emptyList())
-            .also { _pendingCount.value = it.size }
+    /** The stored queue exists but cannot be read. It is never treated as empty. */
+    class QueueUnreadable(cause: Throwable) : Exception("Changes saved on this device could not be read.", cause)
+
+    // Guards the queue file, `inFlight` and `delivered`. Plain blocking lock:
+    // the file is small and every public call runs on Dispatchers.IO.
+    private val guard = Any()
+    /** Operations being sent right now; a second sender gets `AlreadySending`. */
+    private val inFlight = mutableSetOf<String>()
+    /**
+     * Sent and accepted (or finally refused), but the queue file could not be
+     * rewritten. Hidden from `pendingChecked()` and never sent again while the
+     * app runs; the next successful write clears it from disk.
+     */
+    private val delivered = mutableSetOf<String>()
+
+    /** The queue as best known. An unreadable queue reads as empty here: use `pendingChecked()` where "nothing waiting" must be true. */
+    suspend fun pending(): List<PendingOperation> = try { pendingChecked() } catch (e: QueueUnreadable) { emptyList() }
+
+    /** The queue, minus anything already delivered. Throws [QueueUnreadable] rather than answer "empty" for a file it cannot read. */
+    suspend fun pendingChecked(): List<PendingOperation> = withContext(Dispatchers.IO) {
+        synchronized(guard) { readLocked().filterNot { it.id in delivered } }
     }
 
-    private suspend fun write(q: List<PendingOperation>) = withContext(Dispatchers.IO) {
-        queueFile.writeText(HubJson.json.encodeToString(kotlinx.serialization.builtins.ListSerializer(PendingOperation.serializer()), q))
-        _pendingCount.value = q.size
+    private fun readLocked(): List<PendingOperation> {
+        val q = try {
+            if (!queueFile.exists()) emptyList() else HubJson.json.decodeFromString(queueSerializer, queueFile.readText())
+        } catch (e: Exception) {
+            _pendingUnreadable.value = true
+            throw QueueUnreadable(e)
+        }
+        _pendingUnreadable.value = false
+        _pendingCount.value = q.count { it.id !in delivered }
+        return q
     }
 
-    suspend fun enqueue(op: PendingOperation) {
-        val q = pending().toMutableList()
-        op.dedupeKey?.let { k -> q.removeAll { it.dedupeKey == k } }
-        q += op
-        write(q)
+    /** Writes through a temporary file, dropping anything delivered; once that write succeeds, nothing delivered remains on disk. */
+    private fun storeLocked(q: List<PendingOperation>) {
+        val kept = q.filterNot { it.id in delivered }
+        root.mkdirs()
+        val tmp = File(root, "pending-queue.json.tmp")
+        tmp.writeText(HubJson.json.encodeToString(queueSerializer, kept))
+        if (!tmp.renameTo(queueFile)) { tmp.delete(); throw java.io.IOException("Could not replace the saved queue.") }
+        delivered.clear()
+        _pendingCount.value = kept.size
     }
 
-    suspend fun dequeue(id: String) { write(pending().filterNot { it.id == id }) }
-
-    data class ReplayResult(val sent: List<PendingOperation>, val refused: List<Pair<PendingOperation, ApiError>>)
-
-    /** Replays the queue: a final 4xx drops the item (the server refused it); a transport failure stops and keeps the rest. */
-    suspend fun replay(client: ApiClient): ReplayResult {
-        val sent = mutableListOf<PendingOperation>()
-        val refused = mutableListOf<Pair<PendingOperation, ApiError>>()
-        for (op in pending()) {
-            val method = runCatching { ApiClient.Method.valueOf(op.method) }.getOrNull()
-            if (method == null) { dequeue(op.id); continue }
+    /** True only once the new queue is stored. An unreadable queue is never replaced, since it may hold work still owed to the Hub. */
+    suspend fun enqueue(op: PendingOperation): Boolean = withContext(Dispatchers.IO) {
+        synchronized(guard) {
             try {
-                client.send(ApiClient.Request(method, op.path, body = ApiClient.Body.Json(op.body)))
-                dequeue(op.id); sent += op
-            } catch (e: ApiError) {
-                if (e.status in 400..499 && e.status != 401 && e.status != 423) { dequeue(op.id); refused += op to e } else break
+                val q = readLocked().toMutableList()
+                op.dedupeKey?.let { k -> q.removeAll { it.dedupeKey == k } }
+                q += op
+                storeLocked(q)
+                true
+            } catch (e: Exception) { false }
+        }
+    }
+
+    /** Removes an operation. False when the queue could not be read or rewritten; it then stays on disk. */
+    suspend fun dequeue(id: String): Boolean = withContext(Dispatchers.IO) { synchronized(guard) { dequeueLocked(id) } }
+
+    private fun dequeueLocked(id: String): Boolean = try {
+        val q = readLocked()
+        if (q.any { it.id == id }) storeLocked(q.filterNot { it.id == id })
+        true
+    } catch (e: Exception) { false }
+
+    // ── Sending: one path for replay and for a screen's "Send now" ─────────────
+
+    sealed interface SendOutcome {
+        /** Accepted by the server and removed from the queue. */
+        data object Sent : SendOutcome
+        /** Accepted, but the queue file could not be updated. Not sent again while the app runs. */
+        data object SentButNotCleared : SendOutcome
+        /** The server refused it for good ([isFinalRefusal]); removed. */
+        data class Refused(val status: Int, val message: String) : SendOutcome
+        /** Not sent (offline, temporary error, session ended); kept for retry. */
+        data object KeptForRetry : SendOutcome
+        /** Another sender has this operation in flight. */
+        data object AlreadySending : SendOutcome
+        /** No longer queued (sent, replaced by a newer value, or never queued). */
+        data object NotQueued : SendOutcome
+        /** The stored queue could not be read. */
+        data object Unreadable : SendOutcome
+    }
+
+    /** Sends one queued operation, never twice at once. Replay and the clock's "Send now" both come here. */
+    suspend fun send(id: String, transport: suspend (PendingOperation) -> Unit): SendOutcome {
+        val op = withContext(Dispatchers.IO) {
+            synchronized(guard) {
+                if (id in inFlight) return@withContext SendOutcome.AlreadySending
+                val q = try { readLocked() } catch (e: QueueUnreadable) { return@withContext SendOutcome.Unreadable }
+                val op = q.firstOrNull { it.id == id && it.id !in delivered } ?: return@withContext SendOutcome.NotQueued
+                inFlight += id
+                op
             }
         }
-        return ReplayResult(sent, refused)
+        if (op is SendOutcome) return op
+        op as PendingOperation
+        try {
+            try {
+                transport(op)
+            } catch (e: ApiError) {
+                if (!isFinalRefusal(e.status)) return SendOutcome.KeptForRetry
+                withContext(NonCancellable + Dispatchers.IO) { synchronized(guard) { if (!dequeueLocked(id)) markDeliveredLocked(id) } }
+                return SendOutcome.Refused(e.status, e.message)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return SendOutcome.KeptForRetry
+            }
+            return withContext(NonCancellable + Dispatchers.IO) {
+                synchronized(guard) {
+                    if (dequeueLocked(id)) SendOutcome.Sent
+                    else {
+                        markDeliveredLocked(id)
+                        SendOutcome.SentButNotCleared
+                    }
+                }
+            }
+        } finally {
+            synchronized(guard) { inFlight -= id }
+        }
     }
 
-    suspend fun purge() = withContext(Dispatchers.IO) { root.deleteRecursively(); Unit }
+    private fun markDeliveredLocked(id: String) {
+        delivered += id
+        _pendingCount.value = (_pendingCount.value - 1).coerceAtLeast(0)
+    }
+
+    data class ReplayResult(
+        val sent: List<PendingOperation> = emptyList(),
+        val refused: List<Pair<PendingOperation, ApiError>> = emptyList(),
+        /** Accepted by the server but still in the stored queue file. */
+        val notCleared: List<PendingOperation> = emptyList(),
+        /** The stored queue could not be read: nothing was sent, nothing lost. */
+        val unreadable: Boolean = false,
+    )
+
+    suspend fun replay(client: ApiClient): ReplayResult = replay(transport(client))
+
+    /**
+     * Replays the queue in order through [send]. A final 4xx drops the item (the
+     * caller reports it as refused); anything else stops and keeps the rest. An
+     * unreadable queue is reported, never treated as empty.
+     */
+    suspend fun replay(transport: suspend (PendingOperation) -> Unit): ReplayResult {
+        val sent = mutableListOf<PendingOperation>()
+        val refused = mutableListOf<Pair<PendingOperation, ApiError>>()
+        val notCleared = mutableListOf<PendingOperation>()
+        fun result(unreadable: Boolean = false) = ReplayResult(sent, refused, notCleared, unreadable)
+        val queue = try { pendingChecked() } catch (e: QueueUnreadable) { return result(unreadable = true) }
+        for (op in queue) {
+            when (val outcome = send(op.id, transport)) {
+                SendOutcome.Sent -> sent += op
+                SendOutcome.SentButNotCleared -> { sent += op; notCleared += op }
+                is SendOutcome.Refused -> refused += op to ApiError(outcome.status, outcome.message)
+                SendOutcome.NotQueued -> continue
+                // Another sender has this one: stop, so nothing after it reaches the server first.
+                SendOutcome.AlreadySending, SendOutcome.KeptForRetry -> return result()
+                SendOutcome.Unreadable -> return result(unreadable = true)
+            }
+        }
+        return result()
+    }
+
+    companion object {
+        /** The server said no for good. 401 (session), 408, 423 (PIN lock) and 429 are worth retrying. */
+        fun isFinalRefusal(status: Int) = status in 400..499 && status !in setOf(401, 408, 423, 429)
+
+        /** The Hub client as a transport. An unknown method can never be sent, so it is a final refusal. */
+        fun transport(client: ApiClient): suspend (PendingOperation) -> Unit = { op ->
+            val method = runCatching { ApiClient.Method.valueOf(op.method) }.getOrNull()
+                ?: throw ApiError(400, "This saved change cannot be sent (unknown method ${op.method}).")
+            client.send(ApiClient.Request(method, op.path, body = ApiClient.Body.Json(op.body)))
+        }
+    }
+
+    suspend fun purge() = withContext(Dispatchers.IO) {
+        synchronized(guard) { delivered.clear(); root.deleteRecursively() }
+        Unit
+    }
 }
 
 /** Reachability as the app shows it (status pill, pending badge). */
