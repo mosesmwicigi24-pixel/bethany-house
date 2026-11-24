@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Android parity with iPhone — 24 November 2026, Codex (in progress)
+
+- Auditing Android Tailors Hub against the iPhone experience; starting with the production calendar. Android offline queue files remain outside this work.
+- Calendar: hides the stage breakdown in Tailors Hub, adds a past-due summary, date grid, selected-day filtering and Today/Next deadline shortcuts. Tailors debug APK built, installed and launched on the Android emulator; signed-in calendar appearance and interactions remain unverified. My Tasks, calendar order navigation, profile and other screens still require parity work and verification.
+
 ### Profile and employment redesign — 24 November 2026, Codex (verification open)
 
 - Profile polish: aligned profile action widths, compacted the passkey empty state, styled security actions, clarified the personal-details heading and placed the activity empty state in a card. TailorsMobile simulator build succeeded and the app was launched. Signed-in visual and interaction checks remain open.
