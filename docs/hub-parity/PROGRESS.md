@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android time-clock presentation — 25 November 2026, Codex (claimed)
+
+- Taking read-only comparison of the Android time clock against iPhone for matching location and attendance states. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeClock.kt` and corresponding Android tests; no attendance or location policy changes. Test environment confirmed by owner.
+
 ### Android task-detail actions — 25 November 2026, Codex (claim released; verification open)
 
 - Tailors task-detail counters now display a progress bar and an explicit Update count → draft → Save count flow. Draft changes make no request until saved, failed saves retain the draft, and queued counts display a waiting-to-sync label. Pending status actions disable conflicting Tailors controls, and blocked stages cannot start from the Tailors UI. Hub's immediate counter remains unchanged.
