@@ -1,5 +1,11 @@
 # Tailors Hub audit progress
 
+### Stage spacing and text size — 24 November 2026, Codex
+
+- Added spacing and hierarchy to task stage rows. The status line shows the Hub's completion time for completed stages or the first start time for in-progress/paused stages, when available, using Nairobi time; no timestamp is fabricated.
+- Added Tailors Hub Text size settings in iPhone More and the iPad sidebar. A 9–36 pt sample slider maps to iOS Dynamic Type sizes, with a device-setting option. The sample uses the exact selected point size; individual app text styles scale differently. The choice is stored on the device.
+- TailorsMobile iPhone simulator build passed. With fictional data, opened the settings, moved the slider to 9 and 36, saw the preview and app text scale without navigating away, and restored the device setting. The sample order did not include timestamps, so the timestamp display remains unverified in the simulator. iPad, dark mode and other screens at large text sizes remain unverified.
+
 ### Stage journey overview — 24 November 2026, Codex
 
 - Added a horizontal, connected stage journey card below Your stages. It uses the existing assigned-stage sequence, stage icons and explicit statuses; the detailed stage rows and their actions remain available. The connecting line is neutral and does not imply that intermediate stages are complete.

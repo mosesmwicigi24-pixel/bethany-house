@@ -24,6 +24,7 @@ public struct MobileShell: View {
                 PhoneShell()
             }
         }
+        .modifier(TailorsTextSizePreference(enabled: env.session.flavor == .tailors))
         .securityPrompts()
         .tracksActivity()
         .overlay(alignment: .bottom) { ToastHost(env.toasts).padding(.bottom, 60) }
@@ -112,6 +113,13 @@ struct MoreList: View {
                 }
             }
             .task { await env.refreshCounts() }
+            if env.session.flavor == .tailors {
+                Section("App settings") {
+                    NavigationLink { TailorsTextSizeSettings() } label: {
+                        Label("Text size", systemImage: "textformat.size")
+                    }
+                }
+            }
             Section {
                 ForEach(env.session.flavor.userMenu) { item in row(item) }
                 Button(role: .destructive) { Task { unsent = await env.requestSignOut() } } label: { Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right") }
@@ -153,6 +161,7 @@ struct PadShell: View {
     @Environment(AppEnvironment.self) private var env
     @State private var visibility: NavigationSplitViewVisibility = .automatic
     @State private var unsent = 0
+    @State private var showTextSize = false
 
     var body: some View {
         @Bindable var nav = env.navigator
@@ -164,6 +173,11 @@ struct PadShell: View {
                             NavigationLink(value: item.route) { Label(item.label, systemImage: item.icon) }
                                 .badge(item.route == .peopleRequests ? env.peopleRequests : item.route == .notifications ? env.unreadNotifications : 0)
                         }
+                    }
+                }
+                if env.session.flavor == .tailors {
+                    Section("App settings") {
+                        Button { showTextSize = true } label: { Label("Text size", systemImage: "textformat.size") }
                     }
                 }
             }
@@ -201,8 +215,70 @@ struct PadShell: View {
             }
         }
         .sheet(isPresented: $nav.searchPresented) { CommandPalette() }
+        .sheet(isPresented: $showTextSize) {
+            NavigationStack {
+                TailorsTextSizeSettings()
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showTextSize = false } } }
+            }
+        }
         .onAppear { if nav.selection == nil { nav.selection = env.session.home } }
         .modifier(SignOutGuard(unsent: $unsent))
+    }
+}
+
+private enum TailorsTextSize {
+    static func dynamicSize(for reference: Double) -> DynamicTypeSize {
+        let sizes: [DynamicTypeSize] = [.xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge,
+                                        .accessibility1, .accessibility2, .accessibility3, .accessibility4, .accessibility5]
+        let fraction = min(max((reference - 9) / 27, 0), 1)
+        return sizes[Int((fraction * Double(sizes.count - 1)).rounded())]
+    }
+}
+
+private struct TailorsTextSizePreference: ViewModifier {
+    let enabled: Bool
+    @Environment(\.dynamicTypeSize) private var systemSize
+    @AppStorage("tailors.textSize.useDevice") private var useDevice = true
+    @AppStorage("tailors.textSize.reference") private var reference = 17.0
+    func body(content: Content) -> some View {
+        content.dynamicTypeSize(enabled && !useDevice ? TailorsTextSize.dynamicSize(for: reference) : systemSize)
+    }
+}
+
+private struct TailorsTextSizeSettings: View {
+    @AppStorage("tailors.textSize.useDevice") private var useDevice = true
+    @AppStorage("tailors.textSize.reference") private var reference = 17.0
+    var body: some View {
+        List {
+            Section {
+                Text("Choose a comfortable size for text throughout Tailors Hub.")
+                    .foregroundStyle(Theme.textSecondary)
+                Text("Your workshop, at a glance.")
+                    .font(useDevice ? .body.weight(.medium) : .system(size: reference, weight: .medium))
+                    .padding(.vertical, 6)
+            } header: { Text("Preview") }
+            Section {
+                Toggle("Use device setting", isOn: $useDevice)
+                    .tint(Theme.Palette.brandDeep)
+                HStack {
+                    Text("A").font(.caption)
+                    Slider(value: Binding(get: { reference }, set: { reference = $0; useDevice = false }), in: 9...36, step: 1)
+                        .tint(Theme.Palette.brandDeep)
+                        .accessibilityLabel("Text size reference")
+                        .accessibilityValue("\(Int(reference)) points")
+                    Text("A").font(.title2)
+                }
+                HStack {
+                    Text("9 pt")
+                    Spacer()
+                    Text(useDevice ? "Device setting" : "\(Int(reference)) pt sample")
+                    Spacer()
+                    Text("36 pt")
+                }.font(.caption).foregroundStyle(Theme.textSecondary)
+            } footer: { Text("The preview uses this point size. App text scales using iOS text styles, so individual labels may have different sizes. Use device setting follows your accessibility preferences.") }
+        }
+        .navigationTitle("Text size")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 #endif

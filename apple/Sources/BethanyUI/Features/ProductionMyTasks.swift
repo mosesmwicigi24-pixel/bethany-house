@@ -380,6 +380,7 @@ struct MyTasksView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Label("Your stages", systemImage: "list.bullet.clipboard")
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.Palette.brandDeep)
                     .accessibilityAddTraits(.isHeader)
                 ProgressView(value: Double(complete), total: Double(group.tasks.count)) {
                     Text("\(complete) of \(group.tasks.count) complete")
@@ -387,29 +388,27 @@ struct MyTasksView: View {
                 }
                 .tint(complete == group.tasks.count ? Theme.Palette.success : Theme.Palette.brandDeep)
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, 14)
 
             ForEach(group.tasks) { task in
                 let status = task.status
                 let finished = status == "completed"
                 let active = finished || status == "in_progress"
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     ProductionStageIcon(stage: task["stage"], tint: active ? Theme.Palette.brandDeep : Theme.textSecondary)
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(stageName(task))
-                            .font(.subheadline.weight(active ? .semibold : .regular))
+                            .font(.body.weight(active ? .semibold : .medium))
                             .foregroundStyle(active ? Theme.text : Theme.textSecondary)
-                        HStack(spacing: 5) {
-                            Text(stageTimelineLabel(status))
-                            if finished, let completed = task["completed_at"]?.date {
-                                Text("·")
-                                DateText(completed, style: .date)
-                            }
-                        }.font(.caption).foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(stageDetails(task))
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(stageName(task))
-                    .accessibilityValue(stageTimelineLabel(status))
+                    .accessibilityValue(stageDetails(task))
                     Spacer(minLength: 0)
                     if !group.history, finished, ProductionStatus.acceptsFloorWork(group.order["status"]?.string) {
                         Button { noteFor = task } label: {
@@ -426,7 +425,7 @@ struct MyTasksView: View {
                         .foregroundStyle(finished ? Theme.Palette.success : Theme.textSecondary.opacity(0.45))
                         .accessibilityHidden(true)
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, 11)
                 .frame(minHeight: Theme.tapTarget)
                 if task.id != group.tasks.last?.id {
                     Divider().padding(.leading, 38)
@@ -435,6 +434,28 @@ struct MyTasksView: View {
         }
         .padding(14)
         .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func stageDetails(_ task: Record) -> String {
+        let status = task.status
+        let timestamp: Date?
+        let label: String
+        if status == "completed" {
+            timestamp = task["completed_at"]?.date
+            label = "Done"
+        } else if status == "in_progress" || status == "paused" {
+            timestamp = task["started_at"]?.date
+            label = "\(stageTimelineLabel(status)) · Started"
+        } else {
+            return stageTimelineLabel(status)
+        }
+        guard let timestamp else { return stageTimelineLabel(status) }
+        let formatter = DateFormatter()
+        formatter.timeZone = HubDates.nairobi
+        formatter.locale = Locale(identifier: "en_KE")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return "\(label) · \(formatter.string(from: timestamp))"
     }
 
     private func stageTimelineLabel(_ status: String?) -> String {
