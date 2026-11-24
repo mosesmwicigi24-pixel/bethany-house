@@ -2,6 +2,8 @@ package ke.co.bethanyhouse.hub.ui.features.production
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -14,6 +16,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Note
@@ -331,7 +336,8 @@ internal fun taskSummary(group: TaskOrderGroup, history: Boolean): String {
 
 @Composable
 private fun TaskOrderHeader(o: JsonElement?) {
-    var specsOpen by remember { mutableStateOf(false) }
+    val tailors = LocalEnv.current.flavor == AppFlavor.TAILORS
+    var specsOpen by remember { mutableStateOf(tailors) }
     val name = o["product"]["translations"][0]["name"].str ?: o["product_name"].str ?: "Garment"
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -358,7 +364,23 @@ private fun TaskOrderHeader(o: JsonElement?) {
             TextButton(onClick = { specsOpen = !specsOpen }) { Text(if (specsOpen) "Hide specs & measurements" else "Specs & measurements") }
             if (specsOpen) {
                 measured.gender?.let { DetailRow("For", it.humanized) }
-                specs.forEach { (k, v) -> DetailRow(k.humanized, v) }
+                if (tailors) {
+                    o["specifications"].stringPairs.forEach { (key, value) -> DetailRow(key.humanized, value) }
+                    measured.body.chunked(2).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                            row.forEachIndexed { index, (key, value) ->
+                                Column(Modifier.weight(1f).background(MaterialTheme.hub.canvas, RoundedCornerShape(10.dp)).padding(Space.s), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(Icons.Default.Straighten, contentDescription = null, tint = if (index == 0) Palette.brand else Palette.info, modifier = Modifier.size(16.dp))
+                                        Text(key.humanized, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+                                    }
+                                    Text(value, style = MaterialTheme.typography.titleMedium)
+                                }
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                } else specs.forEach { (k, v) -> DetailRow(k.humanized, v) }
             }
         }
         // Notes keep their line breaks: a QC note and a rework reason are separate lines.
@@ -382,6 +404,14 @@ private fun TaskCard(task: Record, order: JsonElement?, pending: Boolean, onActi
 
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (env.flavor == AppFlavor.TAILORS) {
+                val symbol = when {
+                    stageName.contains("cut", ignoreCase = true) -> Icons.Default.ContentCut
+                    stageName.contains("quality", ignoreCase = true) || stageName.contains("inspection", ignoreCase = true) -> Icons.Default.VerifiedUser
+                    else -> Icons.Default.Build
+                }
+                Icon(symbol, contentDescription = null, tint = if (status == "completed") Palette.success else if (status == "in_progress") Palette.brand else MaterialTheme.hub.textTertiary, modifier = Modifier.size(20.dp))
+            }
             Text(stageName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             StatusBadge(status)
             if (pending) StatusBadge("waiting to send", StatusTone.AMBER)
