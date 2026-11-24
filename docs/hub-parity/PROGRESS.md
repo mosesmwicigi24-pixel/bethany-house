@@ -271,3 +271,13 @@ timing; it passed alone on this tree and on the base, and on a full re-run);
 `assembleHubDebug` and `assembleTailorsDebug` build.
 **Not verified:** on a phone or emulator. Server idempotency for a replayed
 punch remains UNKNOWN — NEEDS VERIFICATION.
+
+### Profile: sessions and named devices removed on Android — 24 November 2026, Claude
+
+Owner decision (2026-11-24): the apps' own profile page no longer shows
+Sessions or Named devices, matching Codex's iOS change. People manage them on
+the console's Setup › Profile page; the Android note now says so. Setup ›
+Users (a manager's per-person sessions) is unchanged. The page re-reads the
+person on open so the sign-in safety badges are current (and the route render
+test still sees a Hub request). App tests 265/265; both flavours build.
+Not verified on a device.
