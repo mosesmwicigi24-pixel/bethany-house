@@ -47,6 +47,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiClient
+import ke.co.bethanyhouse.hub.core.ClockGate
 import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.Geofence
 import ke.co.bethanyhouse.hub.core.HubDates
@@ -302,8 +303,9 @@ internal fun ClockScreen() {
         } catch (e: ApiError) { env.toasts.error(e) } finally { busy = false }
     }
 
-    val canPunch = fix != null && outlet != null && !busy && !mocked && (active != null || insideOrEdge)
-    val showForce = active == null && fix != null && outlet != null && canOverride && !mocked && (serverAsksOverride || !insideOrEdge)
+    val statusError = status.state.failure
+    val canPunch = ClockGate.statusUsable(data != null, statusError) && fix != null && outlet != null && !busy && !mocked && (active != null || insideOrEdge)
+    val showForce = ClockGate.forceAllowed(data != null, statusError) && active == null && fix != null && outlet != null && canOverride && !mocked && (serverAsksOverride || !insideOrEdge)
 
     Page("Time clock", subtitle = MeFormat.longDay(Instant.now()), refresh = { status.reload() }) {
         // Words for every state
