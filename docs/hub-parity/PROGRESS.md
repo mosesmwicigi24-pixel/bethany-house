@@ -2,6 +2,7 @@
 
 ### Profile and employment redesign — 24 November 2026, Codex (verification open)
 
+- Profile polish: aligned profile action widths, compacted the passkey empty state, styled security actions, clarified the personal-details heading and placed the activity empty state in a card. TailorsMobile simulator build succeeded and the app was launched. Signed-in visual and interaction checks remain open.
 - Follow-up: profile editing now blocks saving when the profile cannot load and offers retry; missing emergency contact has an add/edit prompt, and recent activity shows date and time. TailorsMobile simulator build passed. The app launched to sign-in; the follow-up has not been checked in signed-in screens. Deduction enrollment, photo upload and security interactions remain unverified.
 - Apple profile groups the existing sign-in controls, removes sessions and named devices from the page, adds a photo-library picker, and displays only populated employment fields and identifiers. Activity remains one tab with the latest 20 actions. Existing server security and permission rules remain in place.
 - TailorsMobile simulator build and HubMac build passed. The iPhone 17 Pro simulator launched to sign-in; signed-in screens, photo upload, security actions and employment states have not been verified. Deduction enrollment is not established by the presence of an identifier; the current display only hides missing identifiers, so enrollment-based filtering remains open.

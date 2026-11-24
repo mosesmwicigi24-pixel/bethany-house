@@ -118,7 +118,7 @@ struct MyEmploymentPanel: View {
                 if let value = me.payMethod, !value.isEmpty { DetailRow("Pay method", me.payMethodText) }
                 Text("Something wrong here? Ask whoever keeps the employee files; only they can change it.").font(Theme.Font.caption).foregroundStyle(Theme.textTertiary)
             }
-            SectionCard("Mine to keep") {
+            SectionCard("Personal details") {
                 if let dob = me.dateOfBirth, !dob.isEmpty { DetailRow("Date of birth", PayrollText.date(dob)) }
                 if let contact = [me.emergencyName, me.emergencyRelationship, me.emergencyPhone].compactMap({ $0?.nilIfEmpty }).joined(separator: " · ").nilIfEmpty {
                     DetailRow("Emergency contact", contact)
@@ -193,8 +193,12 @@ struct MyFileEditSheet: View {
 
 struct MyActivityPanel: View {
     var body: some View {
-        RemoteJSON("/v1/admin/profile/activity", query: ["per_page": "20"], emptyTitle: "No activity recorded yet.", isEmpty: { ProfileActivity.rows($0).isEmpty }) { j, _ in
-            SectionCard("Last 20 actions performed by your account") {
+        RemoteJSON("/v1/admin/profile/activity", query: ["per_page": "20"]) { j, _ in
+            SectionCard("Recent activity") {
+                Text("Your latest 20 account actions.").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary)
+                if ProfileActivity.rows(j).isEmpty {
+                    Label("No activity recorded yet.", systemImage: "clock").font(Theme.Font.secondary).foregroundStyle(Theme.textSecondary).padding(.vertical, Theme.Space.m)
+                }
                 ForEach(ProfileActivity.rows(j)) { a in
                     HStack {
                         Text(a.text).font(Theme.Font.body)

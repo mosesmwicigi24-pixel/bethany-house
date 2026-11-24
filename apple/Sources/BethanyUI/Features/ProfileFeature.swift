@@ -52,10 +52,10 @@ struct ProfileView: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    Button { showEdit = true } label: { Label("Edit details & preferences", systemImage: "pencil") }
+                    Button { showEdit = true } label: { Label("Edit details & preferences", systemImage: "pencil").frame(maxWidth: .infinity, minHeight: 32) }
                         .buttonStyle(.borderedProminent).tint(Theme.Palette.brand)
                     PhotosPicker(selection: $photoItem, matching: .images) {
-                        Label(uploadingPhoto ? "Uploading photo…" : "Change photo", systemImage: "camera")
+                        Label(uploadingPhoto ? "Uploading photo…" : "Change photo", systemImage: "camera").frame(maxWidth: .infinity, minHeight: 32)
                     }
                     .buttonStyle(.bordered).disabled(uploadingPhoto)
                 }
