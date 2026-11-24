@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### Android calendar presentation — 25 November 2026, Codex (claimed)
+### Android calendar presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking Android production calendar comparison against the iPhone 17. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionBoards.kt` and corresponding Android calendar tests. Compare date selection, event counts, empty states and order navigation without changing server data.
+- Added iPhone-style summary tiles, today outline and selected-date styling, monthly order count, compact order cards and a separate past-due list using existing schedule data. Android keeps 48dp date targets. Existing order resolution and permission checks remain in place.
+- Both Android debug builds and focused production tests passed; a Compose test verifies selecting a day filters orders and Show month restores the list. On the signed-in test emulator, visually checked the month and past-due card without changing an order. Reference screenshots and open gaps are recorded in `ANDROID_CHECKLIST.md`. Different months, calendar-to-task return, larger text, dark mode, TalkBack and error/offline states remain unverified. Claim released.
 
 ### Android time-clock presentation — 25 November 2026, Codex (claim released; verification open)
 

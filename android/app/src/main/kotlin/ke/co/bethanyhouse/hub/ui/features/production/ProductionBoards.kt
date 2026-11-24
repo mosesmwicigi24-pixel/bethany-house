@@ -1,6 +1,7 @@
 package ke.co.bethanyhouse.hub.ui.features.production
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -21,6 +24,8 @@ import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.ViewColumn
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -226,26 +231,32 @@ internal fun ProductionCalendarScreen() {
     var month by remember { mutableStateOf(HubDates.today().withDayOfMonth(1)) }
     var assignedOrder by remember { mutableStateOf<Int?>(null) }
     var openingOrder by remember { mutableStateOf(false) }
+    var showAllOverdue by remember { mutableStateOf(false) }
+    val tailors = env.flavor == AppFlavor.TAILORS
     LaunchedEffect(Unit) { schedule.load() }
 
-    Page("Production Calendar", subtitle = if (env.session.current.permissions.isFloorWorker) "Your jobs by due date" else "Delivery promises against the floor's load", refresh = { schedule.reload() }) {
+    Page("Production Calendar", subtitle = if (env.session.current.permissions.isFloorWorker) "Your jobs by due date" else "Delivery promises against the floor's load", refresh = { schedule.reload() }, showTitle = !tailors) {
         LoadableView(schedule.state, retry = { schedule.load() }) { s ->
             // A floor worker's schedule holds only her own jobs (server, Production
             // Cycle 8), so "earliest free slot" — a date-promising figure for
             // whoever runs the floor — would mean nothing to her.
             val floorWorker = env.session.current.permissions.isFloorWorker
-            val tailors = env.flavor == AppFlavor.TAILORS
-            val overdue = s["upcoming_orders"].records.count { it["due_date"].date?.let { date -> HubDates.dayString(date) < HubDates.dayString(HubDates.today()) } == true }
-            StatsRow(listOfNotNull(
+            val overdueOrders = s["upcoming_orders"].records.filter { it["due_date"].date?.let { date -> HubDates.dayString(date) < HubDates.dayString(HubDates.today()) } == true }.sortedBy { it["due_date"].date }
+            val overdue = overdueOrders.size
+            if (tailors) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CalendarSummaryTile(if (floorWorker) "Your active orders" else "Active orders", s["active_count"].str ?: "—", false, Modifier.weight(1f))
+                CalendarSummaryTile("Past due", overdue.toString(), true, Modifier.weight(1f))
+            } else StatsRow(listOfNotNull(
                 Triple(if (floorWorker) "Your active orders" else "Active orders", s["active_count"].str ?: "—", null),
                 if (tailors) Triple("Past due", overdue.toString(), if (overdue > 0) StatusTone.DANGER else StatusTone.NEUTRAL) else null,
                 if (floorWorker) null else Triple("Earliest free slot", s["earliest_free_slot"].str ?: "—", StatusTone.INFO),
             ))
+            if (tailors && !floorWorker) s["earliest_free_slot"].str?.let { Text("Earliest free slot: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
             val byStage = s["by_stage"].obj ?: emptyMap()
             if (!tailors && byStage.isNotEmpty()) SectionCard("Open work per stage") {
                 byStage.keys.sorted().forEach { k -> DetailRow(s["stage_names"][k].str ?: "Stage $k", byStage[k].str) }
             }
-            CalendarMonth(s["upcoming_orders"].records, month, tailors, onPrev = { month = month.minusMonths(1) }, onNext = { month = month.plusMonths(1) }, onToday = { month = HubDates.today().withDayOfMonth(1) }, onSelectMonth = { month = it.withDayOfMonth(1) }, onOpen = if (tailors && env.session.current.can("production.view")) { order ->
+            val openOrder: ((JsonElement) -> Unit)? = if (tailors && env.session.current.can("production.view")) { order ->
                 val number = order["order_number"].str
                 if (!number.isNullOrBlank() && !openingOrder) {
                     openingOrder = true
@@ -264,7 +275,13 @@ internal fun ProductionCalendarScreen() {
                         } catch (e: Exception) { env.toasts.error(e) } finally { openingOrder = false }
                     }
                 }
-            } else null)
+            } else null
+            CalendarMonth(s["upcoming_orders"].records, month, tailors, onPrev = { month = month.minusMonths(1) }, onNext = { month = month.plusMonths(1) }, onToday = { month = HubDates.today().withDayOfMonth(1) }, onSelectMonth = { month = it.withDayOfMonth(1) }, onOpen = openOrder)
+            if (tailors && overdueOrders.isNotEmpty()) SectionCard("Past due") {
+                Text("These production deadlines have passed.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+                (if (showAllOverdue) overdueOrders else overdueOrders.take(3)).forEach { CalendarOrderRow(it, openOrder) }
+                if (overdueOrders.size > 3) TextButton(onClick = { showAllOverdue = !showAllOverdue }) { Text(if (showAllOverdue) "Show fewer" else "Show all ${overdueOrders.size} orders") }
+            }
             if (tailors && floorWorker) {
                 TextButton(onClick = { env.navigator.push(Route.ProductionMyTasks) }) { Text("Open My Tasks") }
             }
@@ -283,7 +300,37 @@ internal fun calendarOrderId(response: JsonElement?, number: String): Int? =
         .filter { it["order_number"].str == number }.singleOrNull()?.get("id").int
 
 @Composable
-private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: Boolean, onPrev: () -> Unit, onNext: () -> Unit, onToday: () -> Unit, onSelectMonth: (LocalDate) -> Unit, onOpen: ((JsonElement) -> Unit)?) {
+private fun CalendarSummaryTile(label: String, value: String, overdue: Boolean, modifier: Modifier = Modifier) {
+    val tint = if (overdue && value != "0") Palette.danger else Palette.brandDeep
+    Surface(modifier = modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.hub.card) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(if (overdue) Icons.Default.Event else Icons.Default.ContentCut, contentDescription = null, tint = tint, modifier = Modifier.size(28.dp).background(tint.copy(alpha = 0.09f), RoundedCornerShape(8.dp)).padding(6.dp))
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(value, style = MaterialTheme.typography.titleLarge)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarOrderRow(order: JsonElement, onOpen: ((JsonElement) -> Unit)?) {
+    val navigable = onOpen != null && !order["order_number"].str.isNullOrBlank()
+    Row(Modifier.fillMaxWidth().background(MaterialTheme.hub.canvas, RoundedCornerShape(10.dp)).then(if (navigable) Modifier.clickable { onOpen?.invoke(order) } else Modifier).padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+        Icon(Icons.Default.Event, contentDescription = null, tint = Palette.brandDeep, modifier = Modifier.size(28.dp).background(Palette.brandDeep.copy(alpha = 0.08f), RoundedCornerShape(7.dp)).padding(5.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(order["product_name"].str ?: "Production order", style = MaterialTheme.typography.bodyMedium)
+            order["order_number"].str?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
+            order["due_date"].date?.let { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { Text("Due", style = MaterialTheme.typography.labelSmall); DateText(it, DateStyle.DATE) } }
+            order["quantity"].int?.takeIf { it > 0 }?.let { Text("$it ${if (it == 1) "piece" else "pieces"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
+        }
+        order["completion_percentage"].int?.let { Text("$it%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
+        if (navigable) Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.hub.textSecondary)
+    }
+}
+
+@Composable
+internal fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: Boolean, onPrev: () -> Unit, onNext: () -> Unit, onToday: () -> Unit, onSelectMonth: (LocalDate) -> Unit, onOpen: ((JsonElement) -> Unit)?) {
     var selected by remember { mutableStateOf<LocalDate?>(null) }
     val byDay = orders.filter { it["due_date"].date != null }.groupBy { HubDates.dayString(it["due_date"].date!!) }
     val title = start.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale.UK))
@@ -291,7 +338,10 @@ private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: 
     SectionCard {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { selected = null; onPrev() }) { Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Previous month") }
-            Spacer(Modifier.weight(1f)); Text(title, style = MaterialTheme.typography.titleMedium); Spacer(Modifier.weight(1f))
+            Spacer(Modifier.weight(1f)); Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                if (tailors) Text("Production deadlines", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+            }; Spacer(Modifier.weight(1f))
             IconButton(onClick = { selected = null; onNext() }) { Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Next month") }
         }
         if (tailors) {
@@ -318,9 +368,9 @@ private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: 
                             val date = start.withDayOfMonth(day)
                             val count = byDay[HubDates.dayString(date)]?.size ?: 0
                             TextButton(onClick = { selected = date }, modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = "${date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.UK))}, $count due orders" }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(day.toString(), color = if (selected == date) Palette.brand else MaterialTheme.hub.textSecondary, style = MaterialTheme.typography.bodySmall)
-                                    Text(if (count > 0) "•" else " ", color = Palette.brand, style = MaterialTheme.typography.labelSmall)
+                                Column(Modifier.size(38.dp).background(if (selected == date) Palette.brandDeep else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(11.dp)).border(1.dp, if (date == today && selected != date) Palette.brandDeep.copy(alpha = 0.55f) else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(11.dp)), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                    Text(day.toString(), color = if (selected == date) androidx.compose.ui.graphics.Color.White else MaterialTheme.hub.text, style = MaterialTheme.typography.bodySmall)
+                                    Text(if (count > 0) "•" else " ", color = if (selected == date) androidx.compose.ui.graphics.Color.White else Palette.brandDeep, style = MaterialTheme.typography.labelSmall)
                                 }
                             }
                         }
@@ -329,7 +379,14 @@ private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: 
             }
             Text("Dot marks a production deadline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
             HorizontalDivider(color = MaterialTheme.hub.line)
-            Text(selected?.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK)) ?: "Due this month", style = MaterialTheme.typography.titleSmall)
+            val visibleCount = (1..start.lengthOfMonth()).sumOf { day ->
+                val date = start.withDayOfMonth(day)
+                if (selected == null || selected == date) byDay[HubDates.dayString(date)]?.size ?: 0 else 0
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(selected?.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK)) ?: "Due this month", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text("$visibleCount ${if (visibleCount == 1) "order" else "orders"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+            }
         }
         var any = false
         (1..start.lengthOfMonth()).forEach { d ->
@@ -339,11 +396,14 @@ private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: 
             if (due.isEmpty()) return@forEach
             any = true
             Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+                if (!tailors) Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
                     DateText(date.atStartOfDay(HubDates.nairobi).toInstant(), DateStyle.DATE)
                     if (date.isBefore(today)) StatusBadge("past due", StatusTone.DANGER)
                 }
                 due.forEach { o ->
+                    if (tailors) {
+                        CalendarOrderRow(o, onOpen)
+                    } else {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth().then(if (onOpen != null && !o["order_number"].str.isNullOrBlank()) Modifier.clickable { onOpen(o) } else Modifier)) {
                         Text(o["order_number"].str ?: "", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         StatusBadge(o["status"].str)
@@ -352,11 +412,12 @@ private fun CalendarMonth(orders: List<JsonElement>, start: LocalDate, tailors: 
                         o["customer_name"].str?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
                         Text("${o["completion_percentage"].int ?: 0}%", style = MaterialTheme.typography.labelSmall)
                     }
+                    }
                 }
             }
             HorizontalDivider(color = MaterialTheme.hub.line)
         }
-        if (!any) Text(if (tailors && selected != null) "No production deadlines on this day." else "No due dates this month.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textTertiary)
+        if (!any) Text(if (tailors && selected != null) "No production deadlines on this day." else if (tailors) "No production deadlines this month." else "No due dates this month.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textTertiary)
     }
 }
 
