@@ -82,6 +82,17 @@ class ShellRenderTest {
     }
 
     @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun `tailors keeps bottom navigation when a conversation is open`() {
+        if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) != AppFlavor.TAILORS) return
+        renderShell()
+        compose.runOnIdle { env.navigator.push(Route.Comms(42)) }
+        settle()
+        assertTrue("More stays available in a conversation", exists(hasText("More")))
+        assertTrue("the fixture's home tab stays available in a conversation", exists(hasText("Production Orders")))
+    }
+
+    @Test
     @Config(qualifiers = "w700dp-h1100dp")
     fun `tablet portrait shows the rail`() {
         renderShell()

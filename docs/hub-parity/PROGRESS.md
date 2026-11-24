@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### My Tasks visual parity — 25 November 2026, Codex (claimed)
+### My Tasks visual parity — 25 November 2026, Codex (claim released; verification open)
 
-- Taking Android My Tasks list and phone shell visual comparison against the iPhone 17. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt`, `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/shell/HubShell.kt`, and any supporting Android-only theme/components needed for this slice. Test environment and safe paired screenshot data remain unconfirmed; no record-changing tests will run against production.
+- Matched the task list's centered Tailors mark, greeting, workshop icon, segmented Active/History control, lane dots, task-row icons and chevrons. Tailors phone navigation now uses a floating card and remains visible on nested pages. Hub flavor keeps its existing navigation. The owner confirmed the simulator account is a test environment; no records were changed in this slice.
+- Tailors and Hub debug APKs built, and focused Tailors production and shell tests passed, including bottom navigation in a conversation. Visually inspected the Android task list and recorded a paired reference and updated screenshot in `screenshots/my-tasks/`; see `ANDROID_CHECKLIST.md`. Font sizes, material icons and touch targets intentionally follow Android conventions and remain visibly different in places. Dark mode, largest text, TalkBack, tab restoration, nested-page keyboard behavior, and full device navigation remain unverified. Task detail, clock, calendar, messages and other pages have separate open gaps. This file claim is released.
 
 ### Android task queue ordering — 25 November 2026, Codex (verification open)
 

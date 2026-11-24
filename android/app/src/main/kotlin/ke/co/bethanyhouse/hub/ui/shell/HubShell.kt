@@ -2,8 +2,10 @@ package ke.co.bethanyhouse.hub.ui.shell
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -65,6 +70,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.shape.RoundedCornerShape
+import ke.co.bethanyhouse.hub.R
 import ke.co.bethanyhouse.hub.ui.LocalTailorsTextSize
 import ke.co.bethanyhouse.hub.ui.TailorsTextSizeDialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -150,9 +159,10 @@ private fun PhoneShell() {
     ) {
         Scaffold(
             containerColor = MaterialTheme.hub.canvas,
-            topBar = { HubTopBar(showMenu = !(moreOpen && nav.path.isEmpty()), onMenu = { scope.launch { drawer.open() } }, titleOverride = if (moreOpen && nav.path.isEmpty()) "More" else null) },
+            topBar = { HubTopBar(showMenu = !(moreOpen && nav.path.isEmpty()) && !(s.flavor == AppFlavor.TAILORS && nav.current == Route.ProductionMyTasks), onMenu = { scope.launch { drawer.open() } }, titleOverride = if (moreOpen && nav.path.isEmpty()) "More" else null) },
             bottomBar = {
-                if (nav.path.isEmpty()) NavigationBar(containerColor = MaterialTheme.hub.card) {
+                if (nav.path.isEmpty() || s.flavor == AppFlavor.TAILORS) {
+                  val bar: @Composable () -> Unit = { NavigationBar(containerColor = if (s.flavor == AppFlavor.TAILORS) Color.Transparent else MaterialTheme.hub.card, windowInsets = if (s.flavor == AppFlavor.TAILORS) WindowInsets(0, 0, 0, 0) else androidx.compose.material3.NavigationBarDefaults.windowInsets) {
                     val itemColors = if (s.flavor == AppFlavor.TAILORS) NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -161,7 +171,7 @@ private fun PhoneShell() {
                         unselectedTextColor = MaterialTheme.hub.textSecondary,
                     ) else NavigationBarItemDefaults.colors()
                     tabs.forEach { tab ->
-                        val selected = !moreOpen && nav.selection == tab.route
+                        val selected = !moreOpen && (if (nav.current is Route.Comms) tab.route is Route.Comms else nav.selection == tab.route)
                         NavigationBarItem(
                             selected = selected,
                             onClick = { moreOpen = false; nav.go(tab.route) },
@@ -170,7 +180,13 @@ private fun PhoneShell() {
                             colors = itemColors,
                         )
                     }
-                    NavigationBarItem(selected = moreOpen, onClick = { if (s.flavor == AppFlavor.TAILORS) moreOpen = true else nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") }, colors = itemColors)
+                    NavigationBarItem(selected = moreOpen, onClick = { if (s.flavor == AppFlavor.TAILORS) { nav.path.clear(); moreOpen = true } else nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") }, colors = itemColors)
+                  } }
+                  if (s.flavor == AppFlavor.TAILORS) {
+                      Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                          Surface(shape = RoundedCornerShape(48.dp), color = MaterialTheme.hub.card, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.hub.line)) { bar() }
+                      }
+                  } else bar()
                 }
             },
         ) { padding ->
@@ -225,9 +241,16 @@ private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit, titleOverride: Stri
     val nav = env.navigator
     val route = nav.current
     val flavor = env.session.current.flavor
+    val tailorHome = titleOverride == null && flavor == AppFlavor.TAILORS && route == Route.ProductionMyTasks && nav.path.isEmpty()
     val title = titleOverride ?: route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
     TopAppBar(
-        title = { Text(title, modifier = if (titleOverride != null) Modifier.fillMaxWidth() else Modifier, textAlign = if (titleOverride != null) TextAlign.Center else TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = {
+            if (tailorHome) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(R.drawable.tailors_mark), contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)))
+                Spacer(Modifier.width(9.dp))
+                Text("Tailors Hub", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            } else Text(title, modifier = if (titleOverride != null) Modifier.fillMaxWidth() else Modifier, textAlign = if (titleOverride != null) TextAlign.Center else TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
         navigationIcon = {
             if (nav.path.isNotEmpty()) IconButton(onClick = { nav.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             else if (showMenu) IconButton(onClick = onMenu) { Icon(Icons.Default.Menu, contentDescription = "Menu") }

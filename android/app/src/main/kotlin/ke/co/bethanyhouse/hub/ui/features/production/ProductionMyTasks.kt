@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Checkroom
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -42,6 +45,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -54,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -212,16 +217,19 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
     }
 
     val tailors = env.flavor == AppFlavor.TAILORS
-    Page(if (tailors && selectedOrder == null) "Tailors Hub" else "My Tasks", subtitle = if (tailors) null else env.session.current.me?.let { "Your stages, ${it.firstName}" }, refresh = { tasks.reload() }) {
+    Page(if (tailors && selectedOrder == null) "Tailors Hub" else "My Tasks", subtitle = if (tailors) null else env.session.current.me?.let { "Your stages, ${it.firstName}" }, refresh = { tasks.reload() }, showTitle = !tailors) {
         if (tailors && selectedOrder == null) {
             Text(env.session.current.me?.name?.takeIf { it.isNotBlank() }?.let { "Hello, $it" } ?: "Hello", style = MaterialTheme.typography.headlineSmall)
             Text("Your workshop, at a glance.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
-            Text("Workshop", style = MaterialTheme.typography.titleSmall, color = Palette.brand)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                Icon(Icons.Default.ContentCut, contentDescription = null, tint = Palette.brandDeep, modifier = Modifier.size(18.dp))
+                Text("Workshop", style = MaterialTheme.typography.titleSmall, color = Palette.brandDeep)
+            }
         }
         if (!tailors || selectedOrder == null) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                SegmentedTabs(listOf(false to "Active", true to "History"), history) { history = it; selectedOrder = null }
-                Spacer(Modifier.weight(1f))
+                if (tailors) TailorTaskTabs(history, Modifier.weight(1f)) { history = it; selectedOrder = null }
+                else { SegmentedTabs(listOf(false to "Active", true to "History"), history) { history = it; selectedOrder = null }; Spacer(Modifier.weight(1f)) }
                 if (queued > 0 || pendingKeys.isNotEmpty()) Text("${maxOf(queued, pendingKeys.size)} waiting to send", style = MaterialTheme.typography.labelSmall, color = Palette.amber)
             }
         } else TextButton(onClick = { if (initialOrderId != null && onClose != null) onClose() else selectedOrder = null }) { Text(if (initialOrderId != null) "‹  Calendar" else "‹  Task list") }
@@ -234,12 +242,20 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
                     listOf("In progress", "Ready to start", "Waiting", "With Quality Control", "Finished stages").forEach { lane ->
                         val matching = groups.filter { taskLane(it, history) == lane }
                         if (matching.isNotEmpty()) {
-                            Text(lane, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.hub.textSecondary)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                Box(Modifier.size(6.dp).background(taskLaneColor(lane), CircleShape))
+                                Text(lane, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.hub.textSecondary)
+                            }
                             matching.forEach { group ->
-                                SectionCard {
-                                    Column(Modifier.fillMaxWidth().clickable { selectedOrder = group.id }.padding(vertical = Space.s), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(taskName(group.order), style = MaterialTheme.typography.titleMedium)
-                                        Text(taskSummary(group, history), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.hub.card, modifier = Modifier.fillMaxWidth().clickable { selectedOrder = group.id }) {
+                                    Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        val tint = taskLaneColor(lane)
+                                        Icon(if (lane == "With Quality Control") Icons.Default.VerifiedUser else Icons.Default.Checkroom, contentDescription = null, tint = tint, modifier = Modifier.size(32.dp).background(tint.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(6.dp))
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Text(taskName(group.order), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                            Text(taskSummary(group, history), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                                        }
+                                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.hub.textSecondary, modifier = Modifier.size(20.dp))
                                     }
                                 }
                             }
@@ -306,6 +322,27 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
 internal suspend fun taskHasPendingChanges(store: OfflineStore, taskId: String): Boolean {
     val prefix = "/v1/tailor/tasks/$taskId/"
     return store.pendingChecked().any { it.path.startsWith(prefix) }
+}
+
+@Composable
+private fun taskLaneColor(lane: String) = when (lane) {
+    "In progress" -> Palette.brandDeep
+    "Ready to start" -> Palette.amber
+    "With Quality Control" -> Palette.nav
+    else -> MaterialTheme.hub.textSecondary
+}
+
+@Composable
+private fun TailorTaskTabs(history: Boolean, modifier: Modifier = Modifier, onSelect: (Boolean) -> Unit) {
+    Row(modifier.background(MaterialTheme.hub.line, CircleShape).padding(2.dp)) {
+        listOf(false to "Active", true to "History").forEach { (value, label) ->
+            Box(
+                Modifier.weight(1f).background(if (history == value) MaterialTheme.hub.card else androidx.compose.ui.graphics.Color.Transparent, CircleShape)
+                    .semantics { selected = history == value }.clickable { onSelect(value) }.heightIn(min = 48.dp).padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.text) }
+        }
+    }
 }
 
 internal class TaskOrderGroup(val id: Int, val order: JsonElement?, val tasks: List<Record>)

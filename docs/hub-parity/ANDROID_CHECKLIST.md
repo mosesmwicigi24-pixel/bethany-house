@@ -1,0 +1,18 @@
+# Android / iPhone parity checklist
+
+Reference: user-provided iPhone 17 and Android emulator comparisons, 25 November 2026. The user confirmed the account shown is a test environment. Screenshots can contain test account names; use only test data in this directory.
+
+| Screen | Element / flow | iPhone | Android | Gap type and evidence | Status |
+|---|---|---|---|---|---|
+| My Tasks | Header, filter, task lanes and navigation | App mark centered; full-width segmented filter; stage icons, lane dots, floating tabs | Earlier build used duplicate title, pills and plain rows; updated build uses mark, segmented filter, icons and floating tabs | Visual. [iPhone reference](screenshots/my-tasks/ios-reference.png), [Android before](screenshots/my-tasks/android-before.png), [Android after](screenshots/my-tasks/android-after.png) | Partially fixed; dynamic type, dark mode and accessibility remain unverified |
+| Task detail | Stage actions and counts | Progress bar and update-count flow | Stepper and direct count controls | Visual / functional, user comparison 00:13:47 | Verified gap; action rules and offline behavior need independent verification |
+| Calendar | Header, date grid and deadline summary | Compact card with today outline, legend and monthly summary | Larger grid, different header and spacing | Visual, user comparison 00:14:07 | Verified gap; date selection and matching state require review |
+| Messages | Conversation list and thread | Grouped list card, conversation header, persistent tabs | Ungrouped list, different header and composer | Visual / navigation, user comparisons 00:14:37 and 00:14:51 | Verified gap; sending and failure states not tested |
+| Clock | Location and clock controls | Location check prompt in supplied screenshot | Location already acquired in supplied screenshot | State / visual; user comparison 00:15:13 | Assumed difference only: states differ, compare matching states before diagnosing behavior |
+| More | Groups and controls | Grouped cards with outlined icons and floating tabs | Grouped cards with filled icons | Visual, user comparison 00:15:25 | Partially fixed; typography, icon weights, routes and states require review |
+| Profile, employment, activity, security | Full pages and actions | Not yet paired | Not yet paired | Visual / functional / privacy | Data unavailable for comparison |
+| Text size | Device preference and slider | Dynamic Type selection | Android local font scale | Platform behavior / accessibility | Intentional implementation difference; extreme-size screens need review |
+| Language | English and Swahili | Source and supported locales require verification | Source and supported locales require verification | Copy / localization | Unknown — needs verification; no new translations supplied |
+| Passkeys | Registration and assertion | Native Apple flow | Managed from console | Functional / security | Verified gap; authentication changes approval-gated; signing and deployed origin details unknown |
+
+No row is complete solely because a build passed. Remaining states, screenshots, navigation, accessibility, and safe test writes must be recorded as they are checked.
