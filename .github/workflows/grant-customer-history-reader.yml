@@ -1,0 +1,81 @@
+name: Give the chat agent the customer history role
+
+# service-accounts:grant-history-reader on the VPS (owner, 2026-11-24).
+#
+#   "Check": read-only — how many service accounts there are and how many
+#   already hold the role.
+#   "Grant": gives the read-only `customer_history_reader` role to the
+#   configured service accounts only, beside the role they already hold.
+#   Needs `actor` (the super admin's hub user NUMBER, never an email) and
+#   `confirm` typed exactly as GRANT. Recorded on the hub's audit trail.
+#
+# The repository is public: only count lines are shown.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to do"
+        type: choice
+        options: ["Check", "Grant"]
+        default: "Check"
+      actor:
+        description: "Grant: your hub user number (the super admin approving it)"
+        required: false
+        default: ""
+      confirm:
+        description: "Grant: type GRANT"
+        required: false
+        default: ""
+
+concurrency:
+  group: grant-customer-history-reader
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Customer history role (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          ACTOR: ${{ inputs.actor }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$MODE" = "Grant" ]; then
+            [[ "$ACTOR" =~ ^[0-9]{1,9}$ ]] || { echo "::error::actor must be your hub user number; nothing was run."; exit 1; }
+            [ "$CONFIRM" = "GRANT" ] || { echo "::error::confirm must be GRANT; nothing was run."; exit 1; }
+          fi
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${{ secrets.VPS_KNOWN_HOSTS }}" ]; then
+            printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            for i in 1 2 3 4 5; do
+              ssh-keyscan -T 15 -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+              [ -s ~/.ssh/known_hosts ] && break
+              sleep $((i * 5))
+            done
+            [ -s ~/.ssh/known_hosts ] || { echo "::error::Could not read host key"; exit 1; }
+          fi
+        timeout-minutes: 3
+
+      - name: Run it (counts only)
+        env:
+          MODE: ${{ inputs.mode }}
+          ACTOR: ${{ inputs.actor }}
+        run: |
+          if [ "$MODE" = "Grant" ]; then
+            CMD="php artisan service-accounts:grant-history-reader --apply --actor=$ACTOR"
+          else
+            CMD="php artisan service-accounts:grant-history-reader"
+          fi
+          KEEP='^(Service accounts found: [0-9]+|Already hold the role: [0-9]+|Would be granted: [0-9]+|Granted now: [0-9]+|Dry run: nothing changed\.|--apply needs .*|The role does not exist yet.*)$'
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -i ~/.ssh/deploy_key "root@${{ secrets.VPS_HOST }}" \
+            "cd /opt/bethany-house && set -o pipefail && docker compose run --rm -T laravel $CMD 2>&1 | grep -E '$KEEP'"
+        timeout-minutes: 10
