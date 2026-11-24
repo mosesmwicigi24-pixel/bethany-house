@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android calendar presentation — 25 November 2026, Codex (claimed)
+
+- Taking Android production calendar comparison against the iPhone 17. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionBoards.kt` and corresponding Android calendar tests. Compare date selection, event counts, empty states and order navigation without changing server data.
+
 ### Android time-clock presentation — 25 November 2026, Codex (claim released; verification open)
 
 - The Tailors Android clock uses a compact status-and-time card and a labeled Your time summary; long last-punch flags wrap. It no longer claims the tailor is at an outlet when the outlet has no saved coordinates. Existing clock, mock-location, permission and attendance eligibility checks are unchanged; Hub retains its existing clock design.
