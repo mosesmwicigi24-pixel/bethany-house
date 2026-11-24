@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Tailors Hub header — 24 November 2026, Codex
+
+- Replaced the two-line My Tasks heading on the Tailors Hub task list with the app's existing scissors-and-thread icon and a larger Tailors Hub name. The system navigation title remains My Tasks for back navigation; Bethany Hub retains its My Tasks heading.
+- TailorsMobile simulator build passed; visually checked the header and task list on iPhone 17 Pro with fictional Hub data. Dark mode, larger accessibility text and iPad remain unverified.
+
 ### Task detail redesign — in progress, 24 November 2026, Codex
 
 - Replaced the compact-width task overlay with navigation-stack detail, preserving the wide split and the Calendar sheet entry; added a product navigation title, selectable order reference, scoped customer label where present, and labeled due date. Separated specifications and measurements into expandable sections, with locally stored per-account disclosure preferences. Made measurement icons consistent, styled the note quietly, and presented the assigned stages as a vertical timeline. Existing stage actions and job conversation remain.

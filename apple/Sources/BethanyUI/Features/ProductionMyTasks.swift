@@ -51,14 +51,24 @@ struct MyTasksView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 if !showsDetail && initialOrderID == nil {
-                  VStack(spacing: 1) {
-                    Text("TAILORS HUB")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(1.1)
-                        .foregroundStyle(Theme.Palette.brandDeep)
-                    Text("My Tasks").font(.headline)
-                }
-                .accessibilityElement(children: .combine)
+                    if env.session.flavor == .tailors {
+                        HStack(spacing: 9) {
+                            Image("TailorsMark")
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 36, height: 36)
+                                .clipShape(RoundedRectangle(cornerRadius: 9))
+                                .accessibilityHidden(true)
+                            Text("Tailors Hub")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(Theme.text)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .accessibilityElement(children: .combine)
+                    } else {
+                        Text("My Tasks").font(.headline)
+                    }
                 }
             }
         }
