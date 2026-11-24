@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### Android task-detail actions — 25 November 2026, Codex (claimed)
+### Android task-detail actions — 25 November 2026, Codex (claim released; verification open)
 
-- Taking Android task-detail control comparison against the iPhone 17. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt` and related Android production tests. Compare update-count, batch and offline flows before changing the controls. Test environment confirmed by owner; no production writes.
+- Tailors task-detail counters now display a progress bar and an explicit Update count → draft → Save count flow. Draft changes make no request until saved, failed saves retain the draft, and queued counts display a waiting-to-sync label. Pending status actions disable conflicting Tailors controls, and blocked stages cannot start from the Tailors UI. Hub's immediate counter remains unchanged.
+- Tailors and Hub debug builds passed; focused production, queue and draft-counter tests passed. On the signed-in Android test emulator, visually inspected the task card and opened/cancelled the editor without saving. Paired reference screenshots and remaining UI differences are recorded in `ANDROID_CHECKLIST.md`. Offline replay races, real server validation, batch controls, dark mode, large text and TalkBack remain unverified. No task record was changed. Claim released.
 
 ### My Tasks visual parity — 25 November 2026, Codex (claim released; verification open)
 

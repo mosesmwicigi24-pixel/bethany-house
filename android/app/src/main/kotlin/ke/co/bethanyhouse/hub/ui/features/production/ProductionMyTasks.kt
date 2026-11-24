@@ -130,6 +130,7 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
     var selectedOrder by remember(initialOrderId) { mutableStateOf(initialOrderId) }
     BackHandler(enabled = selectedOrder != null) { if (initialOrderId != null && onClose != null) onClose() else selectedOrder = null }
     var pendingKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pendingOperations by remember { mutableStateOf<List<OfflineStore.PendingOperation>>(emptyList()) }
     var noteFor by remember { mutableStateOf<Record?>(null) }
     var completed by remember { mutableStateOf<Record?>(null) }
     val online by env.connection.isOnline.collectAsState()
@@ -152,7 +153,10 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
             }
         }
     }
-    suspend fun refreshPending() { pendingKeys = (env.offline?.pending() ?: emptyList()).mapNotNull { it.dedupeKey }.toSet() }
+    suspend fun refreshPending() {
+        pendingOperations = env.offline?.pending() ?: emptyList()
+        pendingKeys = pendingOperations.mapNotNull { it.dedupeKey }.toSet()
+    }
     LaunchedEffect(tasks) { tasks.reload(); refreshPending() }
     var wasOnline by remember { mutableStateOf(online) }
     LaunchedEffect(online) {
@@ -160,15 +164,16 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
         wasOnline = online
     }
 
-    suspend fun enqueue(kind: String, method: String, path: String, body: JsonElement, key: String) {
+    suspend fun enqueue(kind: String, method: String, path: String, body: JsonElement, key: String): Boolean {
         val offline = env.offline
-        if (offline == null) { env.toasts.show("Offline and nothing could be saved on this device.", StatusTone.DANGER); return }
+        if (offline == null) { env.toasts.show("Offline and nothing could be saved on this device.", StatusTone.DANGER); return false }
         if (!offline.enqueue(OfflineStore.PendingOperation(kind = kind, method = method, path = path, body = body, dedupeKey = key))) {
-            env.toasts.show("Offline, and this change could not be saved on this device. Try again when you are back online.", StatusTone.DANGER); return
+            env.toasts.show("Offline, and this change could not be saved on this device. Try again when you are back online.", StatusTone.DANGER); return false
         }
-        pendingKeys = pendingKeys + key
+        refreshPending()
         env.toasts.show("Saved on this device. Waiting to sync.", StatusTone.WARNING)
         if (env.connection.isOnline.value) scope.launch { env.replayPending(); refreshPending(); tasks.load() }
+        return true
     }
 
     suspend fun hasPendingForTask(taskId: String): Boolean? {
@@ -200,19 +205,21 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
         }
     }
 
-    suspend fun count(t: Record, qty: Int, batch: Int?) {
+    suspend fun count(t: Record, qty: Int, batch: Int?): Boolean {
         val path = "/v1/tailor/tasks/${t.id}/progress"
         val body = jsonOf("quantity_done" to qty, "batch_id" to batch)
         val stage = t["stage"]["id"].int ?: t.int("production_stage_id") ?: 0
         val key = "task-${t.id}-progress-$stage" + (batch?.let { "-batch-$it" } ?: "")
-        val pending = hasPendingForTask(t.id) ?: return
-        if (pending) { enqueue("task_progress", "POST", path, body, key); return }
+        val pending = hasPendingForTask(t.id) ?: return false
+        if (pending) return enqueue("task_progress", "POST", path, body, key)
         try {
             env.client.post(path, body)
             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             tasks.load()
+            return true
         } catch (e: ApiError) {
-            if (e.isOffline) enqueue("task_progress", "POST", path, body, key) else { env.toasts.error(e); tasks.load() }
+            if (e.isOffline) return enqueue("task_progress", "POST", path, body, key)
+            env.toasts.error(e); tasks.load(); return false
         }
     }
 
@@ -273,7 +280,7 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
                             openTaskStages(g, history).forEach { t ->
                                 SectionCard {
                                     TaskCard(task = t, order = g.order,
-                                        pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") },
+                                        pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") }, pendingOperations = pendingOperations,
                                         onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
                                 }
                             }
@@ -287,7 +294,7 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
                                 TaskOrderHeader(g.order)
                                 g.tasks.forEach { t ->
                                     TaskCard(task = t, order = g.order,
-                                        pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") },
+                                        pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") }, pendingOperations = pendingOperations,
                                         onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
                                 }
                             }
@@ -634,7 +641,7 @@ private fun TaskOrderHeader(o: JsonElement?) {
 // ── One stage on the bench ───────────────────────────────────────────────────
 
 @Composable
-private fun TaskCard(task: Record, order: JsonElement?, pending: Boolean, onAction: suspend (String) -> Unit, onCount: suspend (Int, Int?) -> Unit, onNote: () -> Unit) {
+private fun TaskCard(task: Record, order: JsonElement?, pending: Boolean, pendingOperations: List<OfflineStore.PendingOperation>, onAction: suspend (String) -> Unit, onCount: suspend (Int, Int?) -> Boolean, onNote: () -> Unit) {
     val env = LocalEnv.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -643,6 +650,8 @@ private fun TaskCard(task: Record, order: JsonElement?, pending: Boolean, onActi
     val orderOpen = ProductionStatus.acceptsFloorWork(order["status"].str)
     val quantity = maxOf(1, order["quantity"].int ?: 1)
     val stageName = task["stage"]["name"].str ?: "Stage"
+    val changes = pendingOperations.filter { it.path.startsWith("/v1/tailor/tasks/${task.id}/") }
+    val awaitingStatus = changes.any { it.kind == "task_status" }
     fun run(op: suspend () -> Unit) { busy = true; scope.launch { try { op() } finally { busy = false } } }
 
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -679,20 +688,28 @@ private fun TaskCard(task: Record, order: JsonElement?, pending: Boolean, onActi
         }
         if (status != "completed" && orderOpen) {
             val batches = order["batches"].records
+            val completing = changes.any { it.kind == "task_status" && it.body["action"].str == "complete" }
+            @Composable fun counter(label: String, done: Int, limit: Int, batchId: Int?) {
+                val queued = changes.lastOrNull { it.kind == "task_progress" && it.body["batch_id"].int == batchId }?.body["quantity_done"].int
+                if (env.flavor == AppFlavor.TAILORS) TailorPieceCounter(label, done, limit, queued, !busy && !completing) { value ->
+                    busy = true
+                    try { onCount(value, batchId) } finally { busy = false }
+                } else PieceCounter(label, done, limit, enabled = !busy) { value -> run { onCount(value, batchId) } }
+            }
             if (batches.isEmpty()) {
-                PieceCounter("Pieces through me", task["quantity_done"].int ?: 0, quantity, enabled = !busy) { v -> run { onCount(v, null) } }
+                counter(if (env.flavor == AppFlavor.TAILORS) "Pieces completed" else "Pieces through me", task["quantity_done"].int ?: 0, quantity, null)
             } else batches.forEach { b ->
                 val bid = b["id"].int ?: 0
                 val done = task["batch_progress"].records.firstOrNull { it["production_order_batch_id"].int == bid }["quantity_done"].int ?: 0
-                PieceCounter(b["label"].str ?: "Batch", done, b["quantity"].int ?: quantity, enabled = !busy) { v -> run { onCount(v, bid) } }
+                counter(b["label"].str ?: "Batch", done, b["quantity"].int ?: quantity, bid)
             }
         }
         if (status == "completed") Text("Done — ${task["quantity_done"].int ?: 0} pieces", style = MaterialTheme.typography.labelSmall, color = Palette.success)
         if (orderOpen) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.fillMaxWidth()) {
-                if (status == "pending" || status == "paused") Button(enabled = !busy, onClick = { run { onAction("start") } }) { Text("Start") }
-                if (status == "in_progress") OutlinedButton(enabled = !busy, onClick = { run { onAction("pause") } }) { Text("Pause") }
-                if (status == "in_progress" || status == "paused") ConfirmButton("Mark $stageName done", "Tells the next bench this stage is finished for the whole order.", enabled = !busy, action = { onAction("complete") }) { Text("Done") }
+                if (status == "pending" || status == "paused") Button(enabled = !busy && (env.flavor != AppFlavor.TAILORS || (blocked == null && !awaitingStatus)), onClick = { run { onAction("start") } }) { Text(if (status == "paused" && env.flavor == AppFlavor.TAILORS) "Resume" else "Start") }
+                if (status == "in_progress") OutlinedButton(enabled = !busy && (env.flavor != AppFlavor.TAILORS || !awaitingStatus), onClick = { run { onAction("pause") } }) { Text("Pause") }
+                if (status == "in_progress" || status == "paused") ConfirmButton("Mark $stageName done", "Tells the next bench this stage is finished for the whole order.", enabled = !busy && (env.flavor != AppFlavor.TAILORS || !awaitingStatus), action = { onAction("complete") }) { Text(if (env.flavor == AppFlavor.TAILORS) "Mark done" else "Done") }
                 IconButton(onClick = onNote, enabled = !busy) { Icon(Icons.Default.Note, contentDescription = "Add note") }
                 if (env.session.current.can("production.manage_assignees") && task["started_at"].isNull && task["concurrent_allowed"].bool != true) {
                     IconButton(enabled = !busy, onClick = {
@@ -702,6 +719,40 @@ private fun TaskCard(task: Record, order: JsonElement?, pending: Boolean, onActi
             }
         } else order["status"].str?.let { s ->
             if (s == "qc_pending" || s == "qc_failed") Text(if (s == "qc_pending") "With Quality Control — counts are locked." else "Failed QC — a manager decides what happens next.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+        }
+    }
+}
+
+@Composable
+internal fun TailorPieceCounter(label: String, confirmed: Int, limit: Int, queued: Int?, enabled: Boolean, onSave: suspend (Int) -> Boolean) {
+    val scope = rememberCoroutineScope()
+    val current = queued ?: confirmed
+    var draft by remember { mutableStateOf<Int?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+            Spacer(Modifier.weight(1f))
+            Text("$current of $limit", style = MaterialTheme.typography.labelMedium)
+        }
+        LinearProgressIndicator(progress = { current.coerceIn(0, maxOf(1, limit)).toFloat() / maxOf(1, limit) }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = if (queued == null) "Confirmed piece count" else "Piece count on this device" }, color = if (queued == null) Palette.brand else Palette.amber, trackColor = MaterialTheme.hub.line)
+        if (queued != null) Text("Saved here · Waiting to sync", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+        val value = draft
+        if (value == null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Button(onClick = { draft = current.coerceIn(0, limit) }, enabled = enabled) { Text("Update count") }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                OutlinedButton(onClick = { draft = value - 1 }, modifier = Modifier.semantics { contentDescription = "Remove one piece" }, enabled = enabled && value > 0 && !saving) { Text("−") }
+                Text("$value", style = MaterialTheme.typography.titleMedium)
+                OutlinedButton(onClick = { draft = value + 1 }, modifier = Modifier.semantics { contentDescription = "Add one piece" }, enabled = enabled && value < limit && !saving) { Text("+") }
+                TextButton(onClick = { draft = limit }, enabled = enabled && value < limit && !saving) { Text("All $limit") }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { draft = null }, enabled = !saving) { Text("Cancel") }
+                Button(onClick = { saving = true; scope.launch { try { if (onSave(value)) draft = null } finally { saving = false } } }, enabled = enabled && !saving && value != current) { Text("Save count") }
+            }
         }
     }
 }
