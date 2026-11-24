@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### My Tasks visual parity — 25 November 2026, Codex (claimed)
+
+- Taking Android My Tasks list and phone shell visual comparison against the iPhone 17. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt`, `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/shell/HubShell.kt`, and any supporting Android-only theme/components needed for this slice. Test environment and safe paired screenshot data remain unconfirmed; no record-changing tests will run against production.
+
 ### Android task queue ordering — 25 November 2026, Codex (verification open)
 
 - Android now checks the current user's readable saved queue before sending a stage status or count. When that stage has saved work, the new change is saved for replay; an unavailable or unreadable queue blocks the update with an explanation. This aligns with the existing iPhone behavior and does not change server rules.
