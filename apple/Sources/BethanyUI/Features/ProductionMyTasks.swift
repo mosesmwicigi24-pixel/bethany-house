@@ -118,7 +118,7 @@ struct MyTasksView: View {
 
     private func queue(_ groups: [OrderGroup], selection: Int?, wide: Bool) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(greeting)
                         .font(.title2.weight(.semibold))
@@ -168,14 +168,14 @@ struct MyTasksView: View {
                     ForEach(QueueLane.allCases) { lane in
                         let orders = groups.filter { $0.lane == lane }
                         if !orders.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 7) {
                                 HStack(spacing: 7) {
                                     Circle()
                                         .fill(laneColor(lane))
                                         .frame(width: 6, height: 6)
                                         .accessibilityHidden(true)
                                     Text(lane.rawValue)
-                                        .font(.caption.weight(.semibold))
+                                        .font(.caption.weight(.medium))
                                         .foregroundStyle(Theme.textSecondary)
                                 }
                                 .accessibilityAddTraits(.isHeader)
@@ -221,9 +221,9 @@ struct MyTasksView: View {
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.textSecondary)
             }
             .frame(maxWidth: .infinity, minHeight: Theme.tapTarget, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(selected ? Theme.Palette.brand.opacity(0.10) : Theme.card, in: RoundedRectangle(cornerRadius: 9))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(selected && wide ? Theme.Palette.brand.opacity(0.08) : Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -395,7 +395,7 @@ struct MyTasksView: View {
                 let finished = status == "completed"
                 let active = finished || status == "in_progress"
                 HStack(spacing: 12) {
-                    ProductionStageIcon(stage: task["stage"], tint: active ? Theme.Palette.brandDeep : Theme.textSecondary)
+                    ProductionStageIcon(stage: task["stage"], tint: stageIconColor(task, active: active))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(stageName(task))
                             .font(.body.weight(status == "in_progress" ? .medium : .regular))
@@ -403,7 +403,9 @@ struct MyTasksView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         Text(stageDetails(task))
                             .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
+                            .foregroundStyle(finished
+                                ? (colorScheme == .dark ? Color(hex: 0x80D99B) : Theme.Palette.success)
+                                : Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityElement(children: .ignore)
@@ -434,6 +436,24 @@ struct MyTasksView: View {
         }
         .padding(16)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func stageIconColor(_ task: Record, active: Bool) -> Color {
+        guard active else { return Theme.textSecondary }
+        let stage = task["stage"]
+        let key = (stage?["slug"]?.string ?? stage?["name"]?.string ?? "")
+            .lowercased().split { !$0.isLetter && !$0.isNumber }.joined(separator: "-")
+        let dark = colorScheme == .dark
+        switch key {
+        case "information-desk", "info-desk": return dark ? Color(hex: 0xAABFDC) : Theme.Palette.nav
+        case "payment", "payments": return dark ? Color(hex: 0x80D99B) : Theme.Palette.success
+        case "material-sourcing", "materials-sourcing", "sourcing": return dark ? Color(hex: 0xE8B56A) : Theme.Palette.amber
+        case "stitching", "sewing": return dark ? Color(hex: 0x92B5FF) : Theme.Palette.info
+        case "button", "buttons", "buttoning": return dark ? Color(hex: 0xC5A7F4) : Theme.Palette.accent
+        case "finishing": return dark ? Color(hex: 0xE8B56A) : Theme.Palette.amber
+        case "quality-check", "quality-control", "inspection", "qc": return dark ? Color(hex: 0x80D99B) : Theme.Palette.success
+        default: return dark ? Theme.Palette.brandTint : Theme.Palette.brandDeep
+        }
     }
 
     private func stageDetails(_ task: Record) -> String {
@@ -488,7 +508,7 @@ struct MyTasksView: View {
                             let completed = task.status == "completed"
                             let current = task.status == "in_progress"
                             VStack(spacing: 6) {
-                                ProductionStageIcon(stage: task["stage"], tint: completed || current ? Theme.Palette.brandDeep : Theme.textSecondary)
+                                ProductionStageIcon(stage: task["stage"], tint: stageIconColor(task, active: completed || current))
                                     .frame(width: 44, height: 44)
                                     .background(Theme.canvas, in: Circle())
                                     .overlay(Circle().strokeBorder(completed ? Theme.Palette.success : (current ? Theme.Palette.brandDeep : Theme.line), lineWidth: 1.5))
