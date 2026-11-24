@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.core.layout.WindowWidthSizeClass
 import ke.co.bethanyhouse.hub.LocalEnv
+import ke.co.bethanyhouse.hub.core.OfflineStore
 import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.NavCatalogue
 import ke.co.bethanyhouse.hub.core.NavItem
@@ -219,7 +220,8 @@ private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit) {
                     IconButton(onClick = { nav.go(Route.Notifications) }) { Icon(Icons.Default.Notifications, contentDescription = "Notifications") }
                 }
             }
-            if (env.pendingCount > 0) Text("${env.pendingCount} queued", style = MaterialTheme.typography.labelSmall, color = Palette.amber, modifier = Modifier.padding(end = 8.dp))
+            if (env.pendingUnreadable) Text("saved changes unreadable", style = MaterialTheme.typography.labelSmall, color = Palette.danger, modifier = Modifier.padding(end = 8.dp))
+            else if (env.pendingCount > 0) Text("${env.pendingCount} queued", style = MaterialTheme.typography.labelSmall, color = Palette.amber, modifier = Modifier.padding(end = 8.dp))
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.hub.canvas),
     )
@@ -239,14 +241,16 @@ private fun SidebarContent() {
     // Say so before signing out, so nobody leaves thinking their work is in.
     var unsentAtSignOut by remember { mutableIntStateOf(0) }
     fun signOut() = scope.launch {
-        val waiting = env.offline?.pending()?.size ?: 0
-        if (waiting > 0 && unsentAtSignOut == 0) unsentAtSignOut = waiting else env.session.signOut()
+        val waiting = try { env.offline?.pendingChecked()?.size ?: 0 } catch (e: OfflineStore.QueueUnreadable) { -1 }
+        if (waiting != 0 && unsentAtSignOut == 0) unsentAtSignOut = waiting else env.session.signOut()
     }
-    if (unsentAtSignOut > 0) AlertDialog(
+    if (unsentAtSignOut != 0) AlertDialog(
         onDismissRequest = { unsentAtSignOut = 0 },
         title = { Text("Changes not sent yet") },
         text = {
             Text(
+                if (unsentAtSignOut < 0) "Changes you made offline are saved on this device but could not be read, so it is not known what has reached the Hub. " +
+                    "Signing out keeps them on this device. Ask a manager for help before signing out." else
                 (if (unsentAtSignOut == 1) "1 change you made offline has" else "$unsentAtSignOut changes you made offline have") +
                     " not reached the Hub. They stay on this device and are sent the next time you sign in here. " +
                     "To send them now, wait for a connection before signing out.",

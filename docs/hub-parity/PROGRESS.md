@@ -239,11 +239,28 @@ and replay timestamp cases. Airplane-mode reachability changes and production
 attendance processing were outside this fixture run. Dark appearance, larger
 text, iPad, empty, and offline job-detail states remain open.
 
-### In progress — 24 November 2026, Claude: Android offline queue
+### Android offline queue — 24 November 2026, Claude (done)
 
-Taking `android/core/.../OfflineStore.kt`, `AppEnvironment.kt` (replay),
-`ui/shell/HubShell.kt` (sign-out count) and the pending-punch code in
-`ui/features/me/MeClock.kt`. Porting the iOS fixes: one sending path (no
-double send between replay and Send now), no resend after a failed queue
-rewrite, an unreadable queue never reads as empty, and only a final 4xx drops
-a saved punch (today any non-offline error, a 500 included, deletes it).
+Ported the iOS queue fixes to Android, same rules on both platforms:
+
+- **One sending path.** `OfflineStore.send(id, transport)` is used by the
+  automatic replay and by the clock's Send now; an operation already in
+  flight answers `AlreadySending` instead of being posted twice.
+- **No resend after a failed rewrite.** Accepted but not cleared from disk
+  (`SentButNotCleared`) is hidden and never sent again while the app runs; the
+  next successful write drops it. Writes go through a temporary file.
+- **Unreadable is not empty.** `pendingChecked()` throws `QueueUnreadable`;
+  replay reports it, enqueue refuses to overwrite it, the top bar says "saved
+  changes unreadable", and sign-out warns instead of reading 0.
+- **Only a final 4xx drops work.** Before, the clock deleted a saved punch on
+  any non-offline error, a 500 included. Now 401, 408, 423, 429 and 5xx keep
+  it (`isFinalRefusal`, same list as iOS).
+- A failed enqueue (clock punch, task update) now says it was not saved.
+
+Verified here: `OfflineStoreTest` 9/9, each case mutation-checked (in-flight
+guard, delivered set, unreadable-as-empty, old refusal list); core 46/46;
+app `testHubDebugUnitTest` 265/265 (one run failed `KioskSetUpTest` on
+timing; it passed alone on this tree and on the base, and on a full re-run);
+`assembleHubDebug` and `assembleTailorsDebug` build.
+**Not verified:** on a phone or emulator. Server idempotency for a replayed
+punch remains UNKNOWN — NEEDS VERIFICATION.

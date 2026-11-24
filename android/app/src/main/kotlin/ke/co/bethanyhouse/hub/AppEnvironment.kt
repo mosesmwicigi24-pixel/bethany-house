@@ -69,6 +69,9 @@ class AppEnvironment(
     var unreadNotifications by mutableIntStateOf(0)
     var pendingCount by mutableIntStateOf(0)
         private set
+    /** The saved queue could not be read: `pendingCount` is not known. */
+    var pendingUnreadable by mutableStateOf(false)
+        private set
 
     fun consoleUrl(route: Route): String = config.hubUrl.trimEnd('/') + "/admin" + route.consolePath
 
@@ -84,7 +87,7 @@ class AppEnvironment(
         if (me != null && s.state == SessionStore.State.SignedIn) {
             val store = OfflineStore(app, me.id)
             offline = store
-            pendingCount = store.pending().size
+            refreshPendingCount()
             val key = config.reverbKey; val host = config.reverbHost
             if (key != null && host != null && realtime == null) {
                 val rt = RealtimeClient(RealtimeClient.Configuration(key, host, config.reverbPort, config.reverbScheme), client)
@@ -101,16 +104,33 @@ class AppEnvironment(
             realtime?.disconnect(); realtime = null
             offline = null
             pendingCount = 0
+            pendingUnreadable = false
         }
     }
 
-    /** Replays queued offline operations when a connection returns. */
+    /** The pending badge, from a checked read: an unreadable queue is flagged, never shown as nothing waiting. */
+    suspend fun refreshPendingCount() {
+        val store = offline ?: run { pendingCount = 0; pendingUnreadable = false; return }
+        try {
+            pendingCount = store.pendingChecked().size
+            pendingUnreadable = false
+        } catch (e: OfflineStore.QueueUnreadable) {
+            pendingUnreadable = true
+        }
+    }
+
+    /** Replays queued offline operations when a connection returns, through the same send path as "Send now". */
     suspend fun replayPending() {
         val store = offline ?: return
         if (!connection.isOnline.value) return
         val result = store.replay(client)
-        pendingCount = store.pending().size
+        refreshPendingCount()
+        if (result.unreadable) toasts.show("Changes saved on this device could not be read, so they were not sent. Don't sign out; ask a manager for help.", StatusTone.DANGER)
         if (result.sent.isNotEmpty()) toasts.show("${result.sent.size} saved change${if (result.sent.size == 1) "" else "s"} sent")
+        if (result.notCleared.isNotEmpty()) toasts.show(
+            "${result.notCleared.size} sent change${if (result.notCleared.size == 1) " was" else "s were"} received by the Hub but could not be cleared from this device. They will not be sent again.",
+            StatusTone.WARNING,
+        )
         result.refused.forEach { (op, e) -> toasts.show("${op.kind.humanized} was refused: ${e.message}", StatusTone.DANGER) }
     }
 

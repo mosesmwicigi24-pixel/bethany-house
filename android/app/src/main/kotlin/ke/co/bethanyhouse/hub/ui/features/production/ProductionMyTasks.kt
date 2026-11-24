@@ -128,7 +128,9 @@ internal fun MyTasksScreen() {
     suspend fun enqueue(kind: String, method: String, path: String, body: JsonElement, key: String) {
         val offline = env.offline
         if (offline == null) { env.toasts.show("Offline and nothing could be saved on this device.", StatusTone.DANGER); return }
-        offline.enqueue(OfflineStore.PendingOperation(kind = kind, method = method, path = path, body = body, dedupeKey = key))
+        if (!offline.enqueue(OfflineStore.PendingOperation(kind = kind, method = method, path = path, body = body, dedupeKey = key))) {
+            env.toasts.show("Offline, and this change could not be saved on this device. Try again when you are back online.", StatusTone.DANGER); return
+        }
         pendingKeys = pendingKeys + key
         env.toasts.show("You're offline — saved on this device and sent when the connection returns.", StatusTone.WARNING)
     }
