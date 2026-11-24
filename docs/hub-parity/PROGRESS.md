@@ -1,5 +1,11 @@
 # Tailors Hub audit progress
 
+### Task detail redesign — in progress, 24 November 2026, Codex
+
+- Replaced the compact-width task overlay with navigation-stack detail, preserving the wide split and the Calendar sheet entry; added a product navigation title, selectable order reference, scoped customer label where present, and labeled due date. Separated specifications and measurements into expandable sections, with locally stored per-account disclosure preferences. Made measurement icons consistent, styled the note quietly, and presented the assigned stages as a vertical timeline. Existing stage actions and job conversation remain.
+- TailorsMobile iPhone 17 Pro simulator build succeeded. With a fictional local Hub, visually checked the in-progress shirt, separate expanded sections and system Back to My Tasks. No live data was changed.
+- **Still open:** measurement units remain UNKNOWN — NEEDS VERIFICATION and are not invented; order and fitting dates are absent from the existing task payload. Verify per-user disclosure persistence, empty/offline/error states, completed and sparse orders, Calendar-to-detail return, VoiceOver, Dynamic Type, dark mode, iPad/Mac and tab-bar clearance. Relative due-date indicators, full before/after screenshot set and the requested broader simulator matrix remain unfinished. Do not describe this redesign as fully verified.
+
 ### Personalized My Tasks header — 24 November 2026, Codex
 
 - Added Tailors Hub branding above the My Tasks navigation title and a greeting using the signed-in account name above the workshop list. Offline and pending-sync controls remain in place.

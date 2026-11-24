@@ -17,12 +17,14 @@ struct MyTasksView: View {
     @State private var syncing = false
     @State private var noteFor: Record?
     @State private var specsExpanded = true
+    @State private var measurementsExpanded = true
+    @State private var preferencesLoaded = false
     private let initialOrderID: Int?
 
     init(initialOrderID: Int? = nil) {
         self.initialOrderID = initialOrderID
         _selectedID = State(initialValue: initialOrderID)
-        _showsDetail = State(initialValue: initialOrderID != nil)
+        _showsDetail = State(initialValue: false)
     }
 
     var body: some View {
@@ -48,7 +50,8 @@ struct MyTasksView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(spacing: 1) {
+                if !showsDetail && initialOrderID == nil {
+                  VStack(spacing: 1) {
                     Text("TAILORS HUB")
                         .font(.system(size: 9, weight: .semibold))
                         .tracking(1.1)
@@ -56,6 +59,7 @@ struct MyTasksView: View {
                     Text("My Tasks").font(.headline)
                 }
                 .accessibilityElement(children: .combine)
+                }
             }
         }
         #endif
@@ -78,32 +82,31 @@ struct MyTasksView: View {
 
     private func workspace(_ groups: [OrderGroup], wide: Bool) -> some View {
         let selection = groups.first { $0.id == selectedID } ?? (wide ? groups.first : nil)
-        let detailVisible = showsDetail && selection != nil
-        return HStack(spacing: 0) {
-            queue(groups, selection: selection?.id)
+        return Group {
+          if !wide, initialOrderID != nil, let selection {
+              orderDetail(selection, back: false).id(selection.id)
+          } else {
+          HStack(spacing: 0) {
+            queue(groups, selection: selection?.id, wide: wide)
                 .frame(width: wide ? 215 : nil)
-                .opacity(!wide && detailVisible ? 0 : 1)
-                .allowsHitTesting(wide || !detailVisible)
-                .accessibilityHidden(!wide && detailVisible)
-                .overlay {
-                    if !wide && detailVisible, let selection {
-                        orderDetail(selection, back: true)
-                            .id(selection.id)
-                    }
+                .navigationDestination(isPresented: $showsDetail) {
+                    if let selection { orderDetail(selection, back: false).id(selection.id) }
                 }
             if wide {
                 Divider()
                 if let selection {
-                    orderDetail(selection, back: false).id(selection.id)
+                    orderDetail(selection, back: true).id(selection.id)
                 } else {
                     EmptyState("Select an order", symbol: "scissors")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+          }
+          }
         }
     }
 
-    private func queue(_ groups: [OrderGroup], selection: Int?) -> some View {
+    private func queue(_ groups: [OrderGroup], selection: Int?, wide: Bool) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -167,7 +170,7 @@ struct MyTasksView: View {
                                 }
                                 .accessibilityAddTraits(.isHeader)
                                 ForEach(orders) { group in
-                                    jobRow(group, selected: selection == group.id)
+                                    jobRow(group, selected: selection == group.id, wide: wide)
                                 }
                             }
                         }
@@ -175,6 +178,7 @@ struct MyTasksView: View {
                 }
             }
             .padding(Theme.Space.l)
+            .padding(.bottom, 36)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
@@ -186,11 +190,11 @@ struct MyTasksView: View {
         return name.isEmpty ? "Hello" : "Hello, \(name)"
     }
 
-    private func jobRow(_ group: OrderGroup, selected: Bool) -> some View {
+    private func jobRow(_ group: OrderGroup, selected: Bool, wide: Bool) -> some View {
         Button {
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                 selectedID = group.id
-                showsDetail = true
+                if !wide { showsDetail = true }
             }
         } label: {
             HStack(spacing: 10) {
@@ -229,34 +233,25 @@ struct MyTasksView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    if back {
-                        Button {
-                            if initialOrderID != nil { dismiss() }
-                            else { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { showsDetail = false } }
-                        } label: {
-                            Label(initialOrderID == nil ? "Task list" : "Calendar", systemImage: "chevron.left")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(minHeight: Theme.tapTarget)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.Palette.brandDeep)
+                    if back { Text(group.name).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader) }
+                    if let customer = group.order["customer_label"]?.string, !customer.isEmpty {
+                        Text("For \(customer)").font(.subheadline).foregroundStyle(Theme.textSecondary)
                     }
-                    Text(group.name).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { orderMetadata(group) }
-                        VStack(alignment: .leading, spacing: 4) { orderMetadata(group) }
+                    if let number = group.order["order_number"]?.string {
+                        Text(number).font(.caption).monospacedDigit().textSelection(.enabled)
+                            .foregroundStyle(Theme.textSecondary)
                     }
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                    if let due = group.order["due_date"]?.date {
+                        Label { HStack { Text("Due"); DateText(due, style: .date) } } icon: { Image(systemName: "calendar") }
+                            .font(.caption).foregroundStyle(Theme.textSecondary)
+                    }
                 }
                 .padding(.bottom, 2)
 
                 if let notice = group.notice {
                     Label(notice, systemImage: group.lane == .inspection ? "checkmark.shield" : "hourglass")
                         .font(.subheadline)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.Palette.brand.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        .foregroundStyle(Theme.textSecondary)
                 }
 
                 ForEach(group.openStages) { task in
@@ -265,15 +260,12 @@ struct MyTasksView: View {
 
                 let specs = group.order["specifications"]?.stringPairs ?? []
                 let measurements = MeasurementSheet.of(group.order["measurements"])
-                if !specs.isEmpty || measurements.gender != nil || !measurements.body.isEmpty {
+                if !specs.isEmpty || measurements.gender != nil {
                     VStack(spacing: 0) {
                         DisclosureGroup(isExpanded: $specsExpanded) {
                             VStack(alignment: .leading, spacing: 12) {
-                                WorkshopMeasurements(measurements: measurements)
+                                if let gender = measurements.gender { DetailRow("For", gender.capitalized) }
                                 if !specs.isEmpty {
-                                    Text("Specifications").font(.caption.weight(.semibold))
-                                        .foregroundStyle(Theme.textSecondary)
-                                        .accessibilityAddTraits(.isHeader)
                                     ForEach(Array(specs.enumerated()), id: \.offset) { _, spec in
                                         DetailRow(spec.0.humanized, spec.1)
                                     }
@@ -282,16 +274,16 @@ struct MyTasksView: View {
                             .padding(.top, 10)
                         } label: {
                             HStack(spacing: 8) {
-                                Label("Specs & measurements", systemImage: "ruler")
+                                Label("Specifications", systemImage: "list.bullet.rectangle")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(Theme.text)
                                 Spacer(minLength: 4)
-                                if !measurements.body.isEmpty {
-                                    Text("\(measurements.body.count)")
+                                if !specs.isEmpty || measurements.gender != nil {
+                                    Text("\(specs.count + (measurements.gender == nil ? 0 : 1))")
                                         .font(.caption.weight(.medium))
                                         .monospacedDigit()
                                         .foregroundStyle(Theme.textSecondary)
-                                        .accessibilityLabel("\(measurements.body.count) measurements")
+                                        .accessibilityLabel("\(specs.count + (measurements.gender == nil ? 0 : 1)) specification fields")
                                 }
                             }
                             .frame(minHeight: Theme.tapTarget, alignment: .leading)
@@ -302,7 +294,24 @@ struct MyTasksView: View {
                     .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
                 }
 
-                if let notes = group.order["notes"]?.string, !notes.isEmpty {
+                if !measurements.body.isEmpty {
+                    DisclosureGroup(isExpanded: $measurementsExpanded) {
+                        WorkshopMeasurements(measurements: measurements, showsGender: false)
+                            .padding(.top, 8)
+                    } label: {
+                        HStack {
+                            Label("Measurements", systemImage: "ruler").font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text("\(measurements.body.count)").font(.caption).foregroundStyle(Theme.textSecondary)
+                                .accessibilityLabel("\(measurements.body.count) measurements")
+                        }.frame(minHeight: Theme.tapTarget)
+                    }
+                    .tint(Theme.Palette.brandDeep)
+                    .padding(14)
+                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+                }
+
+                if let notes = group.order["notes"]?.string, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     VStack(alignment: .leading, spacing: 7) {
                         Label("Bench note", systemImage: "text.alignleft")
                             .font(.subheadline.weight(.semibold))
@@ -311,7 +320,7 @@ struct MyTasksView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .background(Theme.Palette.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
                 }
 
                 if !group.tasks.isEmpty {
@@ -327,6 +336,31 @@ struct MyTasksView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.card)
         .refreshable { await refresh() }
+        .onAppear { loadDisclosurePreferences() }
+        .onChange(of: specsExpanded) { _, value in saveDisclosurePreference("specs", value: value) }
+        .onChange(of: measurementsExpanded) { _, value in saveDisclosurePreference("measurements", value: value) }
+        .navigationTitle(group.name)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.large)
+        #endif
+    }
+
+    private func preferenceKey(_ name: String) -> String? {
+        guard let userID = env.session.me?.id else { return nil }
+        return "tailors.job.\(userID).\(name).expanded"
+    }
+
+    private func loadDisclosurePreferences() {
+        preferencesLoaded = false
+        let defaults = UserDefaults.standard
+        if let key = preferenceKey("specs"), let value = defaults.object(forKey: key) as? Bool { specsExpanded = value }
+        if let key = preferenceKey("measurements"), let value = defaults.object(forKey: key) as? Bool { measurementsExpanded = value }
+        preferencesLoaded = true
+    }
+
+    private func saveDisclosurePreference(_ name: String, value: Bool) {
+        guard preferencesLoaded, let key = preferenceKey(name) else { return }
+        UserDefaults.standard.set(value, forKey: key)
     }
 
     private func stageTimeline(_ group: OrderGroup) -> some View {
@@ -348,12 +382,25 @@ struct MyTasksView: View {
                 let status = task.status
                 let finished = status == "completed"
                 HStack(spacing: 10) {
-                    ProductionStageIcon(stage: task["stage"], tint: stageTint(status), completed: finished)
+                    VStack(spacing: 0) {
+                        Image(systemName: finished ? "checkmark.circle.fill" : (status == "in_progress" ? "circle.inset.filled" : "circle"))
+                            .foregroundStyle(finished ? Theme.Palette.success : stageTint(status))
+                            .font(.title3)
+                            .accessibilityHidden(true)
+                        if task.id != group.tasks.last?.id {
+                            Rectangle().fill(Theme.line).frame(width: 1, height: 18)
+                        }
+                    }
+                    .frame(width: 30)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(stageName(task)).font(.subheadline.weight(finished ? .regular : .semibold))
-                        if !finished {
-                            Text(stageLabel(status)).font(.caption).foregroundStyle(Theme.textSecondary)
-                        }
+                        HStack(spacing: 5) {
+                            Text(stageLabel(status))
+                            if finished, let completed = task["completed_at"]?.date {
+                                Text("·")
+                                DateText(completed, style: .date)
+                            }
+                        }.font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(stageName(task))
@@ -372,9 +419,6 @@ struct MyTasksView: View {
                 }
                 .padding(.vertical, 4)
                 .frame(minHeight: 33)
-                if task.id != group.tasks.last?.id {
-                    Divider().padding(.leading, 38)
-                }
             }
         }
         .padding(14)
