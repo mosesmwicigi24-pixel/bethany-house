@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### In progress — 24 November 2026, Codex
+
+- Refining Apple My Tasks job layout, linking its existing production conversation, and removing Calendar's stage workload section. No Android offline files or Hub permission changes.
+
 ### Calendar and My Tasks navigation — 24 November 2026, Codex
 
 - Calendar now opens the same My Tasks job view when an order is in the signed-in worker's task list. A Calendar back control returns to the calendar. Other orders retain the existing production-order route; no Hub endpoints or permission gates changed.
