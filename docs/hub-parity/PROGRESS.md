@@ -238,3 +238,12 @@ a failed status refresh before the tap. The five `ClockGateTests` and nine
 and replay timestamp cases. Airplane-mode reachability changes and production
 attendance processing were outside this fixture run. Dark appearance, larger
 text, iPad, empty, and offline job-detail states remain open.
+
+### In progress — 24 November 2026, Claude: Android offline queue
+
+Taking `android/core/.../OfflineStore.kt`, `AppEnvironment.kt` (replay),
+`ui/shell/HubShell.kt` (sign-out count) and the pending-punch code in
+`ui/features/me/MeClock.kt`. Porting the iOS fixes: one sending path (no
+double send between replay and Send now), no resend after a failed queue
+rewrite, an unreadable queue never reads as empty, and only a final 4xx drops
+a saved punch (today any non-offline error, a 500 included, deletes it).
