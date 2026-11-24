@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -47,6 +48,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiClient
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.ClockGate
 import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.Geofence
@@ -307,7 +309,8 @@ internal fun ClockScreen() {
     val canPunch = ClockGate.statusUsable(data != null, statusError) && fix != null && outlet != null && !busy && !mocked && (active != null || insideOrEdge)
     val showForce = ClockGate.forceAllowed(data != null, statusError) && active == null && fix != null && outlet != null && canOverride && !mocked && (serverAsksOverride || !insideOrEdge)
 
-    Page("Time clock", subtitle = MeFormat.longDay(Instant.now()), refresh = { status.reload() }) {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page("Time clock", subtitle = MeFormat.longDay(Instant.now()), refresh = { status.reload() }, showTitle = !tailors) {
         // Words for every state
         val (bannerText, bannerTone) = when (val ls = locStatus) {
             LocStatus.Denied -> "Location is off for this app" to StatusTone.DANGER
@@ -348,8 +351,9 @@ internal fun ClockScreen() {
 
         // The clock and the button
         SectionCard {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text(MeFormat.time(now), fontSize = 48.sp, fontWeight = FontWeight.Black, lineHeight = 52.sp)
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = if (tailors) Alignment.Start else Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(if (tailors) Space.s else Space.m)) {
+                if (tailors) Text(if (data == null) "TIME CLOCK" else if (active == null) "READY FOR YOUR SHIFT" else "YOUR SHIFT", style = MaterialTheme.typography.labelMedium, color = Palette.brandDeep)
+                Text(MeFormat.time(now), fontSize = if (tailors) 32.sp else 48.sp, fontWeight = if (tailors) FontWeight.SemiBold else FontWeight.Black, lineHeight = if (tailors) 38.sp else 52.sp)
                 val stateLine = when {
                     data == null -> "Loading…"
                     active == null -> "Not clocked in"
@@ -360,11 +364,21 @@ internal fun ClockScreen() {
                 val hint = when {
                     fix == null -> "waiting for location"
                     active != null -> outlet["name"].str ?: ""
+                    tailors && distanceMeters == null -> "outlet location not set"
                     verdict == Geofence.Verdict.INSIDE -> "you are at ${outlet["name"].str ?: "the outlet"}"
                     verdict == Geofence.Verdict.EDGE -> "near the zone · will be noted"
                     else -> "outside the zone"
                 }
-                Box(
+                if (tailors) {
+                    if (fix == null && locStatus == LocStatus.Idle) TextButton(onClick = { startLocation() }) { Text("Check location") }
+                    else {
+                        Button(onClick = { scope.launch { punch() } }, enabled = canPunch) {
+                            if (busy) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            else Text(if (active != null) "Clock out" else "Clock in")
+                        }
+                        Text(hint.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+                    }
+                } else Box(
                     Modifier.size(176.dp).alpha(if (canPunch) 1f else 0.4f).shadow(14.dp, CircleShape).background(if (active != null) Palette.ink else Palette.brand, CircleShape)
                         .clickable(enabled = canPunch) { scope.launch { punch() } },
                     contentAlignment = Alignment.Center,
@@ -390,7 +404,7 @@ internal fun ClockScreen() {
                 }
             }
             fix?.let { f ->
-                Text("Phone accuracy ±${f.accuracyMeters?.roundToInt() ?: 0} m${radius?.let { " · zone ${it.roundToInt()} m" } ?: ""}. Location is read only while this screen is open.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                Text("Phone accuracy ±${f.accuracyMeters?.roundToInt() ?: 0} m${radius?.let { " · zone ${it.roundToInt()} m" } ?: ""}. Location is read only while this screen is open.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary, textAlign = if (tailors) TextAlign.Start else TextAlign.Center, modifier = Modifier.fillMaxWidth())
             }
         }
 
@@ -424,6 +438,7 @@ private fun SummaryCard(data: JsonElement?, mine: JsonElement?, leave: JsonEleme
     val last = data["last_entry"].obj
     val todayMinutes = (data["today_worked_minutes"].int ?: 0) + (if (active != null) max(0, elapsedMinutes - (active["elapsed_minutes"].int ?: 0)) else 0)
     MeListCard {
+        if (env.flavor == AppFlavor.TAILORS) MeListRow { Text("Your time", style = MaterialTheme.typography.titleSmall, color = Palette.brandDeep) }
         SummaryRow("Today's shift") {
             Text(
                 today?.let { "${it["starts_at"].str ?: ""} – ${it["ends_at"].str ?: ""}${it["label"].str?.let { l -> " · $l" } ?: ""}" }
@@ -435,7 +450,16 @@ private fun SummaryCard(data: JsonElement?, mine: JsonElement?, leave: JsonEleme
         SummaryRow("Today") { Text(MeFormat.clockMinutes(todayMinutes), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold) }
         SummaryRow("Leave balance") { Text(annual["available"].int?.let { "$it days" } ?: "—", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { env.navigator.go(Route.MyLeave) }) }
         SummaryRow("This week") { Text(MeFormat.clockMinutes(data["week_worked_minutes"].int ?: 0), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { env.navigator.go(Route.MyTimesheet) }) }
-        SummaryRow("Last punch") {
+        if (env.flavor == AppFlavor.TAILORS && last != null) MeListRow {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Last punch", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                Text("${MeFormat.whenAt(last["clock_out_at"].date ?: last["clock_in_at"].date)} · ${if (!last["clock_out_at"].isNull) "out" else "in"}", style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (last["clock_in_method"].str == "override") StatusBadge("override", StatusTone.WARNING)
+                    FlagChips(last)
+                }
+            }
+        } else SummaryRow("Last punch") {
             if (last != null) Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${MeFormat.whenAt(last["clock_out_at"].date ?: last["clock_in_at"].date)} · ${if (!last["clock_out_at"].isNull) "out" else "in"}", style = MaterialTheme.typography.bodySmall)
                 if (last["clock_in_method"].str == "override") StatusBadge("override", StatusTone.WARNING)
@@ -473,5 +497,5 @@ private fun SummaryRow(label: String, value: @Composable () -> Unit) {
 internal fun FlagChips(entry: JsonElement?) {
     val short = mapOf("accuracy_low" to "imprecise", "edge" to "near the edge", "sent_late" to "sent late", "mock_location" to "mock location", "auto_clock_out" to "auto closed")
     val flags = entry["flags"].records.mapNotNull { it.str }
-    if (flags.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { flags.forEach { StatusBadge(short[it] ?: it, StatusTone.WARNING) } }
+    if (flags.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { flags.forEach { StatusBadge(short[it] ?: it, StatusTone.WARNING) } }
 }

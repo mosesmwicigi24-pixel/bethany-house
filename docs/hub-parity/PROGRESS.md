@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### Android time-clock presentation — 25 November 2026, Codex (claimed)
+### Android time-clock presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking read-only comparison of the Android time clock against iPhone for matching location and attendance states. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeClock.kt` and corresponding Android tests; no attendance or location policy changes. Test environment confirmed by owner.
+- The Tailors Android clock uses a compact status-and-time card and a labeled Your time summary; long last-punch flags wrap. It no longer claims the tailor is at an outlet when the outlet has no saved coordinates. Existing clock, mock-location, permission and attendance eligibility checks are unchanged; Hub retains its existing clock design.
+- Both Android debug builds, core ClockGate tests and Android kiosk tests passed. On the signed-in test emulator, visually checked the no-outlet-location state and wrapped last-punch flags without recording attendance. Screenshots and the differing iPhone location state are in `ANDROID_CHECKLIST.md`. iPhone source appears to show the same misleading “You are at…” hint when distance is unavailable; logged for iOS review without changing it. Clock-in/out, background trail, offline, other permission states, dark mode, large text and TalkBack remain unverified. Claim released.
 
 ### Android task-detail actions — 25 November 2026, Codex (claim released; verification open)
 
