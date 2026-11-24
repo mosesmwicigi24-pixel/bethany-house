@@ -1,8 +1,10 @@
 # Tailors Hub audit progress
 
-### In progress — 24 November 2026, Codex
+### My Tasks workspace — 24 November 2026, Codex
 
-- Refining Apple My Tasks job layout, linking its existing production conversation, and removing Calendar's stage workload section. No Android offline files or Hub permission changes.
+- Removed Calendar's open-work-by-stage section. My Tasks now opens specifications and measurements by default, groups the bench note in a themed card, and previews up to three recent messages from the existing membership-scoped production channel. Opening the preview uses the existing full Messages conversation; previews do not mark messages read. Missing or dismissed channels are not created or rejoined automatically.
+- TailorsMobile simulator build succeeded. With a fictional local Hub on iPhone 17 Pro, verified the expanded measurement sheet, bench note, recent message, and opening the same conversation. No live Hub data was changed. The screenshot inspection showed the top of the workspace; the conversation was also checked via accessibility navigation.
+- Calendar removal was checked in source but not visually rechecked after the simulator control disconnected. Empty/dismissed channel, error/retry, dark mode, accessibility sizes, iPad and live Hub behavior remain unverified. No Android offline files or Hub permission logic changed.
 
 ### Calendar and My Tasks navigation — 24 November 2026, Codex
 

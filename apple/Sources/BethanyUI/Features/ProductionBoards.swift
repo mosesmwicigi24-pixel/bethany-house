@@ -206,7 +206,6 @@ struct ProductionCalendarView: View {
                     }
                     monthView(orders)
                     if !overdue.isEmpty { overdueSection(overdue) }
-                    stages(data)
                     if floorWorker {
                         Button { env.navigator.go(.productionMyTasks) } label: {
                             Label("Open My Tasks", systemImage: "scissors")
@@ -409,32 +408,6 @@ struct ProductionCalendarView: View {
         }
     }
 
-    @ViewBuilder private func stages(_ data: JSONValue) -> some View {
-        let byStage = data["by_stage"]?.object ?? [:]
-        if !byStage.isEmpty {
-            SectionCard("Open work by stage") {
-                Text("Open tasks across these orders, including paused work.")
-                    .font(.caption).foregroundStyle(Theme.textSecondary)
-                ForEach(byStage.keys.sorted(), id: \.self) { key in
-                    let name = data["stage_names"]?[key]?.string ?? "Stage \(key)"
-                    let count = byStage[key]?.int
-                    HStack(spacing: 10) {
-                        ProductionStageIcon(stage: .object(["name": .string(name)]), tint: Theme.Palette.brandDeep)
-                        Text(name).font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(count.map { "\($0) \($0 == 1 ? "task" : "tasks")" } ?? (byStage[key]?.string ?? "—"))
-                            .font(.caption.weight(.semibold)).monospacedDigit()
-                            .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 9).padding(.vertical, 5)
-                            .background(Theme.card, in: Capsule())
-                    }
-                    .padding(9)
-                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10))
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-    }
 }
 
 private struct CalendarLegendStyle: LabelStyle {

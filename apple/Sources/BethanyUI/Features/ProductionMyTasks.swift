@@ -16,6 +16,7 @@ struct MyTasksView: View {
     @State private var pending: [OfflineStore.PendingOperation] = []
     @State private var syncing = false
     @State private var noteFor: Record?
+    @State private var specsExpanded = true
     private let initialOrderID: Int?
 
     init(initialOrderID: Int? = nil) {
@@ -92,7 +93,7 @@ struct MyTasksView: View {
 
     private func queue(_ groups: [OrderGroup], selection: Int?) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 8) {
                     Label("Workshop", systemImage: "scissors")
                         .font(.subheadline.weight(.semibold))
@@ -198,7 +199,7 @@ struct MyTasksView: View {
     private func orderDetail(_ group: OrderGroup, back: Bool) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 6) {
                     if back {
                         Button {
                             if initialOrderID != nil { dismiss() }
@@ -219,6 +220,7 @@ struct MyTasksView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
                 }
+                .padding(.bottom, 2)
 
                 if let notice = group.notice {
                     Label(notice, systemImage: group.lane == .inspection ? "checkmark.shield" : "hourglass")
@@ -236,8 +238,7 @@ struct MyTasksView: View {
                 let measurements = MeasurementSheet.of(group.order["measurements"])
                 if !specs.isEmpty || measurements.gender != nil || !measurements.body.isEmpty {
                     VStack(spacing: 0) {
-                        Divider()
-                        DisclosureGroup {
+                        DisclosureGroup(isExpanded: $specsExpanded) {
                             VStack(alignment: .leading, spacing: 12) {
                                 WorkshopMeasurements(measurements: measurements)
                                 if !specs.isEmpty {
@@ -249,7 +250,7 @@ struct MyTasksView: View {
                                     }
                                 }
                             }
-                            .padding(.bottom, 12)
+                            .padding(.top, 10)
                         } label: {
                             HStack(spacing: 8) {
                                 Label("Specs & measurements", systemImage: "ruler")
@@ -267,20 +268,28 @@ struct MyTasksView: View {
                             .frame(minHeight: Theme.tapTarget, alignment: .leading)
                         }
                         .tint(Theme.Palette.brandDeep)
-                        Divider()
                     }
+                    .padding(14)
+                    .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
                 }
 
                 if let notes = group.order["notes"]?.string, !notes.isEmpty {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Bench note").font(.subheadline.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 7) {
+                        Label("Bench note", systemImage: "text.alignleft")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.Palette.brandDeep)
                         Text(notes).font(.subheadline).foregroundStyle(Theme.textSecondary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(Theme.Palette.brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
                 }
 
                 if !group.tasks.isEmpty {
                     stageTimeline(group)
                 }
+
+                WorkshopConversation(orderID: group.id)
             }
             .padding(Theme.Space.l)
             .frame(maxWidth: 620, alignment: .leading)
@@ -572,6 +581,101 @@ private func stageLabel(_ status: String?) -> String {
     case "completed": return "Complete"
     case "failed": return "Failed"
     default: return status?.humanized ?? "Stage"
+    }
+}
+
+/// Uses the same membership-scoped production channel as Messages; previews do
+/// not mark the conversation read. Opening it uses the existing conversation UI.
+private struct WorkshopConversation: View {
+    @Environment(AppEnvironment.self) private var env
+    let orderID: Int
+    @State private var channel: ChatChannel?
+    @State private var messages: [ChatMessage] = []
+    @State private var loading = true
+    @State private var error: String?
+    @State private var showingConversation = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Job conversation", systemImage: "bubble.left.and.bubble.right")
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                if let channel, channel.unread > 0 {
+                    Text("\(channel.unread) new").font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.Palette.brandDeep)
+                }
+            }
+            if loading {
+                ProgressView("Loading conversation").font(.caption)
+            } else if let error {
+                Text(error).font(.caption).foregroundStyle(Theme.textSecondary)
+                Button("Try again") { Task { await load() } }.font(.caption.weight(.semibold))
+            } else if channel == nil {
+                Text("No conversation is available for this job in Messages.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+            } else if messages.isEmpty {
+                Text("No messages yet.").font(.caption).foregroundStyle(Theme.textSecondary)
+            } else {
+                ForEach(messages) { message in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(message.userName).font(.caption.weight(.semibold))
+                            Spacer(minLength: 8)
+                            if let date = message.createdAt {
+                                DateText(date, style: .relative).font(.caption).foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                        Text(message.parsed.text.isEmpty ? "Attachment" : message.parsed.text)
+                            .font(.subheadline).foregroundStyle(Theme.text)
+                            .lineLimit(3)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            if channel != nil {
+                Button { showingConversation = true } label: {
+                    Label("Open conversation", systemImage: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: Theme.tapTarget)
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.Palette.brandDeep)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 14))
+        .task(id: orderID) { await load() }
+        .sheet(isPresented: $showingConversation, onDismiss: { Task { await load() } }) {
+            NavigationStack {
+                CommsView(initialChannelId: channel?.id)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { showingConversation = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    private func load() async {
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let data = try await env.session.client.json("/v1/admin/channels")
+            channel = (data["channels"]?.array ?? []).map(ChatChannel.init(json:))
+                .first { $0.contextType == "production_order" && $0.contextId == orderID }
+            guard let channel else { messages = []; return }
+            let thread = try await env.session.client.json("/v1/admin/channels/\(channel.id)/messages", query: ["per_page": "3"])
+            messages = (thread["messages"]?.array ?? []).map(ChatMessage.init(json:))
+        } catch {
+            messages = []
+            self.error = "Couldn't load this conversation. Check your connection and try again."
+        }
     }
 }
 
