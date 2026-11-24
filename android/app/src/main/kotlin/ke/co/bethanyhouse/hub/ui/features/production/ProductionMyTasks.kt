@@ -1,5 +1,7 @@
 package ke.co.bethanyhouse.hub.ui.features.production
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -38,6 +40,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.OfflineStore
 import ke.co.bethanyhouse.hub.core.Record
@@ -58,6 +61,7 @@ import ke.co.bethanyhouse.hub.ui.components.DateStyle
 import ke.co.bethanyhouse.hub.ui.components.DateText
 import ke.co.bethanyhouse.hub.ui.components.DetailRow
 import ke.co.bethanyhouse.hub.ui.components.EmptyState
+import ke.co.bethanyhouse.hub.ui.components.formatDate
 import ke.co.bethanyhouse.hub.ui.components.InfoSheet
 import ke.co.bethanyhouse.hub.ui.components.LoadableView
 import ke.co.bethanyhouse.hub.ui.components.Page
@@ -94,6 +98,8 @@ internal fun MyTasksScreen() {
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     var history by remember { mutableStateOf(false) }
+    var selectedOrder by remember { mutableStateOf<Int?>(null) }
+    BackHandler(enabled = selectedOrder != null) { selectedOrder = null }
     var pendingKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     var noteFor by remember { mutableStateOf<Record?>(null) }
     var completed by remember { mutableStateOf<Record?>(null) }
@@ -162,27 +168,51 @@ internal fun MyTasksScreen() {
         }
     }
 
-    Page("My Tasks", subtitle = env.session.current.me?.let { "Your stages, ${it.firstName}" }, refresh = { tasks.reload() }) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            SegmentedTabs(listOf(false to "Active", true to "History"), history) { history = it }
-            Spacer(Modifier.weight(1f))
-            if (queued > 0 || pendingKeys.isNotEmpty()) Text("${maxOf(queued, pendingKeys.size)} waiting to send", style = MaterialTheme.typography.labelSmall, color = Palette.amber)
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page(if (tailors && selectedOrder == null) "Tailors Hub" else "My Tasks", subtitle = if (tailors) null else env.session.current.me?.let { "Your stages, ${it.firstName}" }, refresh = { tasks.reload() }) {
+        if (tailors && selectedOrder == null) {
+            Text(env.session.current.me?.name?.takeIf { it.isNotBlank() }?.let { "Hello, $it" } ?: "Hello", style = MaterialTheme.typography.headlineSmall)
+            Text("Your workshop, at a glance.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+            Text("Workshop", style = MaterialTheme.typography.titleSmall, color = Palette.brand)
         }
+        if (!tailors || selectedOrder == null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                SegmentedTabs(listOf(false to "Active", true to "History"), history) { history = it; selectedOrder = null }
+                Spacer(Modifier.weight(1f))
+                if (queued > 0 || pendingKeys.isNotEmpty()) Text("${maxOf(queued, pendingKeys.size)} waiting to send", style = MaterialTheme.typography.labelSmall, color = Palette.amber)
+            }
+        } else TextButton(onClick = { selectedOrder = null }) { Text("‹  Task list") }
         LoadableView(tasks.state, retry = { tasks.load() }, isEmpty = { it.isEmpty() }, empty = {
             EmptyState(if (history) "No finished stages yet" else "Nothing on your bench", if (history) null else "When a stage is assigned to you it shows here.", Icons.Default.ContentCut)
         }) { rows ->
+            val groups = taskGroups(rows)
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                taskGroups(rows).forEach { g ->
-                    SectionCard {
-                        TaskOrderHeader(g.order)
-                        g.tasks.forEach { t ->
-                            TaskCard(
-                                task = t, order = g.order,
-                                pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") },
-                                onAction = { a -> act(t, a) },
-                                onCount = { qty, batch -> count(t, qty, batch) },
-                                onNote = { noteFor = t },
-                            )
+                if (tailors && selectedOrder == null) {
+                    listOf("In progress", "Ready to start", "Waiting", "With Quality Control", "Finished stages").forEach { lane ->
+                        val matching = groups.filter { taskLane(it, history) == lane }
+                        if (matching.isNotEmpty()) {
+                            Text(lane, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.hub.textSecondary)
+                            matching.forEach { group ->
+                                SectionCard {
+                                    Column(Modifier.fillMaxWidth().clickable { selectedOrder = group.id }.padding(vertical = Space.s), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(taskName(group.order), style = MaterialTheme.typography.titleMedium)
+                                        Text(taskSummary(group, history), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val visible = if (tailors) groups.filter { it.id == selectedOrder } else groups
+                    if (tailors && visible.isEmpty()) Text("This job is no longer on your task list.", style = MaterialTheme.typography.bodyMedium)
+                    visible.forEach { g ->
+                        SectionCard {
+                            TaskOrderHeader(g.order)
+                            g.tasks.forEach { t ->
+                                TaskCard(task = t, order = g.order,
+                                    pending = pendingKeys.contains("task-${t.id}-status") || pendingKeys.any { it.startsWith("task-${t.id}-progress") },
+                                    onAction = { a -> act(t, a) }, onCount = { qty, batch -> count(t, qty, batch) }, onNote = { noteFor = t })
+                            }
                         }
                     }
                 }
@@ -223,6 +253,40 @@ internal fun taskGroups(rows: List<Record>): List<TaskOrderGroup> {
         val ts = byOrder[oid]!!.sortedBy { it["sequence"].int ?: 0 }
         TaskOrderGroup(oid, ts.firstOrNull()?.get("production_order"), ts)
     }
+}
+
+private fun taskName(order: JsonElement?): String = order["product"]["translations"][0]["name"].str ?: order["product_name"].str ?: "Garment"
+
+private fun openTaskStages(group: TaskOrderGroup, history: Boolean): List<Record> =
+    if (history || !ProductionStatus.acceptsFloorWork(group.order["status"].str)) emptyList()
+    else group.tasks.filter { it.status in listOf("pending", "in_progress", "paused") }
+
+internal fun taskLane(group: TaskOrderGroup, history: Boolean): String {
+    val status = group.order["status"].str
+    val open = openTaskStages(group, history)
+    return when {
+        history -> "Finished stages"
+        status == "qc_pending" || status == "qc_passed" -> "With Quality Control"
+        open.any { it.status == "in_progress" || it.status == "paused" } -> "In progress"
+        open.any { it["blocked_by_stage"].str == null } -> "Ready to start"
+        else -> "Waiting"
+    }
+}
+
+internal fun taskSummary(group: TaskOrderGroup, history: Boolean): String {
+    if (!history) when (group.order["status"].str) {
+        "qc_pending" -> return "Awaiting inspection · No action needed"
+        "qc_passed" -> return "Inspection passed · No action needed"
+        "qc_failed" -> return "Inspection needs follow-up from a manager"
+    }
+    val open = openTaskStages(group, history)
+    val stage = open.firstOrNull { it.status == "in_progress" || it.status == "paused" } ?: open.firstOrNull()
+    if (stage != null) {
+        stage["blocked_by_stage"].str?.let { return "Waiting on $it" }
+        val label = when (stage.status) { "in_progress" -> "In progress"; "paused" -> "Paused"; else -> "Ready to start" }
+        return "${stage["stage"]["name"].str ?: "Stage"} · $label"
+    }
+    return if (history) "${group.tasks.size} ${if (group.tasks.size == 1) "stage" else "stages"}" else "Your stages are finished"
 }
 
 @Composable
@@ -285,6 +349,14 @@ private fun TaskCard(task: Record, order: JsonElement?, pending: Boolean, onActi
             task["estimated_hours"].str?.takeIf { it != "0" }?.let { Text("$it h", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary) }
         }
         task["stage"]["description"].str?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
+        if (env.flavor == AppFlavor.TAILORS) {
+            val timestamp = when (status) {
+                "completed" -> task["completed_at"].date
+                "in_progress", "paused" -> task["started_at"].date
+                else -> null
+            }
+            timestamp?.let { Text("${if (status == "completed") "Done" else "Started"} · ${formatDate(it, DateStyle.DATE_TIME)}", style = MaterialTheme.typography.labelSmall, color = Palette.brand) }
+        }
         if (blocked != null && task["started_at"].isNull) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Lock, contentDescription = null, tint = Palette.amber, modifier = Modifier.size(14.dp))

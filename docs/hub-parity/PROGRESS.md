@@ -2,6 +2,8 @@
 
 ### Android parity with iPhone — 24 November 2026, Codex (in progress)
 
+- Android Tailors Hub sign-in now shows the tailor name and scissors. My Tasks groups orders into iPhone-style status lanes, opens an order for its existing stage actions, and shows recorded start/completion timestamps in the theme color. Task mutations and offline code were not changed.
+- Tailors debug APK built and ran on the Android emulator; the sign-in branding was visually checked. Focused ProductionParityTest passed, including lane classifications. Signed-in task list, task actions, timestamps and accessibility still need emulator verification using a suitable test account or fixture. My Tasks details, item conversations, profile, calendar order navigation and other screens still need parity work.
 - Auditing Android Tailors Hub against the iPhone experience; starting with the production calendar. Android offline queue files remain outside this work.
 - Calendar: hides the stage breakdown in Tailors Hub, adds a past-due summary, date grid, selected-day filtering and Today/Next deadline shortcuts. Tailors debug APK built, installed and launched on the Android emulator; signed-in calendar appearance and interactions remain unverified. My Tasks, calendar order navigation, profile and other screens still require parity work and verification.
 
