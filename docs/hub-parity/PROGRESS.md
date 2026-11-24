@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android profile presentation — 25 November 2026, Codex (claimed)
+
+- Taking a read-only side-by-side review of Profile, My Employment and My Activity. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/ProfileFeature.kt` and related Android profile presentation tests. Authentication/security logic, server permissions and production configuration are outside this claim.
+
 ### Android messages presentation — 25 November 2026, Codex (claim released; verification open)
 
 - Tailors Android now groups channel rows in cards, displays contextual descriptions and the iPhone's empty-message wording, and shows a production-order header with an Open record action in contextual conversations. Hub flavor keeps its prior list and header. Existing message loading, read marking and sending code was not changed.
