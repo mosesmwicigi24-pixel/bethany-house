@@ -36,6 +36,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.PermanentDrawerSheet
@@ -144,6 +145,13 @@ private fun PhoneShell() {
             topBar = { HubTopBar(showMenu = true, onMenu = { scope.launch { drawer.open() } }) },
             bottomBar = {
                 if (nav.path.isEmpty()) NavigationBar(containerColor = MaterialTheme.hub.card) {
+                    val itemColors = if (s.flavor == AppFlavor.TAILORS) NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        indicatorColor = MaterialTheme.hub.canvas,
+                        unselectedIconColor = MaterialTheme.hub.textSecondary,
+                        unselectedTextColor = MaterialTheme.hub.textSecondary,
+                    ) else NavigationBarItemDefaults.colors()
                     tabs.forEach { tab ->
                         val selected = nav.selection == tab.route
                         NavigationBarItem(
@@ -151,9 +159,10 @@ private fun PhoneShell() {
                             onClick = { nav.go(tab.route) },
                             icon = { NavIcon(tab, badge = if (tab.route == Route.Notifications) env.unreadNotifications else 0) },
                             label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = itemColors,
                         )
                     }
-                    NavigationBarItem(selected = false, onClick = { nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") })
+                    NavigationBarItem(selected = false, onClick = { nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") }, colors = itemColors)
                 }
             },
         ) { padding -> CurrentScreen(Modifier.padding(padding)) }

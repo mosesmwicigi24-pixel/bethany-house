@@ -1,5 +1,10 @@
 # Tailors Hub audit progress
 
+### Android navigation appearance — 24 November 2026, Codex (done)
+
+- Replaced the Tailors phone navigation's purple Material default with the app's orange selection and neutral indicator. The Hub flavor retains its existing colors. Tailors debug APK build and ShellRenderTest passed; visually checked the updated selected tab on the signed-in Android emulator. Dark mode and large text remain unverified.
+- Signed-in My Tasks and Calendar loaded account data; the task detail was opened read-only. Full screen and behavior parity, including signed-in profile/security flows, remain open. No production records were changed.
+
 ### Android parity with iPhone — 24 November 2026, Codex (in progress)
 
 - Android now exposes existing two-step setup, password-confirmed disable and recovery-code replacement with an explicit warning. Server authentication, role and step-up checks remain authoritative. Tailors APK build and mock-Hub tests for setup, confirmation, refusal and recovery requests passed; no live security setting was changed. Signed-in setup, QR scanning, step-up, recovery-code handling and screen accessibility remain unverified on an emulator. Android passkey registration remains open.
