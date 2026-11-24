@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DrawerValue
@@ -54,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,7 +63,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ke.co.bethanyhouse.hub.ui.LocalTailorsTextSize
+import ke.co.bethanyhouse.hub.ui.TailorsTextSizeDialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.core.layout.WindowWidthSizeClass
 import ke.co.bethanyhouse.hub.LocalEnv
@@ -130,6 +135,9 @@ private fun PhoneShell() {
     val nav = env.navigator
     val s = env.session.current
     val tabs = s.flavor.phoneTabs(s.permissions, s.home)
+    var moreOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(nav.selection) { moreOpen = false }
+    BackHandler(enabled = moreOpen && nav.path.isEmpty()) { moreOpen = false }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     LaunchedEffect(nav.drawerOpen) { if (nav.drawerOpen) drawer.open() else drawer.close() }
@@ -142,7 +150,7 @@ private fun PhoneShell() {
     ) {
         Scaffold(
             containerColor = MaterialTheme.hub.canvas,
-            topBar = { HubTopBar(showMenu = true, onMenu = { scope.launch { drawer.open() } }) },
+            topBar = { HubTopBar(showMenu = !(moreOpen && nav.path.isEmpty()), onMenu = { scope.launch { drawer.open() } }, titleOverride = if (moreOpen && nav.path.isEmpty()) "More" else null) },
             bottomBar = {
                 if (nav.path.isEmpty()) NavigationBar(containerColor = MaterialTheme.hub.card) {
                     val itemColors = if (s.flavor == AppFlavor.TAILORS) NavigationBarItemDefaults.colors(
@@ -153,19 +161,22 @@ private fun PhoneShell() {
                         unselectedTextColor = MaterialTheme.hub.textSecondary,
                     ) else NavigationBarItemDefaults.colors()
                     tabs.forEach { tab ->
-                        val selected = nav.selection == tab.route
+                        val selected = !moreOpen && nav.selection == tab.route
                         NavigationBarItem(
                             selected = selected,
-                            onClick = { nav.go(tab.route) },
+                            onClick = { moreOpen = false; nav.go(tab.route) },
                             icon = { NavIcon(tab, badge = if (tab.route == Route.Notifications) env.unreadNotifications else 0) },
                             label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             colors = itemColors,
                         )
                     }
-                    NavigationBarItem(selected = false, onClick = { nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") }, colors = itemColors)
+                    NavigationBarItem(selected = moreOpen, onClick = { if (s.flavor == AppFlavor.TAILORS) moreOpen = true else nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") }, colors = itemColors)
                 }
             },
-        ) { padding -> CurrentScreen(Modifier.padding(padding)) }
+        ) { padding ->
+            if (s.flavor == AppFlavor.TAILORS && moreOpen && nav.path.isEmpty()) TailorsMore(tabs.map { it.route }.toSet(), open = { nav.push(it) }, modifier = Modifier.padding(padding))
+            else CurrentScreen(Modifier.padding(padding))
+        }
     }
 }
 
@@ -209,14 +220,14 @@ private fun SidebarShell() {
 }
 
 @Composable
-private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit) {
+private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit, titleOverride: String? = null) {
     val env = LocalEnv.current
     val nav = env.navigator
     val route = nav.current
     val flavor = env.session.current.flavor
-    val title = route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
+    val title = titleOverride ?: route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
     TopAppBar(
-        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = { Text(title, modifier = if (titleOverride != null) Modifier.fillMaxWidth() else Modifier, textAlign = if (titleOverride != null) TextAlign.Center else TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         navigationIcon = {
             if (nav.path.isNotEmpty()) IconButton(onClick = { nav.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             else if (showMenu) IconButton(onClick = onMenu) { Icon(Icons.Default.Menu, contentDescription = "Menu") }
@@ -245,6 +256,9 @@ private fun SidebarContent() {
     val scope = rememberCoroutineScope()
     val groups = s.flavor.groups(s.permissions)
     val dim = Color(0xFFB7C0D3)
+    val textSize = LocalTailorsTextSize.current
+    var showTextSize by remember { mutableStateOf(false) }
+    if (showTextSize && textSize != null) TailorsTextSizeDialog(textSize) { showTextSize = false }
     // Changes saved offline wait in this person's own store on the device and
     // are sent the next time they sign in here; never under someone else.
     // Say so before signing out, so nobody leaves thinking their work is in.
@@ -281,6 +295,14 @@ private fun SidebarContent() {
             }
             item { HorizontalDivider(color = Palette.navBorder, modifier = Modifier.padding(vertical = Space.s)) }
             items(s.flavor.userMenu) { item -> SidebarRow(item, selected = nav.selection == item.route) { nav.go(item.route) } }
+            if (textSize != null) item {
+                ListItem(
+                    headlineContent = { Text("Text size", color = Color(0xFFE2E6EF)) },
+                    leadingContent = { Icon(Icons.Default.TextFields, contentDescription = null, tint = dim) },
+                    colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { showTextSize = true },
+                )
+            }
             item {
                 ListItem(
                     headlineContent = { Text("Sign out", color = Color(0xFFFCA5A5)) },

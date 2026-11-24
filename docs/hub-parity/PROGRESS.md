@@ -1,5 +1,11 @@
 # Tailors Hub audit progress
 
+### Android More and text size — 24 November 2026, Codex (verification open)
+
+- Tailors phone More is a grouped page with the iPhone's Workshop, My workday, Time & pay, App settings and account sections. Existing permission-filtered routes and the offline sign-out warning are preserved. The signed-in Android emulator showed More and returned to it from Production Orders; the final divider and heading polish has built but has not been visually rechecked. Other roles, deep links, tablet, dark appearance and accessibility sizes remain open.
+- Added a device-local text-size preference, device-setting switch and 9–36 reference slider. The emulator showed the dialog and live large-text resizing; the device setting was restored. Tailors debug build, focused Tailors and Hub shell/navigation tests and text-size persistence/range tests passed. Extreme-size screen usability and device restart remain open. The preview follows Android scaling and is not an exact iOS Dynamic Type mapping.
+- Passkey audit: the public `https://hub.bethanyhouse.co.ke/.well-known/assetlinks.json` currently redirects to `/admin/` and returns HTML, not an Android association. The checked-in association config names one Android package, and the passkey validator accepts one configured/request origin. Release signing fingerprints, deployed origin configuration and the exact server changes needed for Android remain UNKNOWN — NEEDS VERIFICATION. No authentication or production configuration was changed.
+
 ### Android task disclosure preferences — 24 November 2026, Codex (verification open)
 
 - Specifications and measurements expansion choices are stored locally per signed-in user, matching the iPhone behavior. Tailors debug build and focused production tests passed; account switching, persistence across restart and accessibility announcement need device verification.

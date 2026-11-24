@@ -10,7 +10,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -116,8 +119,10 @@ object Space {
 }
 
 @Composable
-fun HubTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    androidx.compose.runtime.CompositionLocalProvider(LocalHubColors provides if (darkTheme) darkHub else lightHub) {
+fun HubTheme(darkTheme: Boolean = isSystemInDarkTheme(), tailorsTextSize: TailorsTextSize? = null, content: @Composable () -> Unit) {
+    val systemDensity = LocalDensity.current
+    val density = if (tailorsTextSize != null && !tailorsTextSize.useDevice) Density(systemDensity.density, tailorsTextSize.reference / 17f) else systemDensity
+    CompositionLocalProvider(LocalHubColors provides if (darkTheme) darkHub else lightHub, LocalTailorsTextSize provides tailorsTextSize, LocalDensity provides density) {
         MaterialTheme(colorScheme = if (darkTheme) darkScheme else lightScheme, shapes = HubShapes, typography = HubTypography, content = content)
     }
 }

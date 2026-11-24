@@ -4,6 +4,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
 import ke.co.bethanyhouse.hub.BuildConfig
@@ -41,6 +42,7 @@ class ShellRenderTest {
         assertEquals(SessionStore.State.SignedIn, env.session.current.state)
         env.navigator.selection = null
         env.navigator.path.clear()
+        env.navigator.drawerOpen = false
     }
 
     private fun renderShell() {
@@ -59,6 +61,24 @@ class ShellRenderTest {
         assertTrue("bottom bar More tab", exists(hasText("More")))
         val expectedHome = if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) == AppFlavor.TAILORS) "Production Orders" else "Dashboard"
         assertTrue("home lands on the appropriate page", exists(hasText(expectedHome)))
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun `tailors More opens a permitted destination and returns to its list`() {
+        if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) != AppFlavor.TAILORS) return
+        renderShell()
+        compose.onNode(hasText("More")).performClick()
+        settle()
+        assertTrue("workshop section visible", exists(hasText("Workshop")))
+        assertTrue("More workday section visible", exists(hasText("My workday")))
+        compose.onNode(hasText("Work In Progress")).performClick()
+        settle()
+        assertEquals(Route.Wip, env.navigator.current)
+        assertEquals("destination is pushed above More", 1, env.navigator.path.size)
+        compose.runOnIdle { env.navigator.pop() }
+        settle()
+        assertTrue("returns to More", exists(hasText("Workshop")))
     }
 
     @Test

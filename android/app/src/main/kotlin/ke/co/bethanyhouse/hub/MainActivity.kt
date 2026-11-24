@@ -18,8 +18,10 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ke.co.bethanyhouse.hub.core.Route
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.SessionStore
 import ke.co.bethanyhouse.hub.ui.HubTheme
+import ke.co.bethanyhouse.hub.ui.rememberTailorsTextSize
 import ke.co.bethanyhouse.hub.ui.auth.SignInScreen
 import ke.co.bethanyhouse.hub.ui.shell.HubShell
 import kotlinx.coroutines.launch
@@ -41,7 +43,8 @@ class MainActivity : FragmentActivity() {
         splash.setKeepOnScreenCondition { env.session.current.state == SessionStore.State.Starting }
         pendingRoute = routeFrom(intent)
         setContent {
-            HubTheme {
+            val textSize = if (env.flavor == AppFlavor.TAILORS) rememberTailorsTextSize() else null
+            HubTheme(tailorsTextSize = textSize) {
                 CompositionLocalProvider(LocalEnv provides env) {
                     Root()
                 }
