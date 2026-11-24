@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### Android messages presentation — 25 November 2026, Codex (claimed)
+### Android messages presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking Android message-list and conversation presentation comparison against iPhone. Claimed `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/people/CommsFeature.kt`, `CommsThread.kt`, and relevant Android message tests. Preserve channel membership, unread behavior and send semantics; use test data for any message writes.
+- Tailors Android now groups channel rows in cards, displays contextual descriptions and the iPhone's empty-message wording, and shows a production-order header with an Open record action in contextual conversations. Hub flavor keeps its prior list and header. Existing message loading, read marking and sending code was not changed.
+- Both Android debug builds and focused route/shell tests passed. Visually checked the signed-in test account's list and opened a test conversation; opening may have marked that test thread as read. No message was sent. Paired list screenshots and remaining differences are in `ANDROID_CHECKLIST.md`. Sending, attachments, unread transitions, failures, keyboard clearance, actual bottom navigation in a thread, large text, dark mode and TalkBack remain unverified. Claim released.
 
 ### Android calendar presentation — 25 November 2026, Codex (claim released; verification open)
 

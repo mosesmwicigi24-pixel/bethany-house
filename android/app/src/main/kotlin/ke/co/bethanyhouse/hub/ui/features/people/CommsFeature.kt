@@ -18,11 +18,14 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -42,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.AppEnvironment
 import ke.co.bethanyhouse.hub.core.ApiError
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.HubDates
 import ke.co.bethanyhouse.hub.core.RealtimeClient
 import ke.co.bethanyhouse.hub.core.Route
@@ -244,8 +248,8 @@ private fun ChannelListScreen() {
         catch (e: Exception) { env.toasts.error(e) } finally { searching = false }
     }
     fun open(id: Int) = env.navigator.push(Route.Comms(id))
-
-    Page("Messages", refresh = { store.load() }, actions = {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    val createMenu: @Composable () -> Unit = {
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.Edit, contentDescription = "New") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -254,8 +258,12 @@ private fun ChannelListScreen() {
                 DropdownMenuItem(text = { Text("Quick replies") }, onClick = { menu = false; quickReplies = true })
             }
         }
-    }) {
-        ModuleSearchField(query, { query = it; if (it.isEmpty()) { hits = emptyList(); searched = false } }, "Search messages", onSubmit = { scope.launch { search() } })
+    }
+    Page("Messages", refresh = { store.load() }, showTitle = !tailors, actions = if (tailors) null else createMenu) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            ModuleSearchField(query, { query = it; if (it.isEmpty()) { hits = emptyList(); searched = false } }, "Search messages", onSubmit = { scope.launch { search() } }, modifier = Modifier.weight(1f))
+            if (tailors) createMenu()
+        }
         if (query.isNotEmpty()) {
             if (searching) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             else if (!searched) Text("Press search to look through messages", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
@@ -281,24 +289,36 @@ private fun ChannelListScreen() {
 @Composable
 private fun ChannelSection(title: String, list: List<ChatChannel>, open: (Int) -> Unit) {
     if (list.isEmpty()) return
-    Text(title.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
-    list.forEach { ch -> ChannelRow(ch, Modifier.clickable { open(ch.id) }) }
+    val tailors = ke.co.bethanyhouse.hub.LocalEnv.current.flavor == AppFlavor.TAILORS
+    Text(if (tailors) title else title.uppercase(), style = if (tailors) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+    if (tailors) Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.hub.card, modifier = Modifier.fillMaxWidth()) {
+        Column {
+            list.forEachIndexed { index, ch ->
+                if (index > 0) HorizontalDivider(Modifier.padding(start = 56.dp, end = 16.dp), color = MaterialTheme.hub.line)
+                ChannelRow(ch, Modifier.clickable { open(ch.id) }.padding(horizontal = 16.dp, vertical = 6.dp))
+            }
+        }
+    } else list.forEach { ch -> ChannelRow(ch, Modifier.clickable { open(ch.id) }) }
 }
 
 @Composable
 internal fun ChannelRow(channel: ChatChannel, modifier: Modifier = Modifier) {
+    val tailors = ke.co.bethanyhouse.hub.LocalEnv.current.flavor == AppFlavor.TAILORS
     Row(modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
         if (channel.isDM) Avatar(channel.name, 30.dp)
-        else Box(Modifier.size(30.dp).background(Palette.neutralSoft, MaterialTheme.shapes.extraSmall), contentAlignment = Alignment.Center) { Icon(channel.icon, contentDescription = null, tint = Palette.neutral, modifier = Modifier.size(16.dp)) }
+        else Box(Modifier.size(30.dp).background(if (tailors) Palette.brand.copy(alpha = 0.09f) else Palette.neutralSoft, MaterialTheme.shapes.extraSmall), contentAlignment = Alignment.Center) { Icon(channel.icon, contentDescription = null, tint = if (tailors) Palette.brandDeep else Palette.neutral, modifier = Modifier.size(16.dp)) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(channel.name, style = MaterialTheme.typography.bodyMedium, fontWeight = if (channel.unread > 0) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(channel.name, style = MaterialTheme.typography.bodyMedium, fontWeight = if (tailors || channel.unread > 0) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (tailors && channel.isContext && !channel.description.isNullOrBlank()) Text(channel.description!!, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
             channel.lastMessage?.let { lm ->
-                Text((lm["user_name"].str?.let { "$it: " } ?: "") + ChatMessage.parseBody(lm["body"].str ?: "").text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+                val preview = ChatMessage.parseBody(lm["body"].str ?: "").text
+                Text(if (tailors && preview.isEmpty()) "Message with attachment or link" else (lm["user_name"].str?.let { "$it: " } ?: "") + preview, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary, maxLines = if (tailors) 2 else 1, overflow = TextOverflow.Ellipsis)
+            } ?: run { if (tailors) Text("No messages yet", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            DateText(channel.lastActivity, DateStyle.RELATIVE)
+            if (!tailors || channel.lastActivity != null) DateText(channel.lastActivity, DateStyle.RELATIVE)
             if (channel.unread > 0) Text("${channel.unread}", style = MaterialTheme.typography.labelSmall, color = Color.White, modifier = Modifier.background(Palette.brand, CircleShape).padding(horizontal = 6.dp, vertical = 2.dp))
         }
+        if (tailors) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.hub.textTertiary, modifier = Modifier.size(18.dp))
     }
 }
