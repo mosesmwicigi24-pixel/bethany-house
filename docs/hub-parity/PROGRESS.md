@@ -2,8 +2,8 @@
 
 ### Cleaner My Tasks and stage colors — 24 November 2026, Codex
 
-- Refined My Tasks spacing and white cards; stage icons use distinct theme colors when active, unfinished stages are subdued, and completed status is green. The stage journey uses the same icon colors. Existing stage actions and status labels remain.
-- TailorsMobile iPhone simulator build passed. Visually inspected the task list with fictional data. A separate timestamp fixture verified the stage accessibility values show a known completion date/time and first-start date/time in Nairobi; absent timestamps are not invented. Stage colors and dark appearance still need visual inspection in the simulator.
+- Refined My Tasks spacing and white cards; stage icons use distinct theme colors when active, unfinished stages are subdued, and completed status is green. Recorded dates and times are orange. The stage journey uses the same icon colors. Existing stage actions and status labels remain.
+- TailorsMobile iPhone simulator build passed, including the green status and orange timestamp change. Visually inspected the task list with fictional data. A separate timestamp fixture verified the stage accessibility values show a known completion date/time and first-start date/time in Nairobi; absent timestamps are not invented. Stage colors and dark appearance still need visual inspection in the simulator.
 
 ### Cleaner task and calendar surfaces — 24 November 2026, Codex
 

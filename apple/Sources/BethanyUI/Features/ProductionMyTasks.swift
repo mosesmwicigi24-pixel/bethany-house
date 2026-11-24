@@ -401,11 +401,8 @@ struct MyTasksView: View {
                             .font(.body.weight(status == "in_progress" ? .medium : .regular))
                             .foregroundStyle(active ? Theme.text : Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(stageDetails(task))
+                        stageDetailsText(task)
                             .font(.caption)
-                            .foregroundStyle(finished
-                                ? (colorScheme == .dark ? Color(hex: 0x80D99B) : Theme.Palette.success)
-                                : Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityElement(children: .ignore)
@@ -476,6 +473,21 @@ struct MyTasksView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return "\(label) · \(formatter.string(from: timestamp))"
+    }
+
+    private func stageDetailsText(_ task: Record) -> Text {
+        let details = stageDetails(task)
+        let done = task.status == "completed"
+        let base = done ? (colorScheme == .dark ? Color(hex: 0x80D99B) : Theme.Palette.success) : Theme.textSecondary
+        let hasTimestamp = done ? task["completed_at"]?.date != nil
+            : (["in_progress", "paused"].contains(task.status ?? "") && task["started_at"]?.date != nil)
+        if hasTimestamp, let separator = details.range(of: " · ", options: .backwards) {
+            let prefix = String(details[..<separator.lowerBound])
+            let timestamp = String(details[separator.upperBound...])
+            let accent = colorScheme == .dark ? Theme.Palette.brandTint : Theme.Palette.brandDeep
+            return Text(prefix).foregroundColor(base) + Text(" · ").foregroundColor(Theme.textSecondary) + Text(timestamp).foregroundColor(accent)
+        }
+        return Text(details).foregroundColor(base)
     }
 
     private func stageTimelineLabel(_ status: String?) -> String {
