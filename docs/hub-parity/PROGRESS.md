@@ -46,6 +46,10 @@
 
 - Removed the duplicate Tailors My shifts heading. Both Android debug builds and focused route tests passed; checked the matching empty states on both devices. Shift and attendance actions were not used; populated, action, error and accessibility states remain unverified. Claim released.
 
+### Android leave heading — 25 November 2026, Codex (claimed)
+
+- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeShiftsLeave.kt` for the Tailors My leave heading only. Both signed-in apps show the request and balance sections; Android repeats the title. Keep the year and all leave data and operations intact. No leave request was submitted or cancelled; no sensitive screenshot will be committed.
+
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
 - Aligned Tailors profile navigation labels, avatar, outlet placement and action hierarchy with the iPhone reference; removed the duplicate in-page title. Hub presentation and security operations were not changed.
