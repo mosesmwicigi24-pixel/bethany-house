@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android test isolation — 25 November 2026, Codex (claimed)
+
+- Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/ui/TailorsTextSizeTest.kt` for test-state isolation. The render group with calendar and counter tests passes; the UI group alone passes; combining render tests, text-size tests and those two Compose tests reproduces idling timeouts. Text-size tests leave a custom-size shared preference after completion. Verify whether test teardown removes the interaction before concluding it is the cause.
+
 ### Android passkeys investigation — 25 November 2026, Codex (claim released; verification open)
 
 - Rechecked the public Android and Apple well-known endpoints: both redirected to `/admin/` HTML. Inspected the server's single-origin ceremony configuration, challenge/user-verification options, Android fallback and locally built debug certificate. The release and Play signing fingerprints, deployment routing and library backup-state behavior remain unknown. Findings and a nonproduction-first proposal are in `ANDROID_PASSKEY_PROPOSAL.md`; no auth or server configuration was changed.
