@@ -12,9 +12,10 @@
 - `bundleTailorsRelease` produced `android/app/build/outputs/bundle/tailorsRelease/app-tailors-release.aab`; `jarsigner` reports it is unsigned. This is an unverified review artifact, not a Play-ready release. Upload signing, Play App Signing fingerprint, passkey associations, complete parity and release review remain open; nothing was uploaded or deployed.
 - Apple shared-package tests passed on macOS (127 tests). The `BethanyKit` Xcode scheme has no test action, so this is not an iPhone-simulator test run.
 
-### My Tasks task-row icons — 25 November 2026, Codex (claimed)
+### My Tasks task-row icons — 25 November 2026, Codex (claim released; verification open)
 
-- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt` and a Tailors drawable for the task-list icons. The signed-in iPhone uses outlined garment and quality icons; Android currently shows a hanger and filled shield. This claim covers presentation only.
+- Replaced the Android task-list hanger and filled shield with outlined garment and quality icons, closer to the signed-in iPhone reference. Both Android debug variants and focused production tests passed; visually inspected the loaded test account on the emulator. Other typography, navigation and accessibility differences remain open. Claim released.
+- The TailorsMobile iPhone simulator build passed; the 127 Apple package tests were run on macOS, not the simulator.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 

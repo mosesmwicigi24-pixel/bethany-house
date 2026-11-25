@@ -34,7 +34,7 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Checkroom
+import androidx.compose.material.icons.outlined.VerifiedUser as OutlinedVerifiedUser
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -63,9 +63,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
+import ke.co.bethanyhouse.hub.R
 import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.OfflineStore
@@ -257,7 +259,9 @@ internal fun MyTasksScreen(initialOrderId: Int? = null, onClose: (() -> Unit)? =
                                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.hub.card, modifier = Modifier.fillMaxWidth().clickable { selectedOrder = group.id }) {
                                     Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                         val tint = taskLaneColor(lane)
-                                        Icon(if (lane == "With Quality Control") Icons.Default.VerifiedUser else Icons.Default.Checkroom, contentDescription = null, tint = tint, modifier = Modifier.size(32.dp).background(tint.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(6.dp))
+                                        val iconModifier = Modifier.size(32.dp).background(tint.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(6.dp)
+                                        if (lane == "With Quality Control") Icon(Icons.Outlined.OutlinedVerifiedUser, contentDescription = null, tint = tint, modifier = iconModifier)
+                                        else Icon(painterResource(R.drawable.tailors_garment_outline), contentDescription = null, tint = tint, modifier = iconModifier)
                                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                             Text(taskName(group.order), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                             Text(taskSummary(group, history), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
