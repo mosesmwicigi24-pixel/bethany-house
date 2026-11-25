@@ -10,6 +10,7 @@
 - Against a disposable PostgreSQL database, 15 passkey and association tests passed (114 assertions), including trusted/untrusted Android origins and continued web-origin acceptance. Both Android debug variants built; three provider/API tests and focused navigation tests passed. Real Credential Manager provider behavior, end-to-end enrollment/step-up, Apple device regression, production certificate fingerprints, deployed route behavior and shared-branch review remain open. No production config or account credentials were changed.
 - The updated test emulator loaded the empty passkey list and Add control; no passkey was enrolled or removed. Tailors and Hub lint each report two errors in `PeopleAttendance.kt` and their flavor manifests; the merged Tailors debug manifest does set `MainActivity` exported to true. The running iPhone test build returned to sign-in, so the signed-in comparison is still open.
 - `bundleTailorsRelease` produced `android/app/build/outputs/bundle/tailorsRelease/app-tailors-release.aab`; `jarsigner` reports it is unsigned. This is an unverified review artifact, not a Play-ready release. Upload signing, Play App Signing fingerprint, passkey associations, complete parity and release review remain open; nothing was uploaded or deployed.
+- Refreshed that unsigned bundle after the leave-heading change; SHA-256 `63ed5787b53f9261495b135141cd4488e2ac536f45c5e0c94e2bbeb384ce06c9`. The owner says this will be a new Play app; upload-key setup and secure custody have not yet been established.
 - Apple shared-package tests passed on macOS (127 tests). The `BethanyKit` Xcode scheme has no test action, so this is not an iPhone-simulator test run.
 
 ### My Tasks task-row icons — 25 November 2026, Codex (claim released; verification open)
@@ -21,6 +22,7 @@
 
 - Added a “Draft count” accessibility label and value to the Android count editor. The focused tests passed, and the emulator accessibility tree shows the label and number. Signed-in comparison opened and cancelled both platforms' editors without saving. Full TalkBack/VoiceOver testing remains open. Claim released.
 - A full Tailors unit-suite retry with one worker again produced three Compose idling timeouts in the calendar and count-editor tests (195 tests, 108 skipped); the affected tests pass in isolation. The underlying test-order/environment issue remains unknown.
+- A further one-worker run combining `RouteRenderTest`, `CalendarMonthParityTest` and `TailorPieceCounterTest` passed. That combination alone did not reproduce the full-suite timeouts; the cause remains unknown.
 
 ### Android Updates presentation — 25 November 2026, Codex (claim released; verification open)
 
