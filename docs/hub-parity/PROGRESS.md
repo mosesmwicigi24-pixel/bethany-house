@@ -26,9 +26,10 @@
 
 - Removed the duplicate Tailors page title and default subtitle, and styled the recognition action closer to iPhone; a nonzero must-read notice remains visible. The Hub flavor and feed actions are unchanged. Both Android debug variants and the focused route-render tests passed. Inspected both signed-in empty states; populated feed, must-read, posting, filtering, error and accessibility states remain unverified. Claim released.
 
-### Checklists comparison — 25 November 2026, Codex (investigation only)
+### Checklists comparison — 25 November 2026, Codex (claimed)
 
 - Both signed-in apps show the same opening/closing checklists and incident/damage report options. Android repeats the heading and shortens the navigation title. Paired screenshots are in `ANDROID_CHECKLIST.md`; no form was opened or submitted. Shared navigation and the page need a coordinated fix, and entry, submission and accessibility remain unverified.
+- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeForms.kt` and `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/shell/HubShell.kt` for the Tailors checklist page title only; preserve Hub naming and all form actions.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
