@@ -175,10 +175,11 @@ fun ProfileScreen() {
             DetailRow("Two-step sign-in") { StatusBadge(if (me.twoFactorEnabled) "on" else if (me.twoFactorRequired) "required" else "off", if (me.twoFactorEnabled) StatusTone.SUCCESS else if (me.twoFactorRequired) StatusTone.WARNING else StatusTone.NEUTRAL) }
             if (me.twoFactorEnabled) me.recoveryCodesLeft?.let { DetailRow("Recovery codes left", it.toString()) }
             if (env.flavor == AppFlavor.TAILORS) ProfileTwoFactorControls(me.twoFactorEnabled)
+            if (env.flavor == AppFlavor.TAILORS) ProfilePasskeys()
             DetailRow("Terminal PIN") { StatusBadge(if (me.terminalPinSet) "set" else "not set", if (me.terminalPinSet) StatusTone.SUCCESS else StatusTone.NEUTRAL) }
             if (env.flavor == AppFlavor.TAILORS) OutlinedButton(onClick = { showPin = true }) { Text(if (me.terminalPinSet) "Change PIN" else "Set a PIN") }
             OutlinedButton(onClick = { showPassword = true }) { Text("Change password…") }
-            Text(if (env.flavor == AppFlavor.TAILORS) "Passkeys are managed from Setup › Profile in the console." else "Two-step setup, passkeys and the terminal PIN are managed from Setup › Profile in the console.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
+            if (env.flavor == AppFlavor.HUB) Text("Two-step setup, passkeys and the terminal PIN are managed from Setup › Profile in the console.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
         }
           }
         }

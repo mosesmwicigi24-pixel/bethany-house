@@ -45,7 +45,7 @@ class PasskeysTest extends TestCase
     {
         parent::setUp();
         Artisan::call('permission:sync');
-        config(['security.passkeys.rp_id' => self::RP_ID, 'security.passkeys.origin' => self::ORIGIN]);
+        config(['security.passkeys.rp_id' => self::RP_ID, 'security.passkeys.origin' => self::ORIGIN, 'security.passkeys.android_certificates' => []]);
 
         $this->key = openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]);
         $d = openssl_pkey_get_details($this->key)['ec'];
@@ -70,9 +70,9 @@ class PasskeysTest extends TestCase
         return rtrim(strtr(base64_encode($bin), '+/', '-_'), '=');
     }
 
-    private function registrationResponse(array $options): array
+    private function registrationResponse(array $options, string $origin = self::ORIGIN): array
     {
-        $clientData = json_encode(['type' => 'webauthn.create', 'challenge' => $options['challenge'], 'origin' => self::ORIGIN, 'crossOrigin' => false]);
+        $clientData = json_encode(['type' => 'webauthn.create', 'challenge' => $options['challenge'], 'origin' => $origin, 'crossOrigin' => false]);
         $coseKey = MapObject::create()
             ->add(UnsignedIntegerObject::create(1), UnsignedIntegerObject::create(2))        // kty: EC2
             ->add(UnsignedIntegerObject::create(3), NegativeIntegerObject::create(-7))       // alg: ES256
@@ -104,9 +104,9 @@ class PasskeysTest extends TestCase
         ];
     }
 
-    private function assertionResponse(array $options, User $user, ?int $counter = null): array
+    private function assertionResponse(array $options, User $user, ?int $counter = null, string $origin = self::ORIGIN): array
     {
-        $clientData = json_encode(['type' => 'webauthn.get', 'challenge' => $options['challenge'], 'origin' => self::ORIGIN, 'crossOrigin' => false]);
+        $clientData = json_encode(['type' => 'webauthn.get', 'challenge' => $options['challenge'], 'origin' => $origin, 'crossOrigin' => false]);
         $authData   = hash('sha256', self::RP_ID, true) . chr(0x05) . pack('N', $counter ?? ++$this->counter);
         openssl_sign($authData . hash('sha256', $clientData, true), $signature, $this->key, OPENSSL_ALGO_SHA256);
 
@@ -139,6 +139,37 @@ class PasskeysTest extends TestCase
     }
 
     // ── enrolment ────────────────────────────────────────────────────────────
+
+    public function test_only_an_explicitly_trusted_android_certificate_can_register_and_assert(): void
+    {
+        $fingerprint = str_repeat('12:', 31) . '12';
+        $origin = 'android:apk-key-hash:' . self::b64url(str_repeat("\x12", 32));
+        config(['security.passkeys.android_certificates' => [$fingerprint]]);
+        $user = $this->user();
+        Sanctum::actingAs($user);
+        app(StepUp::class)->confirmFor($user, null);
+
+        $options = $this->postJson('/api/v1/admin/profile/passkeys/options')->assertOk()->json('options');
+        $this->postJson('/api/v1/admin/profile/passkeys', ['name' => 'Android', 'credential' => $this->registrationResponse($options, 'android:apk-key-hash:' . self::b64url(str_repeat("\x13", 32)))])->assertStatus(422);
+        $this->assertSame(0, Passkey::count());
+
+        $options = $this->postJson('/api/v1/admin/profile/passkeys/options')->assertOk()->json('options');
+        $this->postJson('/api/v1/admin/profile/passkeys', ['name' => 'Android', 'credential' => $this->registrationResponse($options, $origin)])->assertCreated();
+        $options = $this->postJson('/api/v1/admin/auth/step-up/passkey/options')->assertOk()->json('options');
+        $this->postJson('/api/v1/admin/auth/step-up/passkey', ['credential' => $this->assertionResponse($options, $user, origin: 'android:apk-key-hash:' . self::b64url(str_repeat("\x13", 32)))])->assertStatus(422);
+        $options = $this->postJson('/api/v1/admin/auth/step-up/passkey/options')->assertOk()->json('options');
+        $this->postJson('/api/v1/admin/auth/step-up/passkey', ['credential' => $this->assertionResponse($options, $user, origin: $origin)])->assertOk();
+    }
+
+    public function test_existing_web_origin_remains_accepted_when_an_android_certificate_is_configured(): void
+    {
+        config(['security.passkeys.android_certificates' => [str_repeat('12', 32)]]);
+        $user = $this->user();
+        Sanctum::actingAs($user);
+        $this->enrol($user);
+        $options = $this->postJson('/api/v1/admin/auth/step-up/passkey/options')->assertOk()->json('options');
+        $this->postJson('/api/v1/admin/auth/step-up/passkey', ['credential' => $this->assertionResponse($options, $user)])->assertOk();
+    }
 
     public function test_adding_a_passkey_needs_a_fresh_confirmation_first(): void
     {

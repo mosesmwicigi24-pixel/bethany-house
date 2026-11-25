@@ -144,6 +144,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
 
     implementation(libs.androidx.biometric)
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.webkit)

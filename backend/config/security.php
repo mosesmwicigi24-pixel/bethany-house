@@ -107,6 +107,9 @@ return [
         'rp_id'   => env('PASSKEY_RP_ID'),
         'rp_name' => env('PASSKEY_RP_NAME', 'Bethany House Hub'),
         'origin'  => env('PASSKEY_ORIGIN'),
+        // Explicitly trusted Android APK signing certificate SHA-256 fingerprints.
+        // Empty by default; never infer trusted certificates from a request.
+        'android_certificates' => array_values(array_filter(array_map('trim', explode(',', (string) env('PASSKEY_ANDROID_CERTIFICATES', ''))))),
     ],
 
     /*

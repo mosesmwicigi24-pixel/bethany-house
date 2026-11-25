@@ -14,6 +14,6 @@ Reference: user-provided iPhone 17 and Android emulator comparisons, 25 November
 | Profile, employment, activity, security | Full pages and actions | iPhone reference supplied | Profile controls and employment/activity tabs opened on test emulator | Partial presentation / functional | Pixel comparison, editing, photo upload, security actions, populated activity, accessibility and error states unverified |
 | Text size | Device preference and slider | Dynamic Type selection | Android local font scale | Platform behavior / accessibility | Intentional implementation difference; extreme-size screens need review |
 | Language | English and Swahili | Source and supported locales require verification | Source and supported locales require verification | Copy / localization | Unknown — needs verification; no new translations supplied |
-| Passkeys | Registration and assertion | Native Apple flow | Managed from console | Functional / security | Verified gap; authentication changes approval-gated; signing and deployed origin details unknown |
+| Passkeys | Registration and assertion | Native Apple flow | Native Android implementation in development; server allowlist defaults empty | Functional / security | Backend and mock-provider tests pass; real provider, staging association, release signing identities, Apple regression and production deployment unverified |
 
 No row is complete solely because a build passed. Remaining states, screenshots, navigation, accessibility, and safe test writes must be recorded as they are checked.
