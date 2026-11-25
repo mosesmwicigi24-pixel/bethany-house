@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### Android full-suite timeout investigation — 25 November 2026, Codex (claimed)
+### Android full-suite timeout investigation — 25 November 2026, Codex (claim released; CI verification open)
 
 - Taking `android/app/build.gradle.kts` and Android test files if needed to investigate the reproducible full-suite Compose idling timeouts. Check the PR CI result and verify any isolation change against both app variants without skipping tests.
+- With each test class in a fresh JVM, both complete local unit suites passed: Tailors 195 tests (108 existing skips), Hub 280 tests (108 existing skips). Applied the same Gradle test-only isolation setting. The underlying state leak is not identified; CI, independent review, and production deployment remain open.
 
 ### Android test isolation — 25 November 2026, Codex (claim released; issue open)
 
