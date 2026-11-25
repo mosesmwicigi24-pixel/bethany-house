@@ -1,12 +1,14 @@
 # Tailors Hub audit progress
 
-### Android test isolation — 25 November 2026, Codex (claimed)
+### Android test isolation — 25 November 2026, Codex (claim released; issue open)
 
 - Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/ui/TailorsTextSizeTest.kt` for test-state isolation. The render group with calendar and counter tests passes; the UI group alone passes; combining render tests, text-size tests and those two Compose tests reproduces idling timeouts. Text-size tests leave a custom-size shared preference after completion. Verify whether test teardown removes the interaction before concluding it is the cause.
+- Text-size tests now clear their saved preference after each test. A previously failing render/text-size/calendar/counter combination passed with cleanup, but the complete Tailors suite still reproduced calendar and piece-counter Compose idling timeouts. The failed run was stopped before reaching the Hub suite. Root cause and complete suite status remain unverified; do not treat cleanup as a complete fix.
 
-### Android lint investigation — 25 November 2026, Codex (claimed)
+### Android lint investigation — 25 November 2026, Codex (claim released)
 
 - Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/people/PeopleAttendance.kt` and the Hub/Tailors flavor manifests for the two existing lint errors. The merged manifests already declare the launcher activity exported; making that declaration explicit in each overlay must preserve the merged value. Review map-marker state without changing attendance, location data or permissions.
+- Remembered map marker state by coordinate and made the existing exported launcher declaration explicit in both flavor overlays. Both debug builds and both flavor lint tasks passed; lint warnings remain. No attendance or permission rules changed.
 
 ### Android passkeys investigation — 25 November 2026, Codex (claim released; verification open)
 

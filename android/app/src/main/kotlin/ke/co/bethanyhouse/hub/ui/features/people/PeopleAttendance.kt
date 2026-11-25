@@ -310,12 +310,12 @@ private fun TrailMap(entryId: Int) {
                         val radius = t["outlet"]["radius"].dbl
                         if (site != null && radius != null) {
                             Circle(center = site, radius = radius, fillColor = Palette.brand.copy(alpha = 0.15f), strokeColor = Palette.brand, strokeWidth = 2f)
-                            Marker(state = MarkerState(site), title = t["outlet"]["name"].str ?: "Outlet")
+                            Marker(state = remember(site) { MarkerState(site) }, title = t["outlet"]["name"].str ?: "Outlet")
                         }
                         if (points.size > 1) Polyline(points = points, color = Palette.info, width = 6f)
-                        t["points"].records.forEach { p -> if (p["mocked"].bool == true) latLng(p)?.let { Marker(state = MarkerState(it), title = "Mock location") } }
-                        inPt?.let { Marker(state = MarkerState(it), title = "In ${Day.time(t["clock_in"]["at"].str)}") }
-                        outPt?.let { Marker(state = MarkerState(it), title = "Out ${Day.time(t["clock_out"]["at"].str)}") }
+                        t["points"].records.forEach { p -> if (p["mocked"].bool == true) latLng(p)?.let { point -> Marker(state = remember(point) { MarkerState(point) }, title = "Mock location") } }
+                        inPt?.let { point -> Marker(state = remember(point) { MarkerState(point) }, title = "In ${Day.time(t["clock_in"]["at"].str)}") }
+                        outPt?.let { point -> Marker(state = remember(point) { MarkerState(point) }, title = "Out ${Day.time(t["clock_out"]["at"].str)}") }
                     }
                     Text("${points.size} points · kept ${t["retention_days"].int ?: 0} days" + (t["left_site_at"].str?.let { " · left site ${Day.time(it)}" } ?: ""), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
                     Text("Map tiles need a Google Maps key (the mapsApiKey build property); without one the map shows blank tiles, the pins and trail still draw.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)

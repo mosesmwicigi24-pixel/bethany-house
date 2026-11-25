@@ -3,6 +3,7 @@ package ke.co.bethanyhouse.hub.ui
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,6 +16,7 @@ class TailorsTextSizeTest {
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
 
     @Before fun clear() { context.getSharedPreferences("tailors_text_size", Context.MODE_PRIVATE).edit().clear().commit() }
+    @After fun restore() { context.getSharedPreferences("tailors_text_size", Context.MODE_PRIVATE).edit().clear().commit() }
 
     @Test fun `custom size persists and device setting can be restored`() {
         val first = TailorsTextSize(context)
