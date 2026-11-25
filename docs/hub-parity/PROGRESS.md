@@ -26,6 +26,10 @@
 
 - Removed the duplicate Tailors page title and default subtitle, and styled the recognition action closer to iPhone; a nonzero must-read notice remains visible. The Hub flavor and feed actions are unchanged. Both Android debug variants and the focused route-render tests passed. Inspected both signed-in empty states; populated feed, must-read, posting, filtering, error and accessibility states remain unverified. Claim released.
 
+### Checklists comparison — 25 November 2026, Codex (investigation only)
+
+- Both signed-in apps show the same opening/closing checklists and incident/damage report options. Android repeats the heading and shortens the navigation title. Paired screenshots are in `ANDROID_CHECKLIST.md`; no form was opened or submitted. Shared navigation and the page need a coordinated fix, and entry, submission and accessibility remain unverified.
+
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
 - Aligned Tailors profile navigation labels, avatar, outlet placement and action hierarchy with the iPhone reference; removed the duplicate in-page title. Hub presentation and security operations were not changed.
