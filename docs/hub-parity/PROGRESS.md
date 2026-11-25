@@ -38,9 +38,9 @@
 
 - Removed the duplicate Tailors Training title and default subtitle; a nonzero course count remains visible. Hub, course and quiz behavior are unchanged. Both Android debug variants and focused route-render tests passed; checked the signed-in empty state on both devices. Populated courses, quizzes, errors and accessibility remain unverified. Claim released.
 
-### Android workday headings — 25 November 2026, Codex (claimed)
+### Android workday headings — 25 November 2026, Codex (claim released; verification open)
 
-- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeSignTodosColleagues.kt` for Tailors-only headings. Paired signed-in inspection showed matching To sign and To-dos empty states and matching Colleagues search/visibility controls, but repeated Android page titles. Preserve pending/overdue notices, privacy settings, and all actions. No document, task, message, or visibility setting was changed. No directory screenshot will be committed because it contains contact details.
+- Removed duplicate Tailors headings on To sign, To-dos and Colleagues; meaningful pending and overdue/open counts remain visible. Both debug builds and focused route tests passed; checked all three updated pages on Android and compared their empty or top-level states with iPhone. No document, task, message, or visibility setting was changed. No directory screenshot is committed because it contains contact details. Populated, action, error and accessibility states remain unverified. Claim released.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
