@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Android full-suite timeout investigation — 25 November 2026, Codex (claimed)
+
+- Taking `android/app/build.gradle.kts` and Android test files if needed to investigate the reproducible full-suite Compose idling timeouts. Check the PR CI result and verify any isolation change against both app variants without skipping tests.
+
 ### Android test isolation — 25 November 2026, Codex (claim released; issue open)
 
 - Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/ui/TailorsTextSizeTest.kt` for test-state isolation. The render group with calendar and counter tests passes; the UI group alone passes; combining render tests, text-size tests and those two Compose tests reproduces idling timeouts. Text-size tests leave a custom-size shared preference after completion. Verify whether test teardown removes the interaction before concluding it is the cause.
