@@ -1,5 +1,12 @@
 # Tailors Hub audit progress
 
+### Android passkeys investigation — 25 November 2026, Codex (implementation claimed)
+
+- Rechecked the public Android and Apple well-known endpoints: both redirected to `/admin/` HTML. Inspected the server's single-origin ceremony configuration, challenge/user-verification options, Android fallback and locally built debug certificate. The release and Play signing fingerprints, deployment routing and library backup-state behavior remain unknown. Findings and a nonproduction-first proposal are in `ANDROID_PASSKEY_PROPOSAL.md`; no auth or server configuration was changed.
+- The iPhone and Android test apps returned to sign-in after the simulators were restarted, so renewed signed-in side-by-side testing is pending.
+- Owner approved the nonproduction proposal. Codex claims `backend/app/Services/Auth/Passkeys.php`, `backend/config/security.php`, `backend/config/applinks.php`, `backend/app/Http/Controllers/WellKnownController.php`, related backend tests, Android Gradle dependencies and Android profile/security passkey client files and tests. Production association/configuration and deployment remain outside this claim and require separate approval.
+- Full Android Tailors and Hub unit runs each reported three Compose idling timeouts in `CalendarMonthParityTest` and `TailorPieceCounterTest`; all three passed in an isolated Tailors run with one worker. Root cause and full-suite stability remain unverified; lint was not reached in the failed combined run.
+
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
 - Aligned Tailors profile navigation labels, avatar, outlet placement and action hierarchy with the iPhone reference; removed the duplicate in-page title. Hub presentation and security operations were not changed.
