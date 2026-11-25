@@ -34,9 +34,9 @@
 
 - Removed the duplicate Tailors Handbook heading and default subtitle; Hub, search and article behavior are unchanged. Both Android debug builds and focused route-render tests passed; inspected the signed-in empty screen on each device. Search results, article access, error, large-text and accessibility states remain unverified. Claim released.
 
-### Android Training presentation — 25 November 2026, Codex (claimed)
+### Android Training presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeHandbookCourses.kt` for the Tailors Training heading. Both signed-in apps show the same empty-state message; Android repeats the title and subtitle. Course and quiz flows remain unchanged.
+- Removed the duplicate Tailors Training title and default subtitle; a nonzero course count remains visible. Hub, course and quiz behavior are unchanged. Both Android debug variants and focused route-render tests passed; checked the signed-in empty state on both devices. Populated courses, quizzes, errors and accessibility remain unverified. Claim released.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 

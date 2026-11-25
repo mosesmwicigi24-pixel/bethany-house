@@ -225,7 +225,9 @@ internal fun CoursesScreen() {
     LaunchedEffect(Unit) { list.load() }
     val subtitle = list.value?.let { d -> val n = d["to_do"].int ?: 0; if (n > 0) "${MeFormat.plural(n, "course")} to complete." else "Short courses with a quiz at the end." }
 
-    Page("Training", subtitle = subtitle, refresh = { list.reload() }) {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page("Training", subtitle = subtitle, refresh = { list.reload() }, showTitle = !tailors) {
+        if (tailors && (list.value["to_do"].int ?: 0) > 0 && subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
         if (list.value["can_edit"].bool == true) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Button(onClick = { editing = true }) { Text("New course") } }
         LoadableView(list.state, retry = { list.load() }, isEmpty = { it.listRecords.isEmpty() }, empty = { EmptyState("No courses yet", icon = Icons.Default.School) }) { d ->
             d.listRecords.forEach { c -> CourseRow(c) { env.navigator.push(Route.Courses(c.intId)) } }
