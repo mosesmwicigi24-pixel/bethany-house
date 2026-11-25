@@ -2,6 +2,10 @@ package ke.co.bethanyhouse.hub.ui.features.production
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.performClick
 import ke.co.bethanyhouse.hub.ui.HubTheme
 import org.junit.Assert.assertEquals
@@ -21,6 +25,7 @@ class TailorPieceCounterTest {
         compose.setContent { HubTheme { TailorPieceCounter("Pieces completed", 1, 3, null, true) { sent += it; false } } }
         compose.onNodeWithText("Update count").performClick()
         compose.onNodeWithText("+").performClick()
+        compose.onNodeWithContentDescription("Draft count").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "2"))
         assertEquals(emptyList<Int>(), sent)
         compose.onNodeWithText("Save count").performClick()
         compose.waitForIdle()

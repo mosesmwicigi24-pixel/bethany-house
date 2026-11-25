@@ -59,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -749,7 +750,7 @@ internal fun TailorPieceCounter(label: String, confirmed: Int, limit: Int, queue
         } else {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 OutlinedButton(onClick = { draft = value - 1 }, modifier = Modifier.semantics { contentDescription = "Remove one piece" }, enabled = enabled && value > 0 && !saving) { Text("−") }
-                Text("$value", style = MaterialTheme.typography.titleMedium)
+                Text("$value", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { contentDescription = "Draft count"; stateDescription = value.toString() })
                 OutlinedButton(onClick = { draft = value + 1 }, modifier = Modifier.semantics { contentDescription = "Add one piece" }, enabled = enabled && value < limit && !saving) { Text("+") }
                 TextButton(onClick = { draft = limit }, enabled = enabled && value < limit && !saving) { Text("All $limit") }
             }

@@ -17,9 +17,10 @@
 - Replaced the Android task-list hanger and filled shield with outlined garment and quality icons, closer to the signed-in iPhone reference. Both Android debug variants and focused production tests passed; visually inspected the loaded test account on the emulator. Other typography, navigation and accessibility differences remain open. Claim released.
 - The TailorsMobile iPhone simulator build passed; the 127 Apple package tests were run on macOS, not the simulator.
 
-### Task count accessibility — 25 November 2026, Codex (claimed)
+### Task count accessibility — 25 November 2026, Codex (claim released; verification open)
 
-- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt` and `TailorPieceCounterTest.kt` to make the editable draft count identifiable to accessibility services. Signed-in test-account comparison: iPhone announces “Draft count” and its value; Android exposes only the number. Opened and cancelled both editors without saving.
+- Added a “Draft count” accessibility label and value to the Android count editor. The focused tests passed, and the emulator accessibility tree shows the label and number. Signed-in comparison opened and cancelled both platforms' editors without saving. Full TalkBack/VoiceOver testing remains open. Claim released.
+- A full Tailors unit-suite retry with one worker again produced three Compose idling timeouts in the calendar and count-editor tests (195 tests, 108 skipped); the affected tests pass in isolation. The underlying test-order/environment issue remains unknown.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
