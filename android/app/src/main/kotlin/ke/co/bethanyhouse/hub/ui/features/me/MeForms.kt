@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiClient
 import ke.co.bethanyhouse.hub.core.ApiError
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.HubJson
 import ke.co.bethanyhouse.hub.core.Record
 import ke.co.bethanyhouse.hub.core.Route
@@ -80,7 +81,7 @@ internal fun FormsScreen() {
     var filling by remember { mutableStateOf<Record?>(null) }
     LaunchedEffect(Unit) { today.load(); mine.load() }
 
-    Page("Checklists & forms", subtitle = today.value["date"].str?.let { MeFormat.longDay(MeFormat.date(it)) }, refresh = { today.reload(); mine.reload() }) {
+    Page("Checklists & forms", subtitle = today.value["date"].str?.let { MeFormat.longDay(MeFormat.date(it)) }, refresh = { today.reload(); mine.reload() }, showTitle = env.flavor != AppFlavor.TAILORS) {
         if (today.value["can_manage"].bool == true) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { env.navigator.go(Route.FormsManage) }) { Text("Manager view ›") }
         }

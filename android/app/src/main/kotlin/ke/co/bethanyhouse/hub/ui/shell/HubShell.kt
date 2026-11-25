@@ -241,15 +241,16 @@ private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit, titleOverride: Stri
     val nav = env.navigator
     val route = nav.current
     val flavor = env.session.current.flavor
-    val tailorHome = titleOverride == null && flavor == AppFlavor.TAILORS && route == Route.ProductionMyTasks && nav.path.isEmpty()
-    val title = titleOverride ?: route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
+    val resolvedTitleOverride = titleOverride ?: if (flavor == AppFlavor.TAILORS && route == Route.Forms) "Checklists & forms" else null
+    val tailorHome = resolvedTitleOverride == null && flavor == AppFlavor.TAILORS && route == Route.ProductionMyTasks && nav.path.isEmpty()
+    val title = resolvedTitleOverride ?: route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
     TopAppBar(
         title = {
             if (tailorHome) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 Image(painterResource(R.drawable.tailors_mark), contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)))
                 Spacer(Modifier.width(9.dp))
                 Text("Tailors Hub", style = MaterialTheme.typography.titleMedium, maxLines = 1)
-            } else Text(title, modifier = if (titleOverride != null) Modifier.fillMaxWidth() else Modifier, textAlign = if (titleOverride != null) TextAlign.Center else TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else Text(title, modifier = if (resolvedTitleOverride != null) Modifier.fillMaxWidth() else Modifier, textAlign = if (resolvedTitleOverride != null) TextAlign.Center else TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         navigationIcon = {
             if (nav.path.isNotEmpty()) IconButton(onClick = { nav.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
