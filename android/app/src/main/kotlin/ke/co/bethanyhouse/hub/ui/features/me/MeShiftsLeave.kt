@@ -207,7 +207,9 @@ internal fun MyLeaveScreen() {
         try { val res = env.client.delete("/v1/admin/me/leave/${r.id}"); env.toasts.show(res.json["message"].str ?: "Cancelled"); mine.reload() } catch (e: ApiError) { env.toasts.error(e) }
     }
 
-    Page("My leave", subtitle = mine.value["year"].str, refresh = { mine.reload() }) {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page("My leave", subtitle = mine.value["year"].str, refresh = { mine.reload() }, showTitle = !tailors) {
+        if (tailors) mine.value["year"].str?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Button(onClick = { openForm() }) { Text("Request leave") } }
         LoadableView(mine.state, retry = { mine.load() }) { data ->
             val balances = data["balances"].records.filter { !it["available"].isNull }
