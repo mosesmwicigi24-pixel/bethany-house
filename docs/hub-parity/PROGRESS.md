@@ -30,9 +30,9 @@
 
 - Both signed-in apps show the same opening/closing checklists and incident/damage report options. Android now displays a single “Checklists & forms” heading; Hub naming and form actions remain unchanged. Both debug variants and focused route/shell tests passed; the updated Android screen was checked on the test emulator. No form was opened or submitted. Entry, submission, accessibility and finer layout differences remain unverified. Claim released.
 
-### Android Handbook presentation — 25 November 2026, Codex (claimed)
+### Android Handbook presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeHandbookCourses.kt` for the Tailors Handbook heading only. The signed-in iPhone and Android empty screens have the same search prompt, but Android duplicates the title. Preserve Hub flavor, search, and article access.
+- Removed the duplicate Tailors Handbook heading and default subtitle; Hub, search and article behavior are unchanged. Both Android debug builds and focused route-render tests passed; inspected the signed-in empty screen on each device. Search results, article access, error, large-text and accessibility states remain unverified. Claim released.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
