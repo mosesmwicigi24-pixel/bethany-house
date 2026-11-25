@@ -21,7 +21,9 @@ import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +53,7 @@ import coil.compose.SubcomposeAsyncImage
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiClient
 import ke.co.bethanyhouse.hub.core.ApiError
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.Record
 import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.bool
@@ -126,9 +129,13 @@ internal fun UpdatesScreen() {
     val pending = meta["must_read_pending"].int ?: 0
     val subtitle = if (pending > 0) "${MeFormat.plural(pending, "must-read")} waiting for you." else "What is happening at Bethany House."
 
-    Page("Updates", subtitle = subtitle, refresh = { load(true) }) {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page("Updates", subtitle = subtitle, refresh = { load(true) }, showTitle = !tailors) {
+        if (tailors && pending > 0) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(onClick = { compose = "recognition" }) { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp)); Text(" Recognise someone") }
+            if (tailors) Button(onClick = { compose = "recognition" }, colors = ButtonDefaults.buttonColors(containerColor = Palette.brandDeep.copy(alpha = 0.12f), contentColor = Palette.brandDeep)) {
+                Icon(Icons.Outlined.StarOutline, contentDescription = null, modifier = Modifier.size(16.dp)); Text(" Recognise someone")
+            } else OutlinedButton(onClick = { compose = "recognition" }) { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp)); Text(" Recognise someone") }
             if (canPost) Button(onClick = { compose = "update" }) { Text("New post") }
             val n = meta["scheduled"].int ?: 0
             if (canPost && n > 0) TextButton(onClick = { showScheduled = true }) { Text("$n scheduled ›") }

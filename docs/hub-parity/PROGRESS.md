@@ -22,9 +22,9 @@
 - Added a “Draft count” accessibility label and value to the Android count editor. The focused tests passed, and the emulator accessibility tree shows the label and number. Signed-in comparison opened and cancelled both platforms' editors without saving. Full TalkBack/VoiceOver testing remains open. Claim released.
 - A full Tailors unit-suite retry with one worker again produced three Compose idling timeouts in the calendar and count-editor tests (195 tests, 108 skipped); the affected tests pass in isolation. The underlying test-order/environment issue remains unknown.
 
-### Android Updates presentation — 25 November 2026, Codex (claimed)
+### Android Updates presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeUpdates.kt` for the Tailors Updates page. On the same signed-in account both apps show the same filters and empty state; Android duplicates the title and adds an introductory subtitle above the content. Preserve the Hub flavor and the existing controls and data behavior.
+- Removed the duplicate Tailors page title and default subtitle, and styled the recognition action closer to iPhone; a nonzero must-read notice remains visible. The Hub flavor and feed actions are unchanged. Both Android debug variants and the focused route-render tests passed. Inspected both signed-in empty states; populated feed, must-read, posting, filtering, error and accessibility states remain unverified. Claim released.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
