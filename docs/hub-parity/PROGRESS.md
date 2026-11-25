@@ -42,9 +42,9 @@
 
 - Removed duplicate Tailors headings on To sign, To-dos and Colleagues; meaningful pending and overdue/open counts remain visible. Both debug builds and focused route tests passed; checked all three updated pages on Android and compared their empty or top-level states with iPhone. No document, task, message, or visibility setting was changed. No directory screenshot is committed because it contains contact details. Populated, action, error and accessibility states remain unverified. Claim released.
 
-### Android shifts presentation — 25 November 2026, Codex (claimed)
+### Android shifts presentation — 25 November 2026, Codex (claim released; verification open)
 
-- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/me/MeShiftsLeave.kt` for the Tailors My shifts heading only. Both signed-in apps show the same no-shifts and open-shifts empty states; Android repeats the title. Shift and attendance actions are outside this change.
+- Removed the duplicate Tailors My shifts heading. Both Android debug builds and focused route tests passed; checked the matching empty states on both devices. Shift and attendance actions were not used; populated, action, error and accessibility states remain unverified. Claim released.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiError
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.HubDates
 import ke.co.bethanyhouse.hub.core.Record
 import ke.co.bethanyhouse.hub.core.Route
@@ -95,7 +96,7 @@ internal fun MyShiftsScreen() {
         try { val res = env.client.delete("/v1/admin/me/swaps/${r.id}"); env.toasts.show(res.json["message"].str ?: "Withdrawn"); mine.reload() } catch (e: ApiError) { env.toasts.error(e) } finally { busy = false }
     }
 
-    Page("My shifts", subtitle = "Next two weeks", refresh = { mine.reload() }) {
+    Page("My shifts", subtitle = "Next two weeks", refresh = { mine.reload() }, showTitle = env.flavor != AppFlavor.TAILORS) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             OutlinedButton(onClick = { env.navigator.go(Route.Clock) }) { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.width(16.dp)); Text(" Clock") }
         }
