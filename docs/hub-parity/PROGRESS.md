@@ -1,6 +1,6 @@
 # Tailors Hub audit progress
 
-### Android passkeys investigation — 25 November 2026, Codex (implementation claimed)
+### Android passkeys investigation — 25 November 2026, Codex (claim released; verification open)
 
 - Rechecked the public Android and Apple well-known endpoints: both redirected to `/admin/` HTML. Inspected the server's single-origin ceremony configuration, challenge/user-verification options, Android fallback and locally built debug certificate. The release and Play signing fingerprints, deployment routing and library backup-state behavior remain unknown. Findings and a nonproduction-first proposal are in `ANDROID_PASSKEY_PROPOSAL.md`; no auth or server configuration was changed.
 - The iPhone and Android test apps returned to sign-in after the simulators were restarted, so renewed signed-in side-by-side testing is pending.
@@ -11,6 +11,10 @@
 - The updated test emulator loaded the empty passkey list and Add control; no passkey was enrolled or removed. Tailors and Hub lint each report two errors in `PeopleAttendance.kt` and their flavor manifests; the merged Tailors debug manifest does set `MainActivity` exported to true. The running iPhone test build returned to sign-in, so the signed-in comparison is still open.
 - `bundleTailorsRelease` produced `android/app/build/outputs/bundle/tailorsRelease/app-tailors-release.aab`; `jarsigner` reports it is unsigned. This is an unverified review artifact, not a Play-ready release. Upload signing, Play App Signing fingerprint, passkey associations, complete parity and release review remain open; nothing was uploaded or deployed.
 - Apple shared-package tests passed on macOS (127 tests). The `BethanyKit` Xcode scheme has no test action, so this is not an iPhone-simulator test run.
+
+### My Tasks task-row icons — 25 November 2026, Codex (claimed)
+
+- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt` and a Tailors drawable for the task-list icons. The signed-in iPhone uses outlined garment and quality icons; Android currently shows a hanger and filled shield. This claim covers presentation only.
 
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
