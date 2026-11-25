@@ -17,6 +17,10 @@
 - Replaced the Android task-list hanger and filled shield with outlined garment and quality icons, closer to the signed-in iPhone reference. Both Android debug variants and focused production tests passed; visually inspected the loaded test account on the emulator. Other typography, navigation and accessibility differences remain open. Claim released.
 - The TailorsMobile iPhone simulator build passed; the 127 Apple package tests were run on macOS, not the simulator.
 
+### Task count accessibility — 25 November 2026, Codex (claimed)
+
+- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/production/ProductionMyTasks.kt` and `TailorPieceCounterTest.kt` to make the editable draft count identifiable to accessibility services. Signed-in test-account comparison: iPhone announces “Draft count” and its value; Android exposes only the number. Opened and cancelled both editors without saving.
+
 ### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
 
 - Aligned Tailors profile navigation labels, avatar, outlet placement and action hierarchy with the iPhone reference; removed the duplicate in-page title. Hub presentation and security operations were not changed.
