@@ -3,6 +3,7 @@
 ### Tailors navigation, directory and text size — 26 November 2026, Codex (claimed)
 
 - Taking Android `core/AppFlavor.kt`, `ui/shell/HubShell.kt`, `ui/shell/TailorsMore.kt`, `ui/TextSizeSettings.kt`, `ui/Theme.kt`, `ui/features/me/MeSignTodosColleagues.kt` and relevant tests; Apple `BethanyKit/AppFlavor.swift`, `BethanyUI/Shell/MobileShell.swift`, `BethanyUI/Features/MeFeatureSignTodosColleagues.swift` and relevant tests. Move existing permission-gated Orders and WIP to phone navigation, retain access to messages and quality control, hide directory emails in Tailors Hub, and investigate text scaling. No server-side permissions or directory settings will be changed.
+- Also taking Apple `BethanyUI/Theme.swift`: its fixed-size fonts do not respond to Dynamic Type. Review the existing font roles before changing them.
 
 ### Android full-suite timeout investigation — 25 November 2026, Codex (claim released; CI verification open)
 
