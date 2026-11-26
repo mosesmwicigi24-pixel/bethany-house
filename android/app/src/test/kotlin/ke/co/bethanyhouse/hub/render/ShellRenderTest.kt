@@ -65,20 +65,24 @@ class ShellRenderTest {
 
     @Test
     @Config(qualifiers = "w411dp-h891dp")
-    fun `tailors More opens a permitted destination and returns to its list`() {
+    fun `tailors tabs open work in progress and More keeps messages`() {
         if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) != AppFlavor.TAILORS) return
         renderShell()
-        compose.onNode(hasText("More")).performClick()
-        settle()
-        assertTrue("workshop section visible", exists(hasText("Workshop")))
-        assertTrue("More workday section visible", exists(hasText("My workday")))
-        compose.onNode(hasText("Work In Progress")).performClick()
+        assertTrue("orders tab visible", exists(hasText("Orders")))
+        compose.onNode(hasText("WIP")).performClick()
         settle()
         assertEquals(Route.Wip, env.navigator.current)
+        compose.onNode(hasText("More")).performClick()
+        settle()
+        assertTrue("More workday section visible", exists(hasText("My workday")))
+        assertTrue("old workshop section removed", !exists(hasText("Workshop")))
+        compose.onAllNodes(hasText("Messages"))[0].performClick()
+        settle()
+        assertTrue("Messages opens from More", env.navigator.current is Route.Comms)
         assertEquals("destination is pushed above More", 1, env.navigator.path.size)
         compose.runOnIdle { env.navigator.pop() }
         settle()
-        assertTrue("returns to More", exists(hasText("Workshop")))
+        assertTrue("returns to More", exists(hasText("My workday")))
     }
 
     @Test
@@ -89,7 +93,7 @@ class ShellRenderTest {
         compose.runOnIdle { env.navigator.push(Route.Comms(42)) }
         settle()
         assertTrue("More stays available in a conversation", exists(hasText("More")))
-        assertTrue("the fixture's home tab stays available in a conversation", exists(hasText("Production Orders")))
+        assertTrue("the fixture's home tab stays available in a conversation", exists(hasText("Orders")))
     }
 
     @Test

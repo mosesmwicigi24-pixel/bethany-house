@@ -1,8 +1,9 @@
 # Tailors Hub audit progress
 
-### Tailors navigation verification — 26 November 2026, Codex (claimed)
+### Tailors navigation verification — 26 November 2026, Codex (claim released; signed-in device review open)
 
 - Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/render/ShellRenderTest.kt` and the Tailors navigation files if needed. The existing signed-in shell tests still expect the previous Workshop section and tab labels; update them to exercise Orders, WIP, More and Messages, then run both variants. Test devices are currently signed out.
+- Updated the shell tests to exercise the new WIP tab, Messages in More, return navigation and the shortened Orders label. Both Tailors and Hub shell test classes passed. The full Tailors suite also ran with one test-selection assertion failure caused by a duplicate hidden drawer node; the corrected focused suite passed. Both updated test apps are installed and open, but require sign-in before device-based layout, colleague privacy and text-size review.
 
 ### Tailors navigation, directory and text size — 26 November 2026, Codex (claim released; visual verification open)
 
