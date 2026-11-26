@@ -3,6 +3,7 @@
 ### Tailors tab order — 26 November 2026, Codex (claimed)
 
 - Taking Android and Apple `AppFlavor` navigation definitions and their flavor tests to arrange Orders, WIP, My Tasks, Clock in, More, using existing permission gates. Calendar stays available in More; no API or permission changes.
+- Also taking Apple `BethanyUI/Shell/MobileShell.swift` to preserve each role's existing landing screen after moving the home tab away from the first position.
 
 ### Tailors navigation verification — 26 November 2026, Codex (claim released; signed-in device review open)
 
