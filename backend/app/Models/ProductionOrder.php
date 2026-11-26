@@ -238,17 +238,43 @@ class ProductionOrder extends Model
             ->ordered()
             ->get();
 
+        $given = [];
         foreach ($stages->values() as $i => $stage) {
-            ProductionTask::firstOrCreate(
+            // A stage with a default (Setup → Production Stages) goes straight
+            // to that person — whoever is serving the customer, or the one
+            // named. Only when the task is CREATED: a task already on the
+            // floor keeps whoever it has.
+            $assignee = $stage->defaultAssigneeFor($this);
+
+            $task = ProductionTask::firstOrCreate(
                 [
                     'production_order_id' => $this->id,
                     'production_stage_id' => $stage->id,
                 ],
                 [
-                    'status'   => 'pending',
-                    'sequence' => $i + 1,
+                    'status'      => 'pending',
+                    'sequence'    => $i + 1,
+                    'assigned_to' => $assignee,
                 ],
             );
+            if ($task->wasRecentlyCreated && $assignee) {
+                $given[$assignee] = true;
+            }
+        }
+
+        // Tell each person once that the job has work for them — not whoever
+        // is doing the confirming, who already knows. Never in the way.
+        foreach (array_keys($given) as $userId) {
+            if ((int) $userId === (int) auth()->id()) {
+                continue;
+            }
+            try {
+                $name = $this->product?->translations?->firstWhere('language_code', 'en')?->name
+                    ?? $this->product?->sku ?? "Production #{$this->order_number}";
+                \App\Services\NotificationService::productionAssigned($this->id, (string) $this->order_number, $name, (int) $userId);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::info('Stage default: notification not sent', ['error' => $e->getMessage()]);
+            }
         }
     }
 

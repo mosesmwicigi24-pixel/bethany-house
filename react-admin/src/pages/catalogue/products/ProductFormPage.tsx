@@ -1812,7 +1812,7 @@ function ProductionStagesTab({
     selected: number[];
     onChange: (ids: number[]) => void;
 }) {
-    const { data: stages, isLoading } = useQuery<{ id: number; name: string; order: number; active?: boolean }[]>({
+    const { data: stages, isLoading } = useQuery<{ id: number; name: string; order: number; active?: boolean; default_assignee_mode?: string; default_assignee_name?: string | null }[]>({
         queryKey: ["production-stages"],
         queryFn: () => get<any>("/v1/admin/product-stages"),
         select: (d: any) => [...(Array.isArray(d) ? d : d?.data ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
@@ -1873,16 +1873,25 @@ function ProductionStagesTab({
                                 on ? "bg-brand-600 text-white" : "bg-surface-100 text-surface-400")}>
                                 {on ? seq : "·"}
                             </span>
-                            <span className={clsx("text-sm", on ? "font-semibold text-surface-900" : "text-surface-500")}>
+                            <span className={clsx("text-sm flex-1 min-w-0", on ? "font-semibold text-surface-900" : "text-surface-500")}>
                                 {stage.name}
                             </span>
+                            {/* Who does it by default, set in Setup → Production Stages. */}
+                            {(stage.default_assignee_mode === "order_creator" || stage.default_assignee_mode === "person") && (
+                                <span className="shrink-0 max-w-[50%] truncate text-2xs text-surface-500">
+                                    {stage.default_assignee_mode === "order_creator"
+                                        ? "Whoever serves the customer"
+                                        : (stage.default_assignee_name || "Person no longer available")}
+                                </span>
+                            )}
                         </label>
                     );
                 })}
             </div>
             <p className="text-2xs text-surface-400">
                 The running order follows the stage catalogue (Setup → Production Stages). Changing the
-                catalogue later doesn't re-order production already on the floor.
+                catalogue later doesn't re-order production already on the floor. Who does each stage is
+                set there too, once for every product.
             </p>
         </div>
     );
