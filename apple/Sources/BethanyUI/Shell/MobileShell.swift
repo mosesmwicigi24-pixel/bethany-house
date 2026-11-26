@@ -36,6 +36,7 @@ struct PhoneShell: View {
     @Environment(AppEnvironment.self) private var env
     @State private var tab: Int = 0
     @State private var paths: [Int: [Route]] = [:]
+    @State private var initializedTab = false
 
     var body: some View {
         let tabs = env.session.flavor.phoneTabs(for: env.session.permissions, home: env.session.home)
@@ -90,6 +91,18 @@ struct PhoneShell: View {
         }
         }
         .tint(Theme.Palette.brandDeep)
+        .onAppear {
+            guard env.session.flavor == .tailors, !initializedTab else { return }
+            initializedTab = true
+            let initial = env.navigator.selection ?? env.session.home
+            if let i = tabs.firstIndex(where: { $0.route == initial }) {
+                tab = i
+                paths[i] = env.navigator.path
+            } else {
+                tab = 99
+                paths[99] = [initial] + env.navigator.path
+            }
+        }
         .onChange(of: env.navigator.path) { _, p in
             // Programmatic navigation (push tap, deep link, palette): route into the right tab.
             guard let target = env.navigator.selection else { return }

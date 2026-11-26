@@ -114,7 +114,7 @@ final class AppFlavorTests: XCTestCase {
 
     func testTailorsTabsRespectProductionPermissions() {
         let tabs = AppFlavor.tailors.phoneTabs(for: tailor, home: AppFlavor.tailors.home(for: tailor))
-        XCTAssertEqual(tabs.map(\.route), [.productionMyTasks, .productionCalendar, .productionOrders, .wip, .clock])
+        XCTAssertEqual(tabs.map(\.route), [.productionOrders, .wip, .productionMyTasks, .clock])
         let noCalendar = AppFlavor.tailors.phoneTabs(for: person("production.worker"), home: .productionMyTasks)
         XCTAssertEqual(noCalendar.map(\.route), [.productionMyTasks, .clock])
         let managerTabs = AppFlavor.tailors.phoneTabs(for: manager, home: .productionOrders)

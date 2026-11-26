@@ -1,9 +1,10 @@
 # Tailors Hub audit progress
 
-### Tailors tab order — 26 November 2026, Codex (claimed)
+### Tailors tab order — 26 November 2026, Codex (claim released; signed-in visual review open)
 
 - Taking Android and Apple `AppFlavor` navigation definitions and their flavor tests to arrange Orders, WIP, My Tasks, Clock in, More, using existing permission gates. Calendar stays available in More; no API or permission changes.
 - Also taking Apple `BethanyUI/Shell/MobileShell.swift` to preserve each role's existing landing screen after moving the home tab away from the first position.
+- Reordered the permission-filtered tabs to Orders, WIP, My Tasks, Clock in, More; Calendar remains in More. Android core and signed-in shell tests, Tailors debug build, iPhone simulator build, and Apple flavor tests passed. Signed-in device layout remains unverified.
 
 ### Tailors navigation verification — 26 November 2026, Codex (claim released; signed-in device review open)
 

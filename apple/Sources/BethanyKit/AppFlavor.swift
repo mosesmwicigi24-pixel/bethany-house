@@ -91,13 +91,11 @@ public enum TailorsHub {
         return .profile
     }
 
-    /// Home, Calendar, Orders, WIP and Clock in (+ More), subject to existing gates.
+    /// Orders, WIP, My Tasks and Clock in (+ More), subject to existing gates.
     public static func phoneTabs(for subject: PermissionSet, home: Route) -> [NavItem] {
-        let first = NavCatalogue.item(for: home).map { NavItem(home == .productionOrders ? "Orders" : $0.label, home, icon: $0.icon) } ?? NavItem("Home", home, icon: "house")
-        var tabs = [first]
-        if home != .productionCalendar, let cal = NavCatalogue.item(for: .productionCalendar), cal.gate.allows(subject) { tabs.append(cal) }
-        for (route, label) in [(Route.productionOrders, "Orders"), (.wip, "WIP")] {
-            if home != route, let item = NavCatalogue.item(for: route), item.gate.allows(subject) {
+        var tabs: [NavItem] = []
+        for (route, label) in [(Route.productionOrders, "Orders"), (.wip, "WIP"), (.productionMyTasks, "My Tasks")] {
+            if let item = NavCatalogue.item(for: route), item.gate.allows(subject) {
                 tabs.append(NavItem(label, route, icon: item.icon))
             }
         }

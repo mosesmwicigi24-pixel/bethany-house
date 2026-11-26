@@ -114,7 +114,7 @@ class AppFlavorTest {
 
     @Test fun tailorsTabsRespectProductionPermissions() {
         val tabs = AppFlavor.TAILORS.phoneTabs(tailor, AppFlavor.TAILORS.home(tailor))
-        assertEquals(listOf(Route.ProductionMyTasks, Route.ProductionCalendar, Route.ProductionOrders, Route.Wip, Route.Clock), tabs.map { it.route })
+        assertEquals(listOf(Route.ProductionOrders, Route.Wip, Route.ProductionMyTasks, Route.Clock), tabs.map { it.route })
         tabs.forEach { assertTrue(AppFlavor.TAILORS.allows(it.route)) }
         val noCalendar = AppFlavor.TAILORS.phoneTabs(person("production.worker"), Route.ProductionMyTasks)
         assertEquals(listOf(Route.ProductionMyTasks, Route.Clock), noCalendar.map { it.route })
