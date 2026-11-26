@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Tailors navigation verification — 26 November 2026, Codex (claimed)
+
+- Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/render/ShellRenderTest.kt` and the Tailors navigation files if needed. The existing signed-in shell tests still expect the previous Workshop section and tab labels; update them to exercise Orders, WIP, More and Messages, then run both variants. Test devices are currently signed out.
+
 ### Tailors navigation, directory and text size — 26 November 2026, Codex (claim released; visual verification open)
 
 - Taking Android `core/AppFlavor.kt`, `ui/shell/HubShell.kt`, `ui/shell/TailorsMore.kt`, `ui/TextSizeSettings.kt`, `ui/Theme.kt`, `ui/features/me/MeSignTodosColleagues.kt` and relevant tests; Apple `BethanyKit/AppFlavor.swift`, `BethanyUI/Shell/MobileShell.swift`, `BethanyUI/Features/MeFeatureSignTodosColleagues.swift` and relevant tests. Move existing permission-gated Orders and WIP to phone navigation, retain access to messages and quality control, hide directory emails in Tailors Hub, and investigate text scaling. No server-side permissions or directory settings will be changed.
