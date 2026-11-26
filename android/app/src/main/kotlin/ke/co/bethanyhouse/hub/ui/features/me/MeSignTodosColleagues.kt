@@ -361,7 +361,7 @@ internal fun ColleaguesScreen() {
             SectionCard {
                 Text("What colleagues see about you:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-                    listOf("show_phone" to "my phone", "show_email" to "my email", "show_birthday" to "my birthday").forEach { (key, label) ->
+                    (listOf("show_phone" to "my phone") + (if (env.flavor == AppFlavor.TAILORS) emptyList() else listOf("show_email" to "my email")) + listOf("show_birthday" to "my birthday")).forEach { (key, label) ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = me[key].bool ?: false, onCheckedChange = { v -> scope.launch { saveMine(key, v) } }, enabled = !busy)
                             Text(label, style = MaterialTheme.typography.bodySmall)
@@ -391,7 +391,7 @@ internal fun ColleaguesScreen() {
                                 c.string("phone")?.let { phone ->
                                     Text("📞 $phone", style = MaterialTheme.typography.labelSmall, color = Palette.info, modifier = Modifier.clickable { runCatching { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone.filter { !it.isWhitespace() }))) } })
                                 }
-                                c.string("email")?.let { email ->
+                                c.string("email")?.takeIf { env.flavor != AppFlavor.TAILORS }?.let { email ->
                                     Text("✉️ $email", style = MaterialTheme.typography.labelSmall, color = Palette.info, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { runCatching { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$email"))) } })
                                 }
                             }

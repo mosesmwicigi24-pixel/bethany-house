@@ -39,6 +39,34 @@ struct PhoneShell: View {
 
     var body: some View {
         let tabs = env.session.flavor.phoneTabs(for: env.session.permissions, home: env.session.home)
+        Group {
+        if env.session.flavor == .tailors {
+            Group {
+                if tab == 99 {
+                    NavigationStack(path: pathBinding(99)) {
+                        MoreList(tabRoutes: Set(tabs.map(\.route))) { paths[99, default: []].append($0) }
+                            .navigationDestination(for: Route.self) { RouteView($0) }
+                    }.environment(\.currentRoutePath, pathBinding(99))
+                } else if tabs.indices.contains(tab) {
+                    NavigationStack(path: pathBinding(tab)) {
+                        RouteView(tabs[tab].route)
+                            .navigationDestination(for: Route.self) { RouteView($0) }
+                    }.environment(\.currentRoutePath, pathBinding(tab))
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack(spacing: 0) {
+                    ForEach(Array(tabs.enumerated()), id: \.offset) { i, item in
+                        tailorTab(item.label, icon: item.icon, color: tabColor(item.route), selected: tab == i) { tab = i }
+                    }
+                    tailorTab("More", icon: "line.3.horizontal", color: Theme.Palette.brandDeep, selected: tab == 99) { tab = 99 }
+                }
+                .padding(5)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
+                .padding(.horizontal, 12).padding(.bottom, 4)
+            }
+        } else {
         TabView(selection: $tab) {
             ForEach(Array(tabs.enumerated()), id: \.offset) { i, item in
                 NavigationStack(path: pathBinding(i)) {
@@ -59,6 +87,8 @@ struct PhoneShell: View {
             .tabItem { Label("More", systemImage: "line.3.horizontal") }
             .tag(99)
         }
+        }
+        }
         .tint(Theme.Palette.brandDeep)
         .onChange(of: env.navigator.path) { _, p in
             // Programmatic navigation (push tap, deep link, palette): route into the right tab.
@@ -75,6 +105,32 @@ struct PhoneShell: View {
 
     private func pathBinding(_ i: Int) -> Binding<[Route]> {
         Binding(get: { paths[i] ?? [] }, set: { paths[i] = $0 })
+    }
+
+    private func tabColor(_ route: Route) -> Color {
+        switch route {
+        case .productionMyTasks: return Theme.Palette.brandDeep
+        case .productionCalendar: return Theme.Palette.info
+        case .productionOrders: return Theme.Palette.warning
+        case .wip: return Theme.Palette.success
+        case .clock: return Theme.Palette.accent
+        default: return Theme.Palette.brandDeep
+        }
+    }
+
+    private func tailorTab(_ label: String, icon: String, color: Color, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 19, weight: .medium))
+                Text(label).font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
+            }
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(selected ? color.opacity(0.12) : Color.clear, in: Capsule())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -98,7 +154,7 @@ struct MoreList: View {
                 return [NavGroup("My workday", workday), NavGroup("Time & pay", timeAndPay)]
                     .filter { !$0.items.isEmpty }
             }
-            return [NavGroup(group.label == "Production" ? "Workshop" : group.label, items)]
+            return [NavGroup(group.label == "Production" ? "Production" : group.label, items)]
         }
     }
 

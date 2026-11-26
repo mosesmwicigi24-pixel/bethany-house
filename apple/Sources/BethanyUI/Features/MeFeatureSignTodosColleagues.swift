@@ -366,7 +366,7 @@ struct ColleaguesView: View {
         SectionCard {
             Text("What colleagues see about you:").font(Theme.Font.secondary.weight(.semibold))
             HStack(spacing: Theme.Space.l) {
-                ForEach([("show_phone", "my phone"), ("show_email", "my email"), ("show_birthday", "my birthday")], id: \.0) { key, label in
+                ForEach([("show_phone", "my phone")] + (env.session.flavor == .tailors ? [] : [("show_email", "my email")]) + [("show_birthday", "my birthday")], id: \.0) { key, label in
                     Toggle(label, isOn: Binding(get: { me[key]?.bool ?? false }, set: { v in Task { await saveMine(key, v) } }))
                         .font(Theme.Font.secondary).disabled(busy)
                         #if os(macOS)
@@ -401,7 +401,7 @@ struct ColleaguesView: View {
                 Text("\(line.isEmpty ? "—" : line)\(outlets.isEmpty ? "" : " · \(outlets.joined(separator: ", "))")").font(Theme.Font.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
                 HStack(spacing: Theme.Space.m) {
                     if let phone = c.string("phone"), let u = URL(string: "tel:\(phone.filter { !$0.isWhitespace })") { Link("📞 \(phone)", destination: u) }
-                    if let email = c.string("email"), let u = URL(string: "mailto:\(email)") { Link("✉️ \(email)", destination: u).lineLimit(1) }
+                    if env.session.flavor != .tailors, let email = c.string("email"), let u = URL(string: "mailto:\(email)") { Link("✉️ \(email)", destination: u).lineLimit(1) }
                 }
                 .font(Theme.Font.caption)
                 HStack(spacing: Theme.Space.m) {

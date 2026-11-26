@@ -112,12 +112,15 @@ class AppFlavorTest {
         assertTrue(AppFlavor.TAILORS.searchable(owner).none { it.route == Route.Pos })
     }
 
-    @Test fun aTailorsTabsAreHerTasksCalendarMessagesAndClock() {
+    @Test fun tailorsTabsRespectProductionPermissions() {
         val tabs = AppFlavor.TAILORS.phoneTabs(tailor, AppFlavor.TAILORS.home(tailor))
-        assertEquals(listOf(Route.ProductionMyTasks, Route.ProductionCalendar, Route.Comms(), Route.Clock), tabs.map { it.route })
+        assertEquals(listOf(Route.ProductionMyTasks, Route.ProductionCalendar, Route.ProductionOrders, Route.Wip, Route.Clock), tabs.map { it.route })
         tabs.forEach { assertTrue(AppFlavor.TAILORS.allows(it.route)) }
         val noCalendar = AppFlavor.TAILORS.phoneTabs(person("production.worker"), Route.ProductionMyTasks)
-        assertEquals(listOf(Route.ProductionMyTasks, Route.Comms(), Route.Clock), noCalendar.map { it.route })
+        assertEquals(listOf(Route.ProductionMyTasks, Route.Clock), noCalendar.map { it.route })
+        val managerTabs = AppFlavor.TAILORS.phoneTabs(manager, Route.ProductionOrders)
+        assertEquals("Orders", managerTabs.first().label)
+        assertEquals(1, managerTabs.count { it.route == Route.ProductionOrders })
     }
 
     @Test fun theSessionCarriesItsApp() {

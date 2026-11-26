@@ -47,7 +47,7 @@ internal fun TailorsMore(tabRoutes: Set<Route>, open: (Route) -> Unit, modifier:
         ordered.forEach { group ->
             val items = group.items.filter { it.route !in tabRoutes }
             val sections = if (group.label == "Me") listOf("My workday" to items.filter { it.route !in personal }, "Time & pay" to items.filter { it.route in personal })
-                else listOf((if (group.label == "Production") "Workshop" else group.label) to items)
+                else listOf(group.label to items)
             sections.filter { it.second.isNotEmpty() }.forEach { (label, rows) ->
                 MoreSection(label) { rows.forEachIndexed { index, item ->
                     if (index > 0) HorizontalDivider(Modifier.padding(start = 56.dp, end = 18.dp), color = MaterialTheme.hub.line)

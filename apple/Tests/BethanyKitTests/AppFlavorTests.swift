@@ -112,10 +112,13 @@ final class AppFlavorTests: XCTestCase {
         XCTAssertTrue(tailorGate.allows(owner))
     }
 
-    func testATailorsTabsAreHerTasksCalendarMessagesAndClock() {
+    func testTailorsTabsRespectProductionPermissions() {
         let tabs = AppFlavor.tailors.phoneTabs(for: tailor, home: AppFlavor.tailors.home(for: tailor))
-        XCTAssertEqual(tabs.map(\.route), [.productionMyTasks, .productionCalendar, .comms(), .clock])
+        XCTAssertEqual(tabs.map(\.route), [.productionMyTasks, .productionCalendar, .productionOrders, .wip, .clock])
         let noCalendar = AppFlavor.tailors.phoneTabs(for: person("production.worker"), home: .productionMyTasks)
-        XCTAssertEqual(noCalendar.map(\.route), [.productionMyTasks, .comms(), .clock])
+        XCTAssertEqual(noCalendar.map(\.route), [.productionMyTasks, .clock])
+        let managerTabs = AppFlavor.tailors.phoneTabs(for: manager, home: .productionOrders)
+        XCTAssertEqual(managerTabs.first?.label, "Orders")
+        XCTAssertEqual(managerTabs.filter { $0.route == .productionOrders }.count, 1)
     }
 }

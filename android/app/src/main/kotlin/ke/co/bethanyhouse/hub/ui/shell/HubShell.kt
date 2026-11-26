@@ -172,15 +172,27 @@ private fun PhoneShell() {
                     ) else NavigationBarItemDefaults.colors()
                     tabs.forEach { tab ->
                         val selected = !moreOpen && (if (nav.current is Route.Comms) tab.route is Route.Comms else nav.selection == tab.route)
+                        val iconColor = when (tab.route) {
+                            Route.ProductionMyTasks -> Palette.brandDeep
+                            Route.ProductionCalendar -> Palette.info
+                            Route.ProductionOrders -> Palette.warning
+                            Route.Wip -> Palette.success
+                            Route.Clock -> Palette.accent
+                            else -> Palette.brandDeep
+                        }
                         NavigationBarItem(
                             selected = selected,
                             onClick = { moreOpen = false; nav.go(tab.route) },
                             icon = { NavIcon(tab, badge = if (tab.route == Route.Notifications) env.unreadNotifications else 0) },
                             label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            colors = itemColors,
+                            colors = if (s.flavor == AppFlavor.TAILORS) NavigationBarItemDefaults.colors(
+                                selectedIconColor = iconColor, unselectedIconColor = iconColor,
+                                selectedTextColor = iconColor, unselectedTextColor = MaterialTheme.hub.textSecondary,
+                                indicatorColor = iconColor.copy(alpha = .12f),
+                            ) else itemColors,
                         )
                     }
-                    NavigationBarItem(selected = moreOpen, onClick = { if (s.flavor == AppFlavor.TAILORS) { nav.path.clear(); moreOpen = true } else nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") }, colors = itemColors)
+                    NavigationBarItem(selected = moreOpen, onClick = { if (s.flavor == AppFlavor.TAILORS) { nav.path.clear(); moreOpen = true } else nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null, tint = if (s.flavor == AppFlavor.TAILORS) Palette.brandDeep else androidx.compose.ui.graphics.Color.Unspecified) }, label = { Text("More") }, colors = itemColors)
                   } }
                   if (s.flavor == AppFlavor.TAILORS) {
                       Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp)) {

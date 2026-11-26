@@ -87,12 +87,14 @@ object TailorsHub {
         else -> Route.Profile
     }
 
-    /** Home, Calendar (when permitted), Messages, Clock in (+ More). */
+    /** Home, Calendar, Orders, WIP and Clock in (+ More), subject to existing gates. */
     fun phoneTabs(subject: PermissionSet, home: Route): List<NavItem> {
-        val first = NavCatalogue.item(home)?.let { NavItem(it.label, home, icon = it.icon) } ?: NavItem("Home", home, icon = "Home")
+        val first = NavCatalogue.item(home)?.let { NavItem(if (home == Route.ProductionOrders) "Orders" else it.label, home, icon = it.icon) } ?: NavItem("Home", home, icon = "Home")
         val tabs = mutableListOf(first)
         NavCatalogue.item(Route.ProductionCalendar)?.takeIf { home != Route.ProductionCalendar && it.gate.allows(subject) }?.let { tabs += it }
-        tabs += NavItem("Messages", Route.Comms(), icon = "Forum")
+        listOf(Route.ProductionOrders to "Orders", Route.Wip to "WIP").forEach { (route, label) ->
+            NavCatalogue.item(route)?.takeIf { home != route && it.gate.allows(subject) }?.let { tabs += NavItem(label, route, icon = it.icon) }
+        }
         tabs += NavItem("Clock in", Route.Clock, icon = NavCatalogue.item(Route.Clock)?.icon ?: "Schedule")
         return tabs
     }

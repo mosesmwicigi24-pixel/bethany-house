@@ -1,9 +1,10 @@
 # Tailors Hub audit progress
 
-### Tailors navigation, directory and text size — 26 November 2026, Codex (claimed)
+### Tailors navigation, directory and text size — 26 November 2026, Codex (claim released; visual verification open)
 
 - Taking Android `core/AppFlavor.kt`, `ui/shell/HubShell.kt`, `ui/shell/TailorsMore.kt`, `ui/TextSizeSettings.kt`, `ui/Theme.kt`, `ui/features/me/MeSignTodosColleagues.kt` and relevant tests; Apple `BethanyKit/AppFlavor.swift`, `BethanyUI/Shell/MobileShell.swift`, `BethanyUI/Features/MeFeatureSignTodosColleagues.swift` and relevant tests. Move existing permission-gated Orders and WIP to phone navigation, retain access to messages and quality control, hide directory emails in Tailors Hub, and investigate text scaling. No server-side permissions or directory settings will be changed.
 - Also taking Apple `BethanyUI/Theme.swift`: its fixed-size fonts do not respond to Dynamic Type. Review the existing font roles before changing them.
+- Added permission-gated Orders and WIP phone tabs with colored icons, kept Messages in More, and retained other production routes. Removed email display and its sharing switch from the Tailors colleague UI only; server responses and existing privacy settings are unchanged. Common Apple typography now uses Dynamic Type styles; Android's existing scale is covered by a new live density test. Android Tailors and Hub debug builds, Android core and focused text-size tests, Apple simulator build and Apple flavor tests passed. No Android emulator was attached; signed-in visual, accessibility and extreme text-size checks remain open, and fixed-size labels outside the common Apple typography still need audit.
 
 ### Android full-suite timeout investigation — 25 November 2026, Codex (claim released; CI verification open)
 
