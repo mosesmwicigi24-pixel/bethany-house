@@ -1,5 +1,9 @@
 # Tailors Hub audit progress
 
+### Tailors tab order — 26 November 2026, Codex (claimed)
+
+- Taking Android and Apple `AppFlavor` navigation definitions and their flavor tests to arrange Orders, WIP, My Tasks, Clock in, More, using existing permission gates. Calendar stays available in More; no API or permission changes.
+
 ### Tailors navigation verification — 26 November 2026, Codex (claim released; signed-in device review open)
 
 - Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/render/ShellRenderTest.kt` and the Tailors navigation files if needed. The existing signed-in shell tests still expect the previous Workshop section and tab labels; update them to exercise Orders, WIP, More and Messages, then run both variants. Test devices are currently signed out.
