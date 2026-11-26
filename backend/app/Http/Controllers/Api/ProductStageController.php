@@ -14,7 +14,23 @@ class ProductStageController extends Controller
 {
     public function index()
     {
-        $stages = ProductionStage::ordered()->get();
+        // Who does each stage by default rides along as a name, so the list
+        // can say "Whoever serves the customer" or the person without a
+        // second call. Names only.
+        $stages = ProductionStage::ordered()->with('defaultAssignee:id,first_name,last_name,status')->get()
+            ->map(function (ProductionStage $stage) {
+                $row = $stage->toArray();
+                $who = $stage->defaultAssignee;
+                unset($row['default_assignee']);
+                $row['default_assignee_name'] = $who ? trim("{$who->first_name} {$who->last_name}") : null;
+                // Set, but the account can no longer work: the stage will be
+                // handed out by hand until someone else is chosen.
+                $row['default_assignee_inactive'] = $stage->default_assignee_mode === ProductionStage::ASSIGN_PERSON
+                    && (!$who || $who->status !== 'active');
+
+                return $row;
+            });
+
         return response()->json($stages);
     }
 
@@ -66,20 +82,42 @@ class ProductStageController extends Controller
             'description' => 'nullable|string',
             'color'       => 'nullable|string|max:20',
             'is_active'   => 'sometimes|boolean',
+            // Who does this stage by default (owner, 2026-11-26).
+            'default_assignee_mode' => 'sometimes|in:' . implode(',', ProductionStage::ASSIGN_MODES),
+            'default_assignee_id'   => 'nullable|integer|exists:users,id',
         ]);
 
         if (isset($validated['name'])) {
             $validated['slug'] = Str::slug($validated['name']);
         }
 
+        if (array_key_exists('default_assignee_mode', $validated)) {
+            if ($validated['default_assignee_mode'] === ProductionStage::ASSIGN_PERSON) {
+                $person = \App\Models\User::find($validated['default_assignee_id'] ?? null);
+                if (!$person || !$person->isActive() || !$person->isStaff()) {
+                    return response()->json([
+                        'message' => 'Choose an active member of staff for this stage.',
+                        'errors'  => ['default_assignee_id' => ['Choose an active member of staff for this stage.']],
+                    ], 422);
+                }
+            } else {
+                // Only a named person carries an id.
+                $validated['default_assignee_id'] = null;
+            }
+        } else {
+            unset($validated['default_assignee_id']);
+        }
+
+        $before = ['mode' => $stage->default_assignee_mode, 'user_id' => $stage->default_assignee_id];
         $stage->update($validated);
 
         try {
+            $after = ['mode' => $stage->default_assignee_mode, 'user_id' => $stage->default_assignee_id];
             ActivityLogService::log('production_stage_updated', null, [
                 'stage_id' => $stage->id,
                 'name'     => $stage->name,
                 'changes'  => array_keys($validated),
-            ]);
+            ] + ($before !== $after ? ['default_assignee_before' => $before, 'default_assignee_after' => $after] : []));
         } catch (\Exception) {}
 
         return response()->json(['message' => 'Stage updated']);

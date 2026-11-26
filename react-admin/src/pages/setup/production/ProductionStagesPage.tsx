@@ -14,6 +14,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
 import { get, post, put, del } from "@/api/client";
+import { usersApi } from "@/api/setup";
 import { useToastStore } from "@/store/toast.store";
 import { Spinner } from "@/components/ui/Spinner";
 import type { ApiError } from "@/types";
@@ -45,6 +46,21 @@ interface ProductionStage {
     description: string | null;
     color: string | null;
     order: number;
+    /** Who does this stage on a new production order (owner, 2026-11-26). */
+    default_assignee_mode?: AssigneeMode;
+    default_assignee_id?: number | null;
+    default_assignee_name?: string | null;
+    /** A person is set but their account can no longer work. */
+    default_assignee_inactive?: boolean;
+}
+
+type AssigneeMode = "none" | "order_creator" | "person";
+
+/** What the stage list says about who does a stage. */
+function whoDoes(stage: ProductionStage): string | null {
+    if (stage.default_assignee_mode === "order_creator") return "Whoever serves the customer";
+    if (stage.default_assignee_mode === "person") return stage.default_assignee_name || "Person no longer available";
+    return null;
 }
 
 // ── Colour palette ────────────────────────────────────────────────────────────
@@ -125,7 +141,16 @@ function SortableStageRow({
     const [name, setName]               = useState(stage.name);
     const [description, setDescription] = useState(stage.description ?? "");
     const [color, setColor]             = useState(stage.color ?? COLOURS[0].value);
+    const [mode, setMode]               = useState<AssigneeMode>(stage.default_assignee_mode ?? "none");
+    const [personId, setPersonId]       = useState<number | "">(stage.default_assignee_id ?? "");
     const [confirmDelete, setConfirmDelete] = useState(false);
+    // Loaded only while a stage is being edited.
+    const { data: people } = useQuery({
+        queryKey: ["users-assignable"],
+        queryFn: () => usersApi.assignable(),
+        enabled: editing,
+        staleTime: 5 * 60_000,
+    });
 
     const {
         attributes,
@@ -142,7 +167,11 @@ function SortableStageRow({
     };
 
     const updateMut = useMutation({
-        mutationFn: () => put(`/v1/admin/product-stages/${stage.id}`, { name, description: description || null, color }),
+        mutationFn: () => put(`/v1/admin/product-stages/${stage.id}`, {
+            name, description: description || null, color,
+            default_assignee_mode: mode,
+            default_assignee_id: mode === "person" && personId !== "" ? personId : null,
+        }),
         onSuccess: () => { toast.success("Stage updated"); setEditing(false); onUpdated(); },
         onError: (e: ApiError) => toast.error(e.message),
     });
@@ -182,12 +211,50 @@ function SortableStageRow({
                             placeholder="What happens in this stage?"
                         />
                     </div>
+                    <div>
+                        <label className="label" htmlFor={`stage-who-${stage.id}`}>Who does this stage</label>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                            <select
+                                id={`stage-who-${stage.id}`}
+                                className="input sm:flex-1"
+                                value={mode}
+                                onChange={e => setMode(e.target.value as AssigneeMode)}
+                            >
+                                <option value="none">Chosen on each order</option>
+                                <option value="order_creator">Whoever serves the customer</option>
+                                <option value="person">Always the same person</option>
+                            </select>
+                            {mode === "person" && (
+                                <select
+                                    className="input sm:flex-1"
+                                    value={personId}
+                                    onChange={e => setPersonId(e.target.value === "" ? "" : Number(e.target.value))}
+                                    aria-label="Person"
+                                >
+                                    <option value="">Choose a person…</option>
+                                    {(people?.data ?? []).map(u => (
+                                        <option key={u.id} value={u.id}>
+                                            {`${u.first_name} ${u.last_name}`.trim()}{u.outlet ? ` · ${u.outlet.name}` : ""}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+                        <p className="text-2xs text-surface-500 mt-1">
+                            {mode === "none" && "New production orders leave this stage for someone to hand out."}
+                            {mode === "order_creator" && "New production orders give this stage to the person who took the customer's order."}
+                            {mode === "person" && "New production orders give this stage to this person. It stays so until you change it here."}
+                            {" "}Orders already in production are not changed.
+                        </p>
+                    </div>
                     <div className="flex gap-2">
                         <button
                             onClick={() => {
                                 setName(stage.name);
                                 setDescription(stage.description ?? "");
                                 setColor(stage.color ?? COLOURS[0].value);
+                                setMode(stage.default_assignee_mode ?? "none");
+                                setPersonId(stage.default_assignee_id ?? "");
                                 setEditing(false);
                             }}
                             className="btn-secondary btn-sm"
@@ -196,7 +263,7 @@ function SortableStageRow({
                         </button>
                         <button
                             onClick={() => updateMut.mutate()}
-                            disabled={!name.trim() || updateMut.isPending}
+                            disabled={!name.trim() || updateMut.isPending || (mode === "person" && personId === "")}
                             className="btn-primary btn-sm"
                         >
                             {updateMut.isPending ? "Saving…" : "Save"}
@@ -233,10 +300,31 @@ function SortableStageRow({
                     {stage.description && (
                         <p className="text-2xs text-surface-400 mt-0.5 truncate">{stage.description}</p>
                     )}
+                    {/* On a phone the "who" sits under the name; beside it from a tablet up. */}
+                    {whoDoes(stage) && (
+                        <p className={clsx("sm:hidden text-2xs mt-0.5", stage.default_assignee_inactive ? "text-warning-dark" : "text-surface-500")}>
+                            {stage.default_assignee_inactive ? `${whoDoes(stage)} (unavailable)` : whoDoes(stage)}
+                        </p>
+                    )}
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                {/* Who does it, when set */}
+                {whoDoes(stage) && (
+                    <span
+                        className={clsx(
+                            "hidden sm:inline-block shrink-0 max-w-[45%] truncate rounded-full px-2.5 py-1 text-2xs font-medium",
+                            stage.default_assignee_inactive
+                                ? "bg-warning-light text-warning-dark"
+                                : "bg-surface-100 text-surface-700",
+                        )}
+                        title={stage.default_assignee_inactive ? "This person can no longer be given work — choose someone else" : "Who does this stage on a new order"}
+                    >
+                        {stage.default_assignee_inactive ? `${whoDoes(stage)} (unavailable)` : whoDoes(stage)}
+                    </span>
+                )}
+
+                {/* Actions — always there on a touch screen, on hover with a mouse */}
+                <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                     <button
                         onClick={() => setEditing(true)}
                         className="btn-ghost btn-icon btn-sm text-surface-400 hover:text-brand-600"
