@@ -118,11 +118,12 @@ class InventoryValuationTest extends TestCase
         $this->assertSame('available (on hand less reserved)', $grand['basis'], 'the basis is stated');
     }
 
-    public function test_a_variant_price_wins_over_the_products_own_price(): void
+    public function test_a_variant_is_valued_at_its_products_price(): void
     {
         $product = Product::factory()->create(['status' => Product::STATUS_ACTIVE]);
         $variant = ProductVariant::factory()->create(['product_id' => $product->id]);
-        // Both rows exist; the variant is the specific thing on the shelf.
+        // A variant takes its product's price (owner, 2026-11-27): a figure
+        // of its own cannot be saved, so the shelf is valued at the product's.
         ProductPrice::create(['product_id' => $product->id, 'product_variant_id' => null,
                               'currency_code' => 'KES', 'regular_price' => 100]);
         ProductPrice::create(['product_id' => $product->id, 'product_variant_id' => $variant->id,
@@ -131,7 +132,7 @@ class InventoryValuationTest extends TestCase
                                'outlet_id' => $this->outlet->id, 'quantity_on_hand' => 2,
                                'quantity_reserved' => 0, 'reorder_point' => 0]);
 
-        $this->assertSame(1_800.0, (float) $this->valuation()['grand_totals']['total_retail_value']);
+        $this->assertSame(200.0, (float) $this->valuation()['grand_totals']['total_retail_value']);
     }
 
     public function test_stock_with_no_kes_price_counts_as_units_but_adds_no_value(): void

@@ -69,6 +69,29 @@ final class PriceRowWriter
     {
         $price = self::withCostOnKesOnly([$price])[0];
 
+        // A variant sells at its product's price (owner, 2026-11-26;
+        // App\Support\VariantPriceSync). Whatever a variant form sends for
+        // the selling price is set aside: the variant's row is brought to the
+        // product's own figures — which already passed the price rules — and
+        // only its COST, which is its own, is taken from the form.
+        if ($variantId !== null) {
+            $master = ProductPrice::where('product_id', $productId)->whereNull('product_variant_id')
+                ->where('currency_code', $price['currency_code'])->first();
+            if ($master) {
+                \App\Support\VariantPriceSync::follow($master, $user, 'variant_saved');
+
+                $own = ProductPrice::where('product_id', $productId)->where('product_variant_id', $variantId)
+                    ->where('currency_code', $price['currency_code'])->first();
+                if ($own && $user->can('products.edit_cost') && array_key_exists('cost_price', $price)) {
+                    $p = $this->proposals->propose('product_cost_change', $own->id, ['cost_price' => $price['cost_price']], $user);
+
+                    return $p ? [$p] : [];
+                }
+
+                return [];
+            }
+        }
+
         $row = ProductPrice::where('product_id', $productId)
             ->when($variantId === null, fn ($q) => $q->whereNull('product_variant_id'), fn ($q) => $q->where('product_variant_id', $variantId))
             ->where('currency_code', $price['currency_code'])
@@ -88,6 +111,11 @@ final class PriceRowWriter
                 'sale_start_date' => $price['sale_start_date'] ?? null,
                 'sale_end_date'   => $price['sale_end_date'] ?? null,
             ] : []) + ($costWritable ? ['cost_price' => $price['cost_price'] ?? null] : []));
+
+            // A product priced in a new currency: every variant is too.
+            if ($variantId === null) {
+                \App\Support\VariantPriceSync::followProduct($productId, $user, 'price_row_created');
+            }
 
             return [];
         }
@@ -110,7 +138,7 @@ final class PriceRowWriter
             $row->sale_start_date = $price['sale_start_date'] ?? null;
             $row->sale_end_date   = $price['sale_end_date'] ?? null;
             if ($row->isDirty(['sale_start_date', 'sale_end_date'])) {
-                $row->save();
+                $row->save();   // its variants keep the window (ProductPrice::saved)
             }
         }
 
