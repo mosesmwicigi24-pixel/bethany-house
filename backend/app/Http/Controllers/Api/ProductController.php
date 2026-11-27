@@ -1050,6 +1050,11 @@ class ProductController extends Controller
                 ]);
             }
 
+            // A variant sells at its product's price (owner, 2026-11-26):
+            // whatever the form sent, the new variant takes the product's
+            // figures in every currency the product is priced in.
+            \App\Support\VariantPriceSync::followProduct((int) $productId, $request->user(), 'variant_created');
+
             DB::commit();
 
             try {

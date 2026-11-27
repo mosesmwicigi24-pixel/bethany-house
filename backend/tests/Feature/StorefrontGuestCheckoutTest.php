@@ -264,7 +264,7 @@ class StorefrontGuestCheckoutTest extends TestCase
         $this->getJson('/api/v1/storefront/orders/not-a-real-token')->assertNotFound();
     }
 
-    public function test_variant_order_sets_variant_and_price(): void
+    public function test_variant_order_sets_variant_at_the_products_price(): void
     {
         $product = Product::factory()->create(['status' => 'active', 'published_at' => now()->subDay(), 'product_type' => 'variable']);
         ProductTranslation::create(['product_id' => $product->id, 'language_code' => 'en', 'name' => 'Princes Cassock']);
@@ -283,9 +283,11 @@ class StorefrontGuestCheckoutTest extends TestCase
         $item  = OrderItem::where('order_id', $order->id)->firstOrFail();
         $this->assertSame($variant->id, $item->product_variant_id);
         $this->assertSame('Blue', $item->variant_name);
-        $this->assertEquals(13000, (float) $item->unit_price); // variant price, not the 10000 base
+        // A variant takes its product's price (owner, 2026-11-27): the 13,000
+        // typed on the variant does not stand.
+        $this->assertEquals(10000, (float) $item->unit_price);
         $this->assertStringContainsString('Blue', (string) $item->product_name);
-        $this->assertEquals(13000, (float) $order->total_amount);
+        $this->assertEquals(10000, (float) $order->total_amount);
     }
 
     public function test_unknown_variant_is_rejected(): void

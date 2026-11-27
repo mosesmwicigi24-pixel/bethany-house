@@ -161,6 +161,9 @@ final class SellingPriceChangeHandler extends ProposalHandler
         // his when finance signs it (App\Support\DiscountRule::judgingAs()).
         $maker = $p->maker_id ? User::find($p->maker_id) : $by;
         \App\Support\DiscountRule::judgingAs($maker ?? $by, fn () => $row->save());
+
+        // Every variant takes the price the moment it stands — at once, or
+        // when the last signature lands (ProductPrice::saved → VariantPriceSync).
     }
 
     public function link(ChangeProposal $p): ?string

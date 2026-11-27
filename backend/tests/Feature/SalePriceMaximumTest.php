@@ -137,25 +137,37 @@ class SalePriceMaximumTest extends TestCase
 
     // ── Variants ─────────────────────────────────────────────────────────────
 
-    public function test_a_variant_sale_price_is_held_to_the_same_rule(): void
+    public function test_a_variant_cannot_carry_a_markdown_its_product_does_not(): void
     {
+        // A variant takes its product's price (owner, 2026-11-27), so the 5%
+        // rule is held in one place: the product's own price.
         $p = $this->product();
         $this->editor();
 
-        $payload = fn (float $sale) => [
+        $price = fn (int $vid) => ProductPrice::where('product_variant_id', $vid)->first();
+
+        // A 10% markdown typed on the variant does not stand: it is created at
+        // the product's price, with no sale.
+        $vid = $this->postJson("/api/v1/admin/products/{$p->id}/variants", [
             'sku' => 'ALB-' . uniqid(), 'variant_name' => 'Large',
-            'prices' => [['currency_code' => 'KES', 'regular_price' => 1000, 'sale_price' => $sale]],
-        ];
-        $this->assertRefused($this->postJson("/api/v1/admin/products/{$p->id}/variants", $payload(900)));
-        $this->assertSame(0, ProductVariant::where('product_id', $p->id)->count());
-
-        $vid = $this->postJson("/api/v1/admin/products/{$p->id}/variants", $payload(950))
-            ->assertSuccessful()->json('variant.id');
-
-        $this->assertRefused($this->putJson("/api/v1/admin/products/{$p->id}/variants/{$vid}", [
             'prices' => [['currency_code' => 'KES', 'regular_price' => 1000, 'sale_price' => 900]],
-        ]));
-        $this->assertSame(950.0, (float) ProductPrice::where('product_variant_id', $vid)->value('sale_price'));
+        ])->assertSuccessful()->json('variant.id');
+        $this->assertSame(1000.0, (float) $price($vid)->regular_price);
+        $this->assertNull($price($vid)->sale_price);
+
+        // Nor does one sent on a later edit of the variant.
+        $this->putJson("/api/v1/admin/products/{$p->id}/variants/{$vid}", [
+            'prices' => [['currency_code' => 'KES', 'regular_price' => 1000, 'sale_price' => 900]],
+        ])->assertSuccessful();
+        $this->assertNull($price($vid)->sale_price);
+
+        // The product is where the rule bites — and the variant follows what
+        // the product is allowed.
+        $this->assertRefused($this->putPrice($p, 1000, 900));
+        $this->assertNull($price($vid)->sale_price);
+
+        $this->putPrice($p, 1000, 950)->assertOk();
+        $this->assertSame(950.0, (float) $price($vid)->sale_price);
     }
 
     // ── What is already on the books ─────────────────────────────────────────

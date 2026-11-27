@@ -51,6 +51,54 @@ class ProductPrice extends Model
      */
     protected static function booted(): void
     {
+        // A product's variants are sold at the product's price (owner,
+        // 2026-11-26; App\Support\VariantPriceSync). On the MODEL for the
+        // reason given below: prices are written from a dozen places, and a
+        // rule kept at the call site is one the next door forgets.
+        //
+        //   a VARIANT row takes its product's selling price and sale window
+        //   whatever was sent (its cost stays its own);
+        //   a PRODUCT row that changes carries every variant with it.
+        static::saving(function (self $price) {
+            if ($price->product_variant_id === null) {
+                return;
+            }
+            $master = static::query()->where('product_id', $price->product_id)->whereNull('product_variant_id')
+                ->where('currency_code', $price->currency_code)->first();
+            if ($master) {
+                $price->regular_price   = $master->regular_price;
+                $price->sale_price      = $master->sale_price;
+                $price->sale_start_date = $master->sale_start_date;
+                $price->sale_end_date   = $master->sale_end_date;
+            }
+        });
+
+        static::saved(function (self $price) {
+            // A variant row brought to its product's price by the rule above
+            // (somebody saved the variant — its cost, say — while it was out
+            // of step): a price change, so it goes on the trail with the old
+            // figures, like every other.
+            if ($price->product_variant_id !== null && !$price->wasRecentlyCreated
+                && $price->wasChanged(['regular_price', 'sale_price'])) {
+                \App\Services\ActivityLogService::log('variant_prices_followed_product', $price->product, [
+                    'product_id' => (int) $price->product_id,
+                    'currency'   => (string) $price->currency_code,
+                    'via'        => 'variant_row_saved',
+                    'variants'   => [[
+                        'variant_id' => (int) $price->product_variant_id,
+                        'before'     => ['regular_price' => $price->getOriginal('regular_price'), 'sale_price' => $price->getOriginal('sale_price')],
+                        'after'      => ['regular_price' => $price->regular_price, 'sale_price' => $price->sale_price],
+                    ]],
+                ], "1 variant price(s) set to the product's {$price->currency_code} price", auth()->user());
+            }
+
+            if ($price->product_variant_id === null
+                && ($price->wasRecentlyCreated || $price->wasChanged(['regular_price', 'sale_price', 'sale_start_date', 'sale_end_date']))) {
+                \App\Support\VariantPriceSync::follow($price, auth()->user(),
+                    $price->wasRecentlyCreated ? 'price_row_created' : 'price_change', createMissing: false);
+            }
+        });
+
         static::saving(function (self $price) {
             // Saved to the cent in every currency (CustomerMoney::listPrice,
             // owner 2026-11-16) — here, on the model, for the same reason as

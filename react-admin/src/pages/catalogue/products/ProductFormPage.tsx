@@ -1094,7 +1094,7 @@ function VariantGenerator({
                         auto-generated - edit them if needed.
                         {productPrices.some((p) => Number(p.regular_price) > 0) && (
                             <span className="ml-1 text-brand-600 font-medium">
-                                Prices pre-filled from the product — adjust per variant if needed.
+                                Every variant sells at the product's price. Change it on the Pricing tab and all variants follow.
                             </span>
                         )}
                         <span className="block mt-1 text-surface-500">
@@ -1191,6 +1191,9 @@ function VariantGenerator({
                                                         step="0.01"
                                                         min="0"
                                                         placeholder="Price"
+                                                        // A variant sells at its product's price: fixed once the product has one.
+                                                        disabled={productPrices.some((p) => p.currency_code === c.code && Number(p.regular_price) > 0)}
+                                                        title={productPrices.some((p) => p.currency_code === c.code && Number(p.regular_price) > 0) ? "Set on the Pricing tab" : undefined}
                                                         value={v.prices[ci]?.regular_price ?? ""}
                                                         onChange={(e) => {
                                                             const newVal = Number(e.target.value);
@@ -1549,35 +1552,7 @@ function EditVariantModal({
         ? null : Number(ownKesCostRaw);
     const effectiveKesCost = ownKesCost ?? productKesCost;
 
-    // Re-pull the main product's prices for every currency — one tap to undo a
-    // per-variant override that has drifted. Missing currencies are derived from
-    // the default via exchange rate (same formula as the live cascade), so a
-    // product priced only in the base currency still fills every column.
     const hasProductPrices = productPrices.some((p) => Number(p.regular_price) > 0);
-    const resetToProductPrice = () => {
-        // The product's own row for each currency; where it has none, the
-        // figure the hub would charge (autoPrice: from the list the currency
-        // is priced from, else KES; never through an unset 1.0 rate).
-        const prodAmounts: Record<string, number> = Object.fromEntries(productPrices.map((x) => [x.currency_code, Number(x.regular_price)]));
-        const prodSales:   Record<string, number> = Object.fromEntries(productPrices.filter((x) => x.sale_price != null).map((x) => [x.currency_code, Number(x.sale_price)]));
-        currencies.forEach((c: any, i: number) => {
-            const fallback = productPrices.find((x) => x.currency_code === c.code && Number(x.regular_price) > 0);
-            const reg = fallback ? Number(fallback.regular_price) : autoPrice(c.code, prodAmounts, currencies);
-            const sale = fallback
-                ? (fallback.sale_price != null ? Number(fallback.sale_price) : null)
-                : autoPrice(c.code, prodSales, currencies);
-            setValue(`prices.${i}.regular_price` as any, (reg ?? null) as any, { shouldDirty: true });
-            setValue(`prices.${i}.sale_price` as any, sale as any, { shouldDirty: true });
-            if (c.code !== COST_CURRENCY) return;
-            // Cost, KES row only: a variant with its own cost is set to the
-            // product's figure; one without keeps using the product's (blank).
-            const own = editing.prices?.find((x) => x.currency_code === COST_CURRENCY)?.cost_price;
-            if (own != null && productKesCost != null) {
-                setValue(`prices.${i}.cost_price` as any, productKesCost as any, { shouldDirty: true });
-            }
-        });
-        toast.success("Prices reset to the product price");
-    };
 
     return (
         <Modal
@@ -1658,17 +1633,14 @@ function EditVariantModal({
                         <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">
                             Pricing
                         </p>
-                        {hasProductPrices && (
-                            <button
-                                type="button"
-                                onClick={resetToProductPrice}
-                                className="text-2xs font-semibold text-brand-600 hover:text-brand-700 hover:underline"
-                                title="Re-pull the main product's prices for every currency"
-                            >
-                                ↺ Reset to product price
-                            </button>
-                        )}
                     </div>
+                    {hasProductPrices && (
+                        <p className="mb-2 rounded-lg bg-surface-50 px-3 py-2 text-xs text-surface-600">
+                            A variant sells at the product's price. To change it, use the product's{" "}
+                            <span className="font-semibold">Pricing</span> tab and every variant follows.
+                            {canSeeCost ? " Its cost is its own and can be set here." : ""}
+                        </p>
+                    )}
                     {currencies.map((currency, i) => {
                         const baseCur  = baseOf(currencies);
                         const isBase   = currency.code === baseCur?.code;
@@ -1679,6 +1651,8 @@ function EditVariantModal({
                         // hub's way (autoPrice): KES fills every other row; a
                         // row the rand is priced from (USD) fills the rand.
                         // A row can still be typed over by hand afterwards.
+                        // The product has a price in this currency: the variant's is that, fixed.
+                        const followsProduct = productPrices.some((x) => x.currency_code === currency.code && Number(x.regular_price) > 0);
                         const regReg  = register(`prices.${i}.regular_price`);
                         const saleReg = register(`prices.${i}.sale_price`);
                         // A price is saved to the cent in every currency (the
@@ -1730,6 +1704,10 @@ function EditVariantModal({
                                             type="text"
                                             inputMode="decimal"
                                             {...regReg}
+                                            readOnly={followsProduct}
+                                            aria-readonly={followsProduct}
+                                            tabIndex={followsProduct ? -1 : undefined}
+                                            style={followsProduct ? { opacity: 0.6 } : undefined}
                                             placeholder={auto !== null ? `auto ${auto.toLocaleString("en-KE", { maximumFractionDigits: 2 })}` : "-"}
                                             onChange={(e) => { regReg.onChange(e); cascade("regular_price")(); }}
                                             onBlur={(e) => { regReg.onBlur(e); wholeOnBlur("regular_price")(); }}
@@ -1745,6 +1723,10 @@ function EditVariantModal({
                                             type="text"
                                             inputMode="decimal"
                                             {...saleReg}
+                                            readOnly={followsProduct}
+                                            aria-readonly={followsProduct}
+                                            tabIndex={followsProduct ? -1 : undefined}
+                                            style={followsProduct ? { opacity: 0.6 } : undefined}
                                             onChange={(e) => { saleReg.onChange(e); cascade("sale_price")(); }}
                                             onBlur={(e) => { saleReg.onBlur(e); wholeOnBlur("sale_price")(); }}
                                             placeholder="-"
