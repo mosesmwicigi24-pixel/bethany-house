@@ -4,14 +4,18 @@ namespace Tests\Feature;
 
 use App\Models\DownloadRequest;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Outlet;
 use App\Models\Payment;
 use App\Models\User;
+use Dompdf\Canvas;
+use Dompdf\FrameDecorator\Text;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -201,6 +205,99 @@ class OrderReceiptPdfTest extends TestCase
         $res = $this->get("/api/v1/admin/pdf/orders/{$o->id}/invoice")->assertOk();
         $this->assertStringStartsWith('%PDF', (string) $res->getContent());
         $this->get("/api/v1/admin/pdf/orders/{$o->id}")->assertOk();   // the internal Sales Order PDF too
+    }
+
+    /** Capture the text Dompdf rendered on each page of the actual download. */
+    private function invoicePages(Order $order): array
+    {
+        $pages = [];
+        $dompdf = $this->app->make('dompdf');
+        $dompdf->setCallbacks([[
+            'event' => 'end_frame',
+            'f' => function ($frame, Canvas $canvas) use (&$pages): void {
+                if ($frame instanceof Text && trim($frame->get_text()) !== '') {
+                    $pages[$canvas->get_page_number()][] = trim($frame->get_text());
+                }
+            },
+        ]]);
+        $this->app->instance('dompdf', $dompdf);
+
+        $response = $this->get("/api/v1/admin/pdf/orders/{$order->id}/invoice")->assertOk();
+        $this->assertStringStartsWith('%PDF', (string) $response->getContent());
+
+        return array_map(fn (array $text) => implode(' ', $text), $pages);
+    }
+
+    public static function invoicePaymentStates(): array
+    {
+        return [
+            'unpaid' => [20_000, 'KES', 'pending', [], 'KES 20,000', 'KES 0', 'KES 20,000'],
+            'awaiting approval' => [20_000, 'KES', 'pending', ['amount' => 5_000, 'status' => 'paid',
+                'requires_approval' => true, 'approval_status' => 'pending_review'], 'KES 20,000', 'KES 0', 'KES 20,000'],
+            'deposit' => [20_000, 'KES', 'pending', ['amount' => 5_000], 'KES 20,000', 'KES 5,000', 'KES 15,000'],
+            'paid' => [20_000, 'KES', 'processing', ['amount' => 20_000], 'KES 20,000', 'KES 20,000', 'KES 0'],
+            'partial refund' => [20_000, 'KES', 'processing', ['amount' => 20_000, 'refund_amount' => 1_750], 'KES 20,000', 'KES 18,250', 'KES 1,750'],
+            'foreign payment' => [450, 'USD', 'processing', ['amount' => 405.77, 'currency_code' => 'ZAR',
+                'order_amount' => 23.61, 'order_currency_code' => 'USD'], 'USD 450', 'USD 23.61', 'USD 426.39'],
+            'zero invoice' => [0, 'KES', 'pending', [], 'KES 0', 'KES 0', 'KES 0'],
+            'void invoice' => [20_000, 'KES', 'cancelled', [], 'KES 20,000', 'KES 0', '—'],
+            'refunded order' => [20_000, 'KES', 'refunded', ['amount' => 20_000, 'refund_amount' => 20_000], 'KES 20,000', 'KES 0', '—'],
+        ];
+    }
+
+    #[DataProvider('invoicePaymentStates')]
+    public function test_invoice_amounts_are_rendered_on_page_one(
+        float $total, string $currency, string $status, array $payment,
+        string $invoiceTotal, string $paid, string $due,
+    ): void {
+        $this->person('admin');
+        $order = $this->order($total);
+        $order->update(['currency_code' => $currency, 'status' => $status]);
+        if ($payment !== []) {
+            Payment::factory()->create($payment + ['order_id' => $order->id, 'currency_code' => $currency]);
+        }
+
+        $pages = $this->invoicePages($order);
+        $this->assertStringContainsString("INVOICE TOTAL {$invoiceTotal} TOTAL PAID {$paid} AMOUNT DUE {$due}", strtoupper($pages[1]));
+        $text = strtoupper(implode(' ', $pages));
+        if ($due === '—') {
+            $this->assertStringNotContainsString('PLEASE PAY THE AMOUNT DUE', $text);
+            $this->assertStringNotContainsString('PAID IN FULL', $text);
+        } elseif ($due === 'KES 0') {
+            $this->assertStringContainsString('PAID IN FULL', $text);
+        }
+    }
+
+    public function test_a_long_invoice_renders_its_summary_items_and_payments_across_pages(): void
+    {
+        $this->person('admin');
+        $order = $this->order(40_000);
+        for ($i = 1; $i <= 40; $i++) {
+            OrderItem::create([
+                'order_id' => $order->id, 'product_name' => sprintf('ITEM-%03d', $i) . ' ' . str_repeat('embroidered detail ', 12),
+                'sku' => sprintf('SKU-%03d', $i), 'quantity' => 1, 'unit_price' => 1_000, 'total_price' => 1_000,
+            ]);
+        }
+        for ($i = 1; $i <= 80; $i++) {
+            Payment::factory()->create([
+                'order_id' => $order->id, 'amount' => 125, 'provider_reference' => sprintf('REF-%03d', $i),
+            ]);
+        }
+
+        $pages = $this->invoicePages($order);
+        $this->assertStringContainsString('INVOICE TOTAL KES 40,000 TOTAL PAID KES 10,000 AMOUNT DUE KES 30,000', strtoupper($pages[1]));
+        $this->assertStringContainsString('ITEM-001', $pages[1]);
+        $this->assertStringNotContainsString('ITEM-040', $pages[1]);
+        $paymentPages = array_filter($pages, fn (string $page) => str_contains($page, 'REF-'));
+        $this->assertGreaterThan(1, count($paymentPages));
+        $text = implode(' ', $pages);
+        for ($i = 1; $i <= 40; $i++) {
+            $this->assertSame(1, substr_count($text, sprintf('ITEM-%03d', $i)), 'each item renders once');
+        }
+        for ($i = 1; $i <= 80; $i++) {
+            $this->assertSame(1, substr_count($text, sprintf('REF-%03d', $i)), 'each payment renders once');
+        }
+        $this->assertStringContainsString('Repairs and alterations', $text);
     }
 
     public function test_nothing_paid_means_no_receipt_send_the_invoice(): void

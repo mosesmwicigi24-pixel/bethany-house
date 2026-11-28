@@ -1,5 +1,11 @@
 # Tailors Hub audit progress
 
+### Invoice PDF pagination — 28 November 2026, Codex (claim released)
+
+- Taking `backend/app/Services/PdfService.php` and `backend/tests/Feature/OrderReceiptPdfTest.php` for the approved first-page invoice summary and pagination tests. The existing order totals and settled-payment balance remain the data sources.
+- The invoice PDF now shows the total, net paid, and amount due on page 1. Cancelled, voided, and refunded orders show a dash for the amount due and omit the payment request in line with the existing payment gate. The item and payment tables can span pages with print margins.
+- Verified against isolated PostgreSQL. All 77 selected tests passed (720 assertions), including nine rendered payment-state cases. A separate nine-page PDF render preserved all 40 item rows and 80 payments exactly once, with the reconciled figures on page 1. Production deployment and verification remain open.
+
 ### Tailors tab order — 26 November 2026, Codex (claim released; signed-in visual review open)
 
 - Taking Android and Apple `AppFlavor` navigation definitions and their flavor tests to arrange Orders, WIP, My Tasks, Clock in, More, using existing permission gates. Calendar stays available in More; no API or permission changes.
