@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useDefaultOutlet } from "@/lib/defaultOutlet";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -489,6 +490,7 @@ function ReceiveModal({
     const outlets = Array.isArray(outletsData)
         ? outletsData
         : (outletsData?.data ?? []);
+    useDefaultOutlet(outlets, outletId === "", setOutletId);
 
     const mutation = useMutation({
         mutationFn: () =>
@@ -681,6 +683,7 @@ function AdjustModal({
     const outlets = Array.isArray(outletsData)
         ? outletsData
         : (outletsData?.data ?? []);
+    useDefaultOutlet(outlets, outletId === "", setOutletId);
 
     // Fetch live detail so we get inventory per outlet - the list item never has inventory[]
     const { data: detailData, isLoading: loadingDetail } = useQuery({

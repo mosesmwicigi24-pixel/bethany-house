@@ -1,4 +1,5 @@
 import { useState, Fragment } from "react";
+import { useDefaultOutlet } from "@/lib/defaultOutlet";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { purchaseOrderApi, supplierApi, grnApi } from "@/api/procurement";
@@ -47,7 +48,7 @@ function GRNFormModal({
     const detail = data?.purchase_order;
 
     const [locationType, setLocationType] = useState<"warehouse" | "outlet">(
-        "warehouse",
+        "outlet",
     );
     const [outletId, setOutletId] = useState("");
     const [notes, setNotes] = useState("");
@@ -103,6 +104,8 @@ function GRNFormModal({
             }),
     });
     const outlets = outletsData?.data ?? [];
+    // Stock is received into the Sonalux House branch unless changed.
+    useDefaultOutlet(outlets, outletId === "", (id) => setOutletId(String(id)));
 
     // Rounded: 0.1 + 0.2 must read 0.3, not 0.30000000000000004.
     const totalReceiving = qtyNum(Object.values(states).reduce(

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { defaultOutletId, useDefaultOutlet } from "@/lib/defaultOutlet";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clsx } from "clsx";
@@ -143,7 +144,7 @@ function ReceiveModal({ po, onClose, onDone }: {
 }) {
     const toast = useToastStore();
     const [notes, setNotes] = useState("");
-    const [locationType, setLocationType] = useState<"warehouse" | "outlet">("warehouse");
+    const [locationType, setLocationType] = useState<"warehouse" | "outlet">("outlet");
     const [outletId, setOutletId] = useState<number | null>(null);
     const [items, setItems] = useState<Array<{ po_item_id: number; quantity_received: number; quality_status: "passed" | "rejected"; notes: string }>>(
         (po.items ?? []).map((i: any) => ({
@@ -160,6 +161,8 @@ function ReceiveModal({ po, onClose, onDone }: {
         staleTime: 60_000,
     });
     const outlets = outletsData?.data ?? [];
+    // Stock is received into the Sonalux House branch unless changed.
+    useDefaultOutlet(outlets, outletId === null, setOutletId);
 
     const outletRequired = locationType === "outlet" && !outletId;
 
@@ -184,7 +187,7 @@ function ReceiveModal({ po, onClose, onDone }: {
             <div className="p-5 space-y-4">
                 <div className="flex gap-2">
                     {(["warehouse", "outlet"] as const).map((t) => (
-                        <button key={t} onClick={() => { setLocationType(t); setOutletId(null); }}
+                        <button key={t} onClick={() => { setLocationType(t); setOutletId(t === "outlet" ? defaultOutletId(outlets) : null); }}
                             className={clsx("flex-1 py-2 rounded-xl text-xs font-semibold border transition-all",
                                 locationType === t ? "bg-brand-600 text-white border-brand-600" : "bg-white text-surface-600 border-surface-200 hover:border-brand-300")}>
                             {t === "warehouse" ? "Main Warehouse" : "Outlet"}

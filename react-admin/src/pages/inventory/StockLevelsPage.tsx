@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { defaultOutletId as pickDefaultOutlet } from "@/lib/defaultOutlet";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { stockApi } from "@/api/stock";
@@ -605,8 +606,7 @@ function OpeningStockModal({ open, onClose, onSaved }: OpeningStockModalProps) {
     // Default outlet: the Sonalux house outlet (still changeable per row).
     const defaultOutletId = useMemo<number | "">(() => {
         if (!outlets.length) return "";
-        const sonalux = outlets.find((o: any) => /sonalux/i.test(o.name ?? ""));
-        return (sonalux ?? outlets[0]).id as number;
+        return pickDefaultOutlet(outlets) ?? (outlets[0].id as number);
     }, [outlets]);
 
     // Backfill rows created before the outlets finished loading.
