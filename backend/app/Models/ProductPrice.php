@@ -68,8 +68,11 @@ class ProductPrice extends Model
             if ($master) {
                 $price->regular_price   = $master->regular_price;
                 $price->sale_price      = $master->sale_price;
-                $price->sale_start_date = $master->sale_start_date;
-                $price->sale_end_date   = $master->sale_end_date;
+                // As stored — the date cast would drop a time of day.
+                $price->setRawAttributes([
+                    'sale_start_date' => $master->getRawOriginal('sale_start_date'),
+                    'sale_end_date'   => $master->getRawOriginal('sale_end_date'),
+                ] + $price->getAttributes());
             }
         });
 
