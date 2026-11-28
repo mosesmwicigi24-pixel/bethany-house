@@ -252,6 +252,29 @@ class VariantPricesFollowProductTest extends TestCase
         $this->assertSame($before, DB::table('activity_log')->where('action', 'variant_prices_followed_product')->count());
     }
 
+    public function test_a_sale_window_saved_with_a_time_of_day_is_copied_exactly(): void
+    {
+        // As found on the live hub (2026-11-28): the window is a timestamp,
+        // and one saved with a time of day was copied by day only, so those
+        // variants stayed "out of step" after the alignment.
+        DB::table('product_prices')->where('id', $this->kes->id)->update([
+            'sale_price' => 9600, 'sale_start_date' => '2026-11-01 14:30:00', 'sale_end_date' => '2026-12-24 21:00:00',
+        ]);
+
+        $this->assertSame(0, Artisan::call('prices:align-variants', ['--apply' => true, '--actor' => $this->owner->id]));
+        $this->assertStringContainsString('Still out of step: 0', Artisan::output());
+
+        $raw = DB::table('product_prices')->where('product_variant_id', $this->red->id)->where('currency_code', 'KES')->first();
+        $this->assertSame('2026-11-01 14:30:00', (string) $raw->sale_start_date);
+        $this->assertSame('2026-12-24 21:00:00', (string) $raw->sale_end_date);
+
+        // And a variant row saved on its own keeps the exact window too.
+        $this->of($this->red)->update(['cost_price' => 6100]);
+        $raw = DB::table('product_prices')->where('product_variant_id', $this->red->id)->where('currency_code', 'KES')->first();
+        $this->assertSame('2026-11-01 14:30:00', (string) $raw->sale_start_date);
+        $this->assertSame(0, \App\Support\VariantPriceSync::outOfStep()->count());
+    }
+
     public function test_the_list_goes_to_the_owner_by_email_and_the_log_shows_counts_only(): void
     {
         Mail::fake();

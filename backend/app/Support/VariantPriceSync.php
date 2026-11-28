@@ -53,7 +53,13 @@ final class VariantPriceSync
         }
 
         $currency = (string) $productRow->currency_code;
-        $target   = self::figures($productRow);
+        // Read as stored: the sale window is a timestamp, and the model's
+        // date cast would drop a time of day (found live, 2026-11-28).
+        $stored = DB::table('product_prices')->where('id', $productRow->id)->first();
+        if (!$stored) {
+            return 0;
+        }
+        $target   = self::figures($stored);
         $existing = DB::table('product_prices')
             ->where('product_id', $productRow->product_id)
             ->whereIn('product_variant_id', $variantIds)
@@ -145,13 +151,13 @@ final class VariantPriceSync
     /** The four followed columns of a row, as they are stored. */
     private static function figures(object $row): array
     {
-        $day = fn ($v) => $v === null ? null : substr((string) ($v instanceof \DateTimeInterface ? $v->format('Y-m-d') : $v), 0, 10);
+        $at = fn ($v) => $v === null ? null : (string) $v;
 
         return [
             'regular_price'   => number_format((float) $row->regular_price, 2, '.', ''),
             'sale_price'      => $row->sale_price === null ? null : number_format((float) $row->sale_price, 2, '.', ''),
-            'sale_start_date' => $day($row->sale_start_date ?? null),
-            'sale_end_date'   => $day($row->sale_end_date ?? null),
+            'sale_start_date' => $at($row->sale_start_date ?? null),
+            'sale_end_date'   => $at($row->sale_end_date ?? null),
         ];
     }
 }
