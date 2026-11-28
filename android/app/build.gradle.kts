@@ -106,6 +106,8 @@ android {
             // Robolectric fetches its Android runtime jars; use the same Maven mirror as the build.
             it.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2/")
             it.maxHeapSize = "3g"
+            // Isolate Robolectric/Compose state between test classes to prevent idling timeouts.
+            it.forkEvery = 1
             // Optional live-backend render check (LiveRenderTest); see docs/NATIVE_APPS_ANDROID.md.
             (project.findProperty("hubE2eUrl") as String?)?.let { url -> it.systemProperty("hub.e2e.url", url) }
             (project.findProperty("hubE2eToken") as String?)?.let { t -> it.systemProperty("hub.e2e.token", t) }
@@ -144,6 +146,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
 
     implementation(libs.androidx.biometric)
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.webkit)

@@ -53,13 +53,13 @@ public enum Theme {
         public static func display(_ size: CGFloat, weight: SwiftUI.Font.Weight = .bold) -> SwiftUI.Font {
             .system(size: size, weight: weight, design: .rounded)
         }
-        public static let pageTitle = display(26)
-        public static let sectionTitle = SwiftUI.Font.system(size: 17, weight: .semibold)
-        public static let body = SwiftUI.Font.system(size: 15)
-        public static let secondary = SwiftUI.Font.system(size: 13)
-        public static let caption = SwiftUI.Font.system(size: 11, weight: .medium)
-        public static let mono = SwiftUI.Font.system(size: 13, design: .monospaced)
-        public static let stat = display(28)
+        public static let pageTitle = SwiftUI.Font.system(.title2, design: .rounded).weight(.bold)
+        public static let sectionTitle = SwiftUI.Font.headline
+        public static let body = SwiftUI.Font.subheadline
+        public static let secondary = SwiftUI.Font.footnote
+        public static let caption = SwiftUI.Font.caption2.weight(.medium)
+        public static let mono = SwiftUI.Font.system(.footnote, design: .monospaced)
+        public static let stat = SwiftUI.Font.system(.title, design: .rounded).weight(.bold)
     }
 
     // MARK: Shape & spacing

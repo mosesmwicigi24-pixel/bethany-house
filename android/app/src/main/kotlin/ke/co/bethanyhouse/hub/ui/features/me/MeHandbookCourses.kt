@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiError
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.Record
 import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.bool
@@ -100,7 +101,7 @@ internal fun HandbookScreen() {
     val list = remember { Resource(scope) { env.client.get("/v1/admin/handbook", mapOf("q" to query.trim().ifEmpty { null })).json ?: JsonNull } }
     LaunchedEffect(query) { if (list.state != Loadable.Idle) delay(300); list.reload() }
 
-    Page("Handbook", subtitle = "How we do things at Bethany House.", refresh = { list.reload() }) {
+    Page("Handbook", subtitle = "How we do things at Bethany House.", refresh = { list.reload() }, showTitle = env.flavor != AppFlavor.TAILORS) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
             ModuleSearchField(query, { query = it }, "Search policies and how-tos…", onSubmit = { list.load() }, modifier = Modifier.weight(1f))
             if (list.value["can_edit"].bool == true) Button(onClick = { editing = true }) { Text("New article") }
@@ -224,7 +225,9 @@ internal fun CoursesScreen() {
     LaunchedEffect(Unit) { list.load() }
     val subtitle = list.value?.let { d -> val n = d["to_do"].int ?: 0; if (n > 0) "${MeFormat.plural(n, "course")} to complete." else "Short courses with a quiz at the end." }
 
-    Page("Training", subtitle = subtitle, refresh = { list.reload() }) {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page("Training", subtitle = subtitle, refresh = { list.reload() }, showTitle = !tailors) {
+        if (tailors && (list.value["to_do"].int ?: 0) > 0 && subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
         if (list.value["can_edit"].bool == true) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Button(onClick = { editing = true }) { Text("New course") } }
         LoadableView(list.state, retry = { list.load() }, isEmpty = { it.listRecords.isEmpty() }, empty = { EmptyState("No courses yet", icon = Icons.Default.School) }) { d ->
             d.listRecords.forEach { c -> CourseRow(c) { env.navigator.push(Route.Courses(c.intId)) } }

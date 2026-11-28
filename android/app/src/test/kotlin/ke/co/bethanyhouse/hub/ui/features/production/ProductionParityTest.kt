@@ -1,5 +1,6 @@
 package ke.co.bethanyhouse.hub.ui.features.production
 
+import ke.co.bethanyhouse.hub.core.Record
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import org.junit.Assert.assertEquals
@@ -55,5 +56,24 @@ class ProductionParityTest {
         assertNull(lastQcNote("QC: Passed"))
         assertNull(lastQcNote("No inspection yet"))
         assertNull(lastQcNote(null))
+    }
+    @Test fun taskLanesReflectWorkAndInspection() {
+        fun group(orderStatus: String, taskStatus: String, blocked: Boolean = false): TaskOrderGroup {
+            val order = json("""{"status":"$orderStatus"}""")
+            val task = Record(json("""{"status":"$taskStatus","stage":{"name":"Stitching"},"blocked_by_stage":${if (blocked) "\"Cutting\"" else "null"}}"""))
+            return TaskOrderGroup(1, order, listOf(task))
+        }
+        assertEquals("In progress", taskLane(group("in_progress", "in_progress"), false))
+        assertEquals("Ready to start", taskLane(group("pending", "pending"), false))
+        assertEquals("Waiting", taskLane(group("pending", "pending", true), false))
+        assertEquals("With Quality Control", taskLane(group("qc_pending", "completed"), false))
+        assertEquals("Awaiting inspection · No action needed", taskSummary(group("qc_pending", "completed"), false))
+        assertEquals("Finished stages", taskLane(group("completed", "completed"), true))
+    }
+    @Test fun calendarOpensOnlyAnUnambiguousExactOrderNumber() {
+        val results = json("""{"data":[{"id":7,"order_number":"PRD-7"},{"id":70,"order_number":"PRD-70"}]}""")
+        assertEquals(7, calendarOrderId(results, "PRD-7"))
+        assertNull(calendarOrderId(results, "PRD-8"))
+        assertNull(calendarOrderId(json("""{"data":[{"id":7,"order_number":"PRD-7"},{"id":8,"order_number":"PRD-7"}]}"""), "PRD-7"))
     }
 }

@@ -21,6 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -47,6 +50,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ke.co.bethanyhouse.hub.LocalEnv
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.ApiError
 import ke.co.bethanyhouse.hub.core.AuthService
 import ke.co.bethanyhouse.hub.core.SessionStore
@@ -72,7 +76,7 @@ fun SignInScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Space.xl),
         ) {
-            Brand()
+            Brand(env.flavor == AppFlavor.TAILORS)
             val kioskEnded by env.kiosk.ended.collectAsStateWithLifecycle()
             kioskEnded?.let { reason ->
                 Surface(shape = MaterialTheme.shapes.medium, color = Palette.warningSoft, modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()) {
@@ -97,19 +101,20 @@ fun SignInScreen() {
                     }
                 }
             }
-            Text("Bethany House Hub · ${env.config.hubUrl.removePrefix("https://")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
+            Text("${if (env.flavor == AppFlavor.TAILORS) "Tailors Hub" else "Bethany House Hub"} · ${env.config.hubUrl.removePrefix("https://")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
         }
     }
 }
 
 @Composable
-private fun Brand() {
+private fun Brand(tailors: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Box(Modifier.size(56.dp).background(Palette.brand, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
-            Text("BH", style = MaterialTheme.typography.titleLarge, color = androidx.compose.ui.graphics.Color.White)
+            if (tailors) Icon(Icons.Default.ContentCut, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White)
+            else Text("BH", style = MaterialTheme.typography.titleLarge, color = androidx.compose.ui.graphics.Color.White)
         }
-        Text("Bethany House", style = MaterialTheme.typography.headlineSmall)
-        Text("Sign in to the Hub", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.hub.textSecondary)
+        Text(if (tailors) "Tailors Hub" else "Bethany House", style = MaterialTheme.typography.headlineSmall)
+        Text(if (tailors) "Staff sign-in" else "Sign in to the Hub", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.hub.textSecondary)
     }
 }
 

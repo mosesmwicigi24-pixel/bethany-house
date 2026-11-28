@@ -189,7 +189,15 @@ class Passkeys
     private function ceremonies(Request $request): CeremonyStepManagerFactory
     {
         $f = new CeremonyStepManagerFactory();
-        $f->setAllowedOrigins([$this->origin($request)]);
+        $origins = [$this->origin($request)];
+        foreach ((array) config('security.passkeys.android_certificates', []) as $fingerprint) {
+            $hex = str_replace(':', '', (string) $fingerprint);
+            if (!preg_match('/\A[0-9a-fA-F]{64}\z/', $hex)) {
+                throw new \InvalidArgumentException('Invalid Android passkey certificate fingerprint.');
+            }
+            $origins[] = 'android:apk-key-hash:' . self::b64url(hex2bin($hex));
+        }
+        $f->setAllowedOrigins(array_values(array_unique($origins)));
         $f->setAlgorithmManager(Manager::create()->add(ES256::create(), RS256::create()));
         $f->setAttestationStatementSupportManager($this->attestations());
 

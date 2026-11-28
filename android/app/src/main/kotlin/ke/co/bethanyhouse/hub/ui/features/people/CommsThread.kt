@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import ke.co.bethanyhouse.hub.AppEnvironment
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiError
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.Record
 import ke.co.bethanyhouse.hub.core.RealtimeClient
 import ke.co.bethanyhouse.hub.core.Route
@@ -281,7 +282,21 @@ internal fun ThreadScreen(channelId: Int) {
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.hub.canvas)) {
         val ch = channel
-        Row(Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.m), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        if (env.flavor == AppFlavor.TAILORS && ch?.isContext == true) {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.hub.card).padding(horizontal = Space.gutter, vertical = Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Icon(ch.icon, contentDescription = null, tint = Palette.brandDeep, modifier = Modifier.size(32.dp).background(Palette.brand.copy(alpha = 0.09f), MaterialTheme.shapes.extraSmall).padding(7.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(if (ch.contextType == "production_order") "Production order" else "Order", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+                        Text(ch.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        ch.description?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary) }
+                        Text("${ch.memberCount} members", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textSecondary)
+                    }
+                    IconButton(onClick = { showDetails = true }) { Icon(Icons.Default.Info, contentDescription = "Details") }
+                }
+                ch.contextRoute?.let { route -> TextButton(onClick = { env.navigator.go(route) }) { Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp)); Text("  Open record") } }
+            }
+        } else Row(Modifier.fillMaxWidth().padding(horizontal = Space.gutter, vertical = Space.m), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             if (ch != null) Icon(ch.icon, contentDescription = null, tint = Palette.brandDeep, modifier = Modifier.size(20.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(ch?.name ?: "Conversation", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)

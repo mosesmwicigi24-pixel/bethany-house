@@ -41,6 +41,7 @@ fun Page(
     subtitle: String? = null,
     refresh: (suspend () -> Unit)? = null,
     actions: (@Composable () -> Unit)? = null,
+    showTitle: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var refreshing by remember { mutableStateOf(false) }
@@ -51,10 +52,10 @@ fun Page(
                 Modifier.fillMaxWidth().widthIn(max = 1100.dp).verticalScroll(rememberScrollState()).padding(horizontal = Space.gutter, vertical = Space.l),
                 verticalArrangement = Arrangement.spacedBy(Space.l),
             ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (showTitle || actions != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(title, style = MaterialTheme.typography.headlineMedium)
-                        if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
+                        if (showTitle) Text(title, style = MaterialTheme.typography.headlineMedium)
+                        if (showTitle && subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
                     }
                     actions?.invoke()
                 }

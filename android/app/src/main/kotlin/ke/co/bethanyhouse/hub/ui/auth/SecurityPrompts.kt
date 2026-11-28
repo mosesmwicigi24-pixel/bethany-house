@@ -58,6 +58,7 @@ import ke.co.bethanyhouse.hub.ui.Palette
 import ke.co.bethanyhouse.hub.ui.Space
 import ke.co.bethanyhouse.hub.ui.hub
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 /**
  * The PIN lock (423 pin_locked), the step-up dialog (403 step_up_required),
@@ -140,12 +141,13 @@ private fun IdleLockedOutOverlay() {
     }
 }
 
-/** "Confirm it's you": TOTP or password as the server asked, with its fallback. Passkeys are not yet wired on Android (see checklist). */
+/** "Confirm it's you": use the server's suggested method and offer its fallback. */
 @Composable
 private fun StepUpDialog(challenge: StepUpChallenge) {
     val env = LocalEnv.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var method by remember(challenge) { mutableStateOf(if (challenge.method == StepUpChallenge.Method.PASSKEY) (challenge.fallback ?: StepUpChallenge.Method.PASSWORD) else challenge.method) }
+    var method by remember(challenge) { mutableStateOf(challenge.method) }
     var secret by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -153,20 +155,25 @@ private fun StepUpDialog(challenge: StepUpChallenge) {
         if (busy) return
         busy = true; error = null
         scope.launch {
-            try { env.session.stepUp(if (method == StepUpChallenge.Method.PASSWORD) secret else null, if (method == StepUpChallenge.Method.TOTP) secret else null) }
-            catch (e: ApiError) { error = e.message } catch (e: Exception) { error = e.message }
+            try {
+                if (method == StepUpChallenge.Method.PASSKEY) {
+                    AndroidPasskeys(context, env.client).stepUp()
+                    env.session.stepUpSucceeded()
+                } else env.session.stepUp(if (method == StepUpChallenge.Method.PASSWORD) secret else null, if (method == StepUpChallenge.Method.TOTP) secret else null)
+            }
+            catch (e: CancellationException) { throw e } catch (e: ApiError) { error = e.message } catch (e: Exception) { error = e.message ?: "Passkey confirmation failed. Try another way." }
             busy = false
         }
     }
     AlertDialog(
-        onDismissRequest = { scope.launch { env.session.cancelStepUp() } },
+        onDismissRequest = { if (!busy) scope.launch { env.session.cancelStepUp() } },
         icon = { Icon(Icons.Default.Key, contentDescription = null, tint = Palette.brand) },
         title = { Text("Confirm it's you") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Text(challenge.reason ?: "This action needs you to confirm your identity.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
-                if (challenge.method == StepUpChallenge.Method.PASSKEY) Text("Passkeys aren't available in this app yet; use the fallback below.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.hub.textTertiary)
-                OutlinedTextField(
+                if (method == StepUpChallenge.Method.PASSKEY) Text("Confirm with a passkey on this device.", style = MaterialTheme.typography.bodySmall)
+                else OutlinedTextField(
                     value = secret, onValueChange = { secret = it }, singleLine = true,
                     label = { Text(if (method == StepUpChallenge.Method.TOTP) "Authenticator code" else "Password") },
                     visualTransformation = if (method == StepUpChallenge.Method.PASSWORD) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
@@ -175,11 +182,12 @@ private fun StepUpDialog(challenge: StepUpChallenge) {
                 )
                 error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Palette.danger) }
                 val fb = challenge.fallback
-                if (fb != null && fb != method && fb != StepUpChallenge.Method.PASSKEY) TextButton(onClick = { method = fb; secret = "" }) { Text("Use ${if (fb == StepUpChallenge.Method.PASSWORD) "password" else "authenticator code"} instead") }
+                if (fb != null && fb != method && fb != StepUpChallenge.Method.PASSKEY) TextButton(enabled = !busy, onClick = { method = fb; secret = "" }) { Text("Use ${if (fb == StepUpChallenge.Method.PASSWORD) "password" else "authenticator code"} instead") }
+                if (challenge.method == StepUpChallenge.Method.PASSKEY && method != StepUpChallenge.Method.PASSKEY) TextButton(enabled = !busy, onClick = { method = StepUpChallenge.Method.PASSKEY; secret = "" }) { Text("Use passkey instead") }
             }
         },
-        confirmButton = { TextButton(enabled = !busy && secret.isNotEmpty(), onClick = { submit() }) { Text("Confirm") } },
-        dismissButton = { TextButton(onClick = { scope.launch { env.session.cancelStepUp() } }) { Text("Cancel") } },
+        confirmButton = { TextButton(enabled = !busy && (method == StepUpChallenge.Method.PASSKEY || secret.isNotEmpty()), onClick = { submit() }) { Text(if (method == StepUpChallenge.Method.PASSKEY) "Use passkey" else "Confirm") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = { scope.launch { env.session.cancelStepUp() } }) { Text("Cancel") } },
     )
 }
 

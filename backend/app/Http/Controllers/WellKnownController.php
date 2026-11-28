@@ -44,20 +44,22 @@ class WellKnownController extends Controller
     /** Android App Links (Digital Asset Links). */
     public function assetLinks(): JsonResponse
     {
-        $package      = (string) config('applinks.android.package');
-        $fingerprints = (array) config('applinks.android.sha256_fingerprints', []);
-        abort_if($package === '' || $fingerprints === [], 404);
-
-        return response()->json([[
+        $targets = [
+            [(string) config('applinks.android.package'), (array) config('applinks.android.sha256_fingerprints', [])],
+            [(string) config('applinks.android.tailors_package'), (array) config('applinks.android.tailors_sha256_fingerprints', [])],
+        ];
+        $targets = array_values(array_filter($targets, fn (array $target) => $target[0] !== '' && $target[1] !== []));
+        abort_if($targets === [], 404);
+        return response()->json(array_map(fn (array $target) => [
             'relation' => [
                 'delegate_permission/common.handle_all_urls',
                 'delegate_permission/common.get_login_creds',
             ],
             'target' => [
                 'namespace'                => 'android_app',
-                'package_name'             => $package,
-                'sha256_cert_fingerprints' => array_values($fingerprints),
+                'package_name'             => $target[0],
+                'sha256_cert_fingerprints' => array_values($target[1]),
             ],
-        ]])->header('Cache-Control', 'public, max-age=3600');
+        ], $targets))->header('Cache-Control', 'public, max-age=3600');
     }
 }

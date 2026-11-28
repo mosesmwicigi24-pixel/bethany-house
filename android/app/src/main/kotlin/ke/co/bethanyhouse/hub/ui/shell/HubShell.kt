@@ -2,8 +2,10 @@ package ke.co.bethanyhouse.hub.ui.shell
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +29,7 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DrawerValue
@@ -36,6 +42,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.PermanentDrawerSheet
@@ -53,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,7 +68,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.shape.RoundedCornerShape
+import ke.co.bethanyhouse.hub.R
+import ke.co.bethanyhouse.hub.ui.LocalTailorsTextSize
+import ke.co.bethanyhouse.hub.ui.TailorsTextSizeDialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.core.layout.WindowWidthSizeClass
 import ke.co.bethanyhouse.hub.LocalEnv
@@ -129,6 +144,9 @@ private fun PhoneShell() {
     val nav = env.navigator
     val s = env.session.current
     val tabs = s.flavor.phoneTabs(s.permissions, s.home)
+    var moreOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(nav.selection) { moreOpen = false }
+    BackHandler(enabled = moreOpen && nav.path.isEmpty()) { moreOpen = false }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     LaunchedEffect(nav.drawerOpen) { if (nav.drawerOpen) drawer.open() else drawer.close() }
@@ -141,22 +159,52 @@ private fun PhoneShell() {
     ) {
         Scaffold(
             containerColor = MaterialTheme.hub.canvas,
-            topBar = { HubTopBar(showMenu = true, onMenu = { scope.launch { drawer.open() } }) },
+            topBar = { HubTopBar(showMenu = !(moreOpen && nav.path.isEmpty()) && !(s.flavor == AppFlavor.TAILORS && nav.current == Route.ProductionMyTasks), onMenu = { scope.launch { drawer.open() } }, titleOverride = if (moreOpen && nav.path.isEmpty()) "More" else null) },
             bottomBar = {
-                if (nav.path.isEmpty()) NavigationBar(containerColor = MaterialTheme.hub.card) {
+                if (nav.path.isEmpty() || s.flavor == AppFlavor.TAILORS) {
+                  val bar: @Composable () -> Unit = { NavigationBar(containerColor = if (s.flavor == AppFlavor.TAILORS) Color.Transparent else MaterialTheme.hub.card, windowInsets = if (s.flavor == AppFlavor.TAILORS) WindowInsets(0, 0, 0, 0) else androidx.compose.material3.NavigationBarDefaults.windowInsets) {
+                    val itemColors = if (s.flavor == AppFlavor.TAILORS) NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        indicatorColor = MaterialTheme.hub.canvas,
+                        unselectedIconColor = MaterialTheme.hub.textSecondary,
+                        unselectedTextColor = MaterialTheme.hub.textSecondary,
+                    ) else NavigationBarItemDefaults.colors()
                     tabs.forEach { tab ->
-                        val selected = nav.selection == tab.route
+                        val selected = !moreOpen && (if (nav.current is Route.Comms) tab.route is Route.Comms else nav.selection == tab.route)
+                        val iconColor = when (tab.route) {
+                            Route.ProductionMyTasks -> Palette.brandDeep
+                            Route.ProductionCalendar -> Palette.info
+                            Route.ProductionOrders -> Palette.warning
+                            Route.Wip -> Palette.success
+                            Route.Clock -> Palette.accent
+                            else -> Palette.brandDeep
+                        }
                         NavigationBarItem(
                             selected = selected,
-                            onClick = { nav.go(tab.route) },
+                            onClick = { moreOpen = false; nav.go(tab.route) },
                             icon = { NavIcon(tab, badge = if (tab.route == Route.Notifications) env.unreadNotifications else 0) },
                             label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            colors = if (s.flavor == AppFlavor.TAILORS) NavigationBarItemDefaults.colors(
+                                selectedIconColor = iconColor, unselectedIconColor = iconColor,
+                                selectedTextColor = iconColor, unselectedTextColor = MaterialTheme.hub.textSecondary,
+                                indicatorColor = iconColor.copy(alpha = .12f),
+                            ) else itemColors,
                         )
                     }
-                    NavigationBarItem(selected = false, onClick = { nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) }, label = { Text("More") })
+                    NavigationBarItem(selected = moreOpen, onClick = { if (s.flavor == AppFlavor.TAILORS) { nav.path.clear(); moreOpen = true } else nav.drawerOpen = true }, icon = { Icon(Icons.Default.MoreHoriz, contentDescription = null, tint = if (s.flavor == AppFlavor.TAILORS) Palette.brandDeep else androidx.compose.ui.graphics.Color.Unspecified) }, label = { Text("More") }, colors = itemColors)
+                  } }
+                  if (s.flavor == AppFlavor.TAILORS) {
+                      Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                          Surface(shape = RoundedCornerShape(48.dp), color = MaterialTheme.hub.card, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.hub.line)) { bar() }
+                      }
+                  } else bar()
                 }
             },
-        ) { padding -> CurrentScreen(Modifier.padding(padding)) }
+        ) { padding ->
+            if (s.flavor == AppFlavor.TAILORS && moreOpen && nav.path.isEmpty()) TailorsMore(tabs.map { it.route }.toSet(), open = { nav.push(it) }, modifier = Modifier.padding(padding))
+            else CurrentScreen(Modifier.padding(padding))
+        }
     }
 }
 
@@ -200,14 +248,22 @@ private fun SidebarShell() {
 }
 
 @Composable
-private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit) {
+private fun HubTopBar(showMenu: Boolean, onMenu: () -> Unit, titleOverride: String? = null) {
     val env = LocalEnv.current
     val nav = env.navigator
     val route = nav.current
     val flavor = env.session.current.flavor
-    val title = route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
+    val resolvedTitleOverride = titleOverride ?: if (flavor == AppFlavor.TAILORS && route == Route.Forms) "Checklists & forms" else null
+    val tailorHome = resolvedTitleOverride == null && flavor == AppFlavor.TAILORS && route == Route.ProductionMyTasks && nav.path.isEmpty()
+    val title = resolvedTitleOverride ?: route?.let { NavCatalogue.item(it)?.label } ?: route?.let { NavCatalogue.item(it.parent ?: it)?.label } ?: flavor.appName
     TopAppBar(
-        title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = {
+            if (tailorHome) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(R.drawable.tailors_mark), contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)))
+                Spacer(Modifier.width(9.dp))
+                Text("Tailors Hub", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            } else Text(title, modifier = if (resolvedTitleOverride != null) Modifier.fillMaxWidth() else Modifier, textAlign = if (resolvedTitleOverride != null) TextAlign.Center else TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
         navigationIcon = {
             if (nav.path.isNotEmpty()) IconButton(onClick = { nav.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             else if (showMenu) IconButton(onClick = onMenu) { Icon(Icons.Default.Menu, contentDescription = "Menu") }
@@ -236,6 +292,9 @@ private fun SidebarContent() {
     val scope = rememberCoroutineScope()
     val groups = s.flavor.groups(s.permissions)
     val dim = Color(0xFFB7C0D3)
+    val textSize = LocalTailorsTextSize.current
+    var showTextSize by remember { mutableStateOf(false) }
+    if (showTextSize && textSize != null) TailorsTextSizeDialog(textSize) { showTextSize = false }
     // Changes saved offline wait in this person's own store on the device and
     // are sent the next time they sign in here; never under someone else.
     // Say so before signing out, so nobody leaves thinking their work is in.
@@ -272,6 +331,14 @@ private fun SidebarContent() {
             }
             item { HorizontalDivider(color = Palette.navBorder, modifier = Modifier.padding(vertical = Space.s)) }
             items(s.flavor.userMenu) { item -> SidebarRow(item, selected = nav.selection == item.route) { nav.go(item.route) } }
+            if (textSize != null) item {
+                ListItem(
+                    headlineContent = { Text("Text size", color = Color(0xFFE2E6EF)) },
+                    leadingContent = { Icon(Icons.Default.TextFields, contentDescription = null, tint = dim) },
+                    colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.clickable { showTextSize = true },
+                )
+            }
             item {
                 ListItem(
                     headlineContent = { Text("Sign out", color = Color(0xFFFCA5A5)) },

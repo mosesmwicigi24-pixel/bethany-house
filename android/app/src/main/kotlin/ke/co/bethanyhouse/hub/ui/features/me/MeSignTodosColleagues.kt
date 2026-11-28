@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.ApiError
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.core.Record
 import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.bool
@@ -97,7 +98,9 @@ internal fun SignScreen() {
     LaunchedEffect(Unit) { list.load() }
     val subtitle = list.value?.let { d -> val n = d["pending"].int ?: 0; if (n > 0) "$n waiting for your signature." else "Nothing waiting." }
 
-    Page("To sign", subtitle = subtitle, refresh = { list.reload() }) {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page("To sign", subtitle = subtitle, refresh = { list.reload() }, showTitle = !tailors) {
+        if (tailors && (list.value["pending"].int ?: 0) > 0 && subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
         LoadableView(list.state, retry = { list.load() }, isEmpty = { it.listRecords.isEmpty() }, empty = { EmptyState("Nobody has asked you to sign anything", icon = Icons.Default.Draw) }) { d ->
             MeListCard {
                 d.listRecords.forEach { r ->
@@ -224,7 +227,9 @@ internal fun TodosScreen() {
 
     val subtitle = list.value?.let { d -> val overdue = d["overdue"].int ?: 0; val open = d["open"].int ?: 0; if (overdue > 0) "$overdue overdue · $open open" else "$open open" }
 
-    Page("To-dos", subtitle = subtitle, refresh = { list.reload() }) {
+    val tailors = env.flavor == AppFlavor.TAILORS
+    Page("To-dos", subtitle = subtitle, refresh = { list.reload() }, showTitle = !tailors) {
+        if (tailors && ((list.value["overdue"].int ?: 0) > 0 || (list.value["open"].int ?: 0) > 0) && subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.hub.textSecondary)
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             SegmentedTabs(listOf("mine" to "Mine", "given" to "I gave") + (if (canGive) listOf("team" to "The team") else emptyList()), todoScope) { todoScope = it }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -348,7 +353,7 @@ internal fun ColleaguesScreen() {
         } catch (e: ApiError) { env.toasts.error(e) } finally { busy = false }
     }
 
-    Page("Colleagues", subtitle = "Everyone at Bethany House and how to reach them.", refresh = { list.reload() }) {
+    Page("Colleagues", subtitle = "Everyone at Bethany House and how to reach them.", refresh = { list.reload() }, showTitle = env.flavor != AppFlavor.TAILORS) {
         ModuleSearchField(query, { query = it }, "Search by name, job or department…", onSubmit = { list.load() })
         val depts = list.value["departments"].records.mapNotNull { it.str }
         if (depts.isNotEmpty()) SelectField("Department", department.ifEmpty { null }, depts.map { it to it }, { department = it ?: "" }, Modifier.fillMaxWidth(), placeholder = "All departments")
@@ -356,7 +361,7 @@ internal fun ColleaguesScreen() {
             SectionCard {
                 Text("What colleagues see about you:", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-                    listOf("show_phone" to "my phone", "show_email" to "my email", "show_birthday" to "my birthday").forEach { (key, label) ->
+                    (listOf("show_phone" to "my phone") + (if (env.flavor == AppFlavor.TAILORS) emptyList() else listOf("show_email" to "my email")) + listOf("show_birthday" to "my birthday")).forEach { (key, label) ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = me[key].bool ?: false, onCheckedChange = { v -> scope.launch { saveMine(key, v) } }, enabled = !busy)
                             Text(label, style = MaterialTheme.typography.bodySmall)
@@ -386,7 +391,7 @@ internal fun ColleaguesScreen() {
                                 c.string("phone")?.let { phone ->
                                     Text("📞 $phone", style = MaterialTheme.typography.labelSmall, color = Palette.info, modifier = Modifier.clickable { runCatching { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone.filter { !it.isWhitespace() }))) } })
                                 }
-                                c.string("email")?.let { email ->
+                                c.string("email")?.takeIf { env.flavor != AppFlavor.TAILORS }?.let { email ->
                                     Text("✉️ $email", style = MaterialTheme.typography.labelSmall, color = Palette.info, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { runCatching { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$email"))) } })
                                 }
                             }

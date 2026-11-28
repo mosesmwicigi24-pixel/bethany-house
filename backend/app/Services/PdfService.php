@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Order;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 
@@ -109,7 +110,8 @@ class PdfService
         string $parties,
         string $table,
         array  $totals = [],
-        string $extra  = ''
+        string $extra  = '',
+        string $invoiceSummary = ''
     ): string {
         $s       = self::settings();
         $appName = htmlspecialchars($s['app_name'] ?? 'Bethany House');
@@ -159,6 +161,15 @@ class PdfService
             $totalsHtml .= '</table>';
         }
 
+        // Invoice payment history can span several pages on its own. Keep it
+        // in normal page flow so Dompdf can break the table between payments.
+        $bottom = $invoiceSummary !== ''
+            ? "<div class=\"invoice-totals\">{$totalsHtml}</div>{$extra}"
+            : "<div class=\"bottom-row\">
+                <div class=\"bottom-left\">{$extra}</div>
+                <div class=\"bottom-right\">{$totalsHtml}</div>
+              </div>";
+
         $badge = "<span style=\"display:inline-block;padding:3px 12px;border-radius:20px;font-size:8px;font-weight:700;letter-spacing:1px;background:{$statusColour};color:#fff;\">{$statusLabel}</span>";
 
         // Design language: Bethany navy (#152441, from the logo) anchors the
@@ -167,8 +178,9 @@ class PdfService
         // Soft 8-10px corners, zebra rows instead of grid lines, air instead of
         // boxes. dompdf constraints honoured: table layouts (no flex), solid
         // fills (no gradients/shadows), DejaVu Sans (bundled, full glyph set).
-        $css = '
-*{box-sizing:border-box;margin:0;padding:0}
+        // Dompdf applies the invoice's @page margins to the root element.
+        $resetScope = $invoiceSummary !== '' ? 'body, body *' : '*';
+        $css = $resetScope . '{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"DejaVu Sans",Arial,sans-serif;font-size:10.5px;color:#25303f;background:#fff;line-height:1.5}
 table{border-collapse:collapse;width:100%}
 .page{padding:26px 30px;max-width:780px;margin:0 auto}
@@ -190,6 +202,11 @@ table{border-collapse:collapse;width:100%}
 .meta-table td{padding:8px 6px;text-align:center;vertical-align:top}
 .meta-table .ml{display:block;font-size:7.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#8b95a6;margin-bottom:2px}
 .meta-table .mv{display:block;font-size:10px;font-weight:700;color:#25303f;white-space:nowrap}
+.invoice-summary{background:#152441;margin-bottom:12px;table-layout:fixed;page-break-inside:avoid}
+.invoice-summary .ml{color:#c9d2e0}
+.invoice-summary .mv{color:#fff;font-size:12.5px}
+.invoice-totals{width:48%;margin:12px 0 12px auto;page-break-inside:avoid}
+.invoice-payment-totals{margin-top:8px;page-break-inside:avoid}
 
 .party-row{display:table;width:100%;margin-bottom:14px;border-spacing:0}
 .party-cell{display:table-cell;width:50%;vertical-align:top;padding-right:12px}
@@ -241,6 +258,10 @@ table{border-collapse:collapse;width:100%}
 .footer .gold-dot{color:#D98A2A;font-weight:700}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.page{padding:14px}}';
 
+        if ($invoiceSummary !== '') {
+            $css .= '@page{margin:18pt 0}.page{padding-top:2px;padding-bottom:2px}';
+        }
+
         return <<<HTML
 <!DOCTYPE html>
 <html lang="en">
@@ -267,12 +288,10 @@ table{border-collapse:collapse;width:100%}
   </div>
   <hr class="gold-rule">
   <div class="meta-card"><table class="meta-table"><tr>{$metaRows}</tr></table></div>
+  {$invoiceSummary}
   {$parties}
   {$table}
-  <div class="bottom-row">
-    <div class="bottom-left">{$extra}</div>
-    <div class="bottom-right">{$totalsHtml}</div>
-  </div>
+  {$bottom}
   <div class="sig-row">
     <div class="sig-cell"><div class="sig-line"></div>Signature</div>
     <div class="sig-cell"><div class="sig-line"></div>Name (print)</div>
@@ -617,21 +636,34 @@ HTML;
             'currency' => $currency,
         ];
 
+        $invoiceSummary = '';
+        if ($isInvoice) {
+            $total = self::money((float) $totals['total'], $currency);
+            $invoiceSummary = '<td><span class="ml">Invoice Total</span><span class="mv">' . $total . '</span></td>';
+        }
+
         $extra = '';
         if ($isInvoice && array_key_exists('balance_due', $order)) {
-            // An invoice asks to be paid (owner, 2026-10-15): only money that
-            // has SETTLED is shown as received, and what is still owed says so.
-            $due    = (float) $order['balance_due'];
+            $due = (float) $order['balance_due'];
+            $paid = self::money((float) ($order['total_paid'] ?? 0), $currency);
+            $payable = !in_array($order['status'] ?? 'pending', Order::DEAD_STATUSES, true);
+            $amountDue = $payable ? self::money($due, $currency) : '—';
+            $invoiceSummary .= '<td><span class="ml">Total Paid</span><span class="mv">' . $paid . '</span></td>'
+                . '<td><span class="ml">Amount Due</span><span class="mv">' . $amountDue . '</span></td>';
             $extra  = self::paymentsReceivedHtml($order['settled_payments'] ?? [], $currency)
-                . '<table class="totals-table" style="margin-top:8px">'
-                . '<tr><td class="tl">Total Paid</td><td class="tv">' . self::money((float) ($order['total_paid'] ?? 0), $currency) . '</td></tr>'
-                . ($due < 0.01
-                    ? '<tr class="total-line"><td class="tl">PAID IN FULL</td><td class="tv">' . self::money(0, $currency) . ' due</td></tr>'
-                    : '<tr class="total-line"><td class="tl">Amount Due</td><td class="tv">' . self::money($due, $currency) . '</td></tr>')
-                . '</table>'
-                . ($due < 0.01 ? '' : '<div class="notes-box" style="margin-top:10px">Please pay the amount due of <strong>'
-                    . self::money($due, $currency) . '</strong>, quoting order <strong>'
-                    . htmlspecialchars((string) ($order['order_number'] ?? '')) . '</strong>. Thank you.</div>');
+                . '<table class="totals-table invoice-payment-totals">'
+                . '<tr><td class="tl">Total Paid</td><td class="tv">' . $paid . '</td></tr>';
+            if ($payable) {
+                $extra .= $due < 0.01
+                    ? '<tr class="total-line"><td class="tl">PAID IN FULL</td><td class="tv">' . $amountDue . ' due</td></tr>'
+                    : '<tr class="total-line"><td class="tl">Amount Due</td><td class="tv">' . $amountDue . '</td></tr>';
+            }
+            $extra .= '</table>';
+            if ($payable && $due >= 0.01) {
+                $extra .= '<div class="notes-box" style="margin-top:10px">Please pay the amount due of <strong>'
+                    . $amountDue . '</strong>, quoting order <strong>'
+                    . htmlspecialchars((string) ($order['order_number'] ?? '')) . '</strong>. Thank you.</div>';
+            }
         } elseif (!empty($order['payments'])) {
             $payRows = '';
             foreach ($order['payments'] as $p) {
@@ -653,8 +685,12 @@ HTML;
         // The 14-day repair rule, on every invoice (owner, 2026-11-19).
         $extra .= \App\Support\CustomerTerms::repairsHtml();
 
+        if ($invoiceSummary !== '') {
+            $invoiceSummary = '<table class="meta-table invoice-summary"><tr>' . $invoiceSummary . '</tr></table>';
+        }
+
         return self::page($title, $order['order_number'] ?? '—', $order['status'] ?? 'pending',
-            $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra);
+            $meta, $parties, self::itemsTable($columns, $rows), $totals, $extra, $invoiceSummary);
     }
 
     /**

@@ -32,7 +32,7 @@ class WellKnownAppLinksTest extends TestCase
 
     public function test_android_file_is_absent_until_a_fingerprint_is_set(): void
     {
-        config(['applinks.android.sha256_fingerprints' => []]);
+        config(['applinks.android.sha256_fingerprints' => [], 'applinks.android.tailors_sha256_fingerprints' => []]);
 
         $this->get(self::LINKS)->assertStatus(404);
     }
@@ -45,5 +45,17 @@ class WellKnownAppLinksTest extends TestCase
             ->assertJsonPath('0.target.package_name', 'ke.co.bethanyhouse.hub')
             ->assertJsonPath('0.target.sha256_cert_fingerprints', ['AA:BB', 'CC:DD'])
             ->assertJsonPath('0.relation.0', 'delegate_permission/common.handle_all_urls');
+    }
+
+    public function test_android_file_keeps_hub_and_tailors_as_separate_targets(): void
+    {
+        config(['applinks.android.package' => 'ke.co.bethanyhouse.hub', 'applinks.android.sha256_fingerprints' => ['HUB'],
+            'applinks.android.tailors_package' => 'ke.co.bethanyhouse.tailors', 'applinks.android.tailors_sha256_fingerprints' => ['TAILORS']]);
+        $this->get(self::LINKS)->assertOk()
+            ->assertJsonPath('0.target.package_name', 'ke.co.bethanyhouse.hub')
+            ->assertJsonPath('0.target.sha256_cert_fingerprints', ['HUB'])
+            ->assertJsonPath('1.target.package_name', 'ke.co.bethanyhouse.tailors')
+            ->assertJsonPath('1.target.sha256_cert_fingerprints', ['TAILORS'])
+            ->assertJsonPath('1.relation.1', 'delegate_permission/common.get_login_creds');
     }
 }

@@ -32,6 +32,8 @@ return [
         // (upload key and Play App Signing key), as `keytool -list -v` prints
         // them: "AB:CD:...".
         'sha256_fingerprints' => array_values(array_filter(array_map('trim', explode(',', (string) env('ANDROID_SHA256_FINGERPRINTS', ''))))),
+        'tailors_package' => env('ANDROID_TAILORS_PACKAGE', 'ke.co.bethanyhouse.tailors'),
+        'tailors_sha256_fingerprints' => array_values(array_filter(array_map('trim', explode(',', (string) env('ANDROID_TAILORS_SHA256_FINGERPRINTS', ''))))),
     ],
 
     // Paths of the Hub the apps claim. Everything under /admin is the staff

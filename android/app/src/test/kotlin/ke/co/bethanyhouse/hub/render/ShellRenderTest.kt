@@ -4,8 +4,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
+import ke.co.bethanyhouse.hub.BuildConfig
+import ke.co.bethanyhouse.hub.core.AppFlavor
 import ke.co.bethanyhouse.hub.LocalEnv
 import ke.co.bethanyhouse.hub.core.Route
 import ke.co.bethanyhouse.hub.core.SessionStore
@@ -39,6 +42,7 @@ class ShellRenderTest {
         assertEquals(SessionStore.State.SignedIn, env.session.current.state)
         env.navigator.selection = null
         env.navigator.path.clear()
+        env.navigator.drawerOpen = false
     }
 
     private fun renderShell() {
@@ -55,7 +59,41 @@ class ShellRenderTest {
     fun `phone shows the bottom bar with More`() {
         renderShell()
         assertTrue("bottom bar More tab", exists(hasText("More")))
-        assertTrue("home lands on the dashboard", exists(hasText("Dashboard")))
+        val expectedHome = if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) == AppFlavor.TAILORS) "Production Orders" else "Dashboard"
+        assertTrue("home lands on the appropriate page", exists(hasText(expectedHome)))
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun `tailors tabs open work in progress and More keeps messages`() {
+        if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) != AppFlavor.TAILORS) return
+        renderShell()
+        assertTrue("orders tab visible", exists(hasText("Orders")))
+        compose.onNode(hasText("WIP")).performClick()
+        settle()
+        assertEquals(Route.Wip, env.navigator.current)
+        compose.onNode(hasText("More")).performClick()
+        settle()
+        assertTrue("More workday section visible", exists(hasText("My workday")))
+        assertTrue("old workshop section removed", !exists(hasText("Workshop")))
+        compose.onAllNodes(hasText("Messages"))[0].performClick()
+        settle()
+        assertTrue("Messages opens from More", env.navigator.current is Route.Comms)
+        assertEquals("destination is pushed above More", 1, env.navigator.path.size)
+        compose.runOnIdle { env.navigator.pop() }
+        settle()
+        assertTrue("returns to More", exists(hasText("My workday")))
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun `tailors keeps bottom navigation when a conversation is open`() {
+        if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) != AppFlavor.TAILORS) return
+        renderShell()
+        compose.runOnIdle { env.navigator.push(Route.Comms(42)) }
+        settle()
+        assertTrue("More stays available in a conversation", exists(hasText("More")))
+        assertTrue("the fixture's home tab stays available in a conversation", exists(hasText("Orders")))
     }
 
     @Test
@@ -69,9 +107,10 @@ class ShellRenderTest {
     @Config(qualifiers = "w1280dp-h800dp")
     fun `tablet landscape shows the permanent sidebar with every group`() {
         renderShell()
-        assertTrue("sidebar shows WORKSPACE", exists(hasText("WORKSPACE")))
+        val tailors = AppFlavor.valueOf(BuildConfig.APP_FLAVOR) == AppFlavor.TAILORS
+        assertTrue("sidebar shows an available group", exists(hasText(if (tailors) "ME" else "WORKSPACE")))
         // The sidebar is a lazy list: scroll each lower group's page into view.
-        listOf("POS", "Purchase Orders", "Payment Transactions", "Sign out").forEach {
+        (if (tailors) listOf("Production Orders", "Sign out") else listOf("POS", "Purchase Orders", "Payment Transactions", "Sign out")).forEach {
             compose.onNode(androidx.compose.ui.test.hasScrollToNodeAction()).performScrollToNode(hasText(it))
             assertTrue("sidebar reaches $it", exists(hasText(it)))
         }
@@ -81,9 +120,10 @@ class ShellRenderTest {
     @Config(qualifiers = "w411dp-h891dp")
     fun `a deep link to a detail page opens it with a back stack`() {
         renderShell()
-        compose.runOnIdle { env.navigator.go(Route.Order(42)) }
+        val detail = if (AppFlavor.valueOf(BuildConfig.APP_FLAVOR) == AppFlavor.TAILORS) Route.ProductionOrder(42) else Route.Order(42)
+        compose.runOnIdle { env.navigator.go(detail) }
         settle()
-        assertEquals(Route.Order(42), env.navigator.current)
+        assertEquals(detail, env.navigator.current)
         assertTrue("back arrow shown", exists(hasContentDescription("Back")))
         compose.runOnIdle { env.navigator.pop() }
         settle()

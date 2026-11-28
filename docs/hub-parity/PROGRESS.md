@@ -1,7 +1,163 @@
 # Tailors Hub audit progress
 
+### Invoice PDF pagination — 28 November 2026, Codex (claim released)
+
+- Taking `backend/app/Services/PdfService.php` and `backend/tests/Feature/OrderReceiptPdfTest.php` for the approved first-page invoice summary and pagination tests. The existing order totals and settled-payment balance remain the data sources.
+- The invoice PDF now shows the total, net paid, and amount due on page 1. Cancelled, voided, and refunded orders show a dash for the amount due and omit the payment request in line with the existing payment gate. The item and payment tables can span pages with print margins.
+- Verified against isolated PostgreSQL. All 77 selected tests passed (720 assertions), including nine rendered payment-state cases. A separate nine-page PDF render preserved all 40 item rows and 80 payments exactly once, with the reconciled figures on page 1. Production deployment and verification remain open.
+
+### Tailors tab order — 26 November 2026, Codex (claim released; signed-in visual review open)
+
+- Taking Android and Apple `AppFlavor` navigation definitions and their flavor tests to arrange Orders, WIP, My Tasks, Clock in, More, using existing permission gates. Calendar stays available in More; no API or permission changes.
+- Also taking Apple `BethanyUI/Shell/MobileShell.swift` to preserve each role's existing landing screen after moving the home tab away from the first position.
+- Reordered the permission-filtered tabs to Orders, WIP, My Tasks, Clock in, More; Calendar remains in More. Android core and signed-in shell tests, Tailors debug build, iPhone simulator build, and Apple flavor tests passed. Signed-in device layout remains unverified.
+
+### Tailors navigation verification — 26 November 2026, Codex (claim released; signed-in device review open)
+
+- Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/render/ShellRenderTest.kt` and the Tailors navigation files if needed. The existing signed-in shell tests still expect the previous Workshop section and tab labels; update them to exercise Orders, WIP, More and Messages, then run both variants. Test devices are currently signed out.
+- Updated the shell tests to exercise the new WIP tab, Messages in More, return navigation and the shortened Orders label. Both Tailors and Hub shell test classes passed. The full Tailors suite also ran with one test-selection assertion failure caused by a duplicate hidden drawer node; the corrected focused suite passed. Both updated test apps are installed and open, but require sign-in before device-based layout, colleague privacy and text-size review.
+
+### Tailors navigation, directory and text size — 26 November 2026, Codex (claim released; visual verification open)
+
+- Taking Android `core/AppFlavor.kt`, `ui/shell/HubShell.kt`, `ui/shell/TailorsMore.kt`, `ui/TextSizeSettings.kt`, `ui/Theme.kt`, `ui/features/me/MeSignTodosColleagues.kt` and relevant tests; Apple `BethanyKit/AppFlavor.swift`, `BethanyUI/Shell/MobileShell.swift`, `BethanyUI/Features/MeFeatureSignTodosColleagues.swift` and relevant tests. Move existing permission-gated Orders and WIP to phone navigation, retain access to messages and quality control, hide directory emails in Tailors Hub, and investigate text scaling. No server-side permissions or directory settings will be changed.
+- Also taking Apple `BethanyUI/Theme.swift`: its fixed-size fonts do not respond to Dynamic Type. Review the existing font roles before changing them.
+- Added permission-gated Orders and WIP phone tabs with colored icons, kept Messages in More, and retained other production routes. Removed email display and its sharing switch from the Tailors colleague UI only; server responses and existing privacy settings are unchanged. Common Apple typography now uses Dynamic Type styles; Android's existing scale is covered by a new live density test. Android Tailors and Hub debug builds, Android core and focused text-size tests, Apple simulator build and Apple flavor tests passed. No Android emulator was attached; signed-in visual, accessibility and extreme text-size checks remain open, and fixed-size labels outside the common Apple typography still need audit.
+
+### Android full-suite timeout investigation — 25 November 2026, Codex (claim released; CI verification open)
+
+- Taking `android/app/build.gradle.kts` and Android test files if needed to investigate the reproducible full-suite Compose idling timeouts. Check the PR CI result and verify any isolation change against both app variants without skipping tests.
+- With each test class in a fresh JVM, both complete local unit suites passed: Tailors 195 tests (108 existing skips), Hub 280 tests (108 existing skips). Applied the same Gradle test-only isolation setting. The underlying state leak is not identified; CI, independent review, and production deployment remain open.
+
+### Android test isolation — 25 November 2026, Codex (claim released; issue open)
+
+- Taking `android/app/src/test/kotlin/ke/co/bethanyhouse/hub/ui/TailorsTextSizeTest.kt` for test-state isolation. The render group with calendar and counter tests passes; the UI group alone passes; combining render tests, text-size tests and those two Compose tests reproduces idling timeouts. Text-size tests leave a custom-size shared preference after completion. Verify whether test teardown removes the interaction before concluding it is the cause.
+- Text-size tests now clear their saved preference after each test. A previously failing render/text-size/calendar/counter combination passed with cleanup, but the complete Tailors suite still reproduced calendar and piece-counter Compose idling timeouts. The failed run was stopped before reaching the Hub suite. Root cause and complete suite status remain unverified; do not treat cleanup as a complete fix.
+
+### Android lint investigation — 25 November 2026, Codex (claim released)
+
+- Taking `android/app/src/main/kotlin/ke/co/bethanyhouse/hub/ui/features/people/PeopleAttendance.kt` and the Hub/Tailors flavor manifests for the two existing lint errors. The merged manifests already declare the launcher activity exported; making that declaration explicit in each overlay must preserve the merged value. Review map-marker state without changing attendance, location data or permissions.
+- Remembered map marker state by coordinate and made the existing exported launcher declaration explicit in both flavor overlays. Both debug builds and both flavor lint tasks passed; lint warnings remain. No attendance or permission rules changed.
+
+### Android passkeys investigation — 25 November 2026, Codex (claim released; verification open)
+
+- Rechecked the public Android and Apple well-known endpoints: both redirected to `/admin/` HTML. Inspected the server's single-origin ceremony configuration, challenge/user-verification options, Android fallback and locally built debug certificate. The release and Play signing fingerprints, deployment routing and library backup-state behavior remain unknown. Findings and a nonproduction-first proposal are in `ANDROID_PASSKEY_PROPOSAL.md`; no auth or server configuration was changed.
+- The iPhone and Android test apps returned to sign-in after the simulators were restarted, so renewed signed-in side-by-side testing is pending.
+- Owner approved the nonproduction proposal. Codex claims `backend/app/Services/Auth/Passkeys.php`, `backend/config/security.php`, `backend/config/applinks.php`, `backend/app/Http/Controllers/WellKnownController.php`, related backend tests, Android Gradle dependencies and Android profile/security passkey client files and tests. Production association/configuration and deployment remain outside this claim and require separate approval.
+- Full Android Tailors and Hub unit runs each reported three Compose idling timeouts in `CalendarMonthParityTest` and `TailorPieceCounterTest`; all three passed in an isolated Tailors run with one worker. Root cause and full-suite stability remain unverified; lint was not reached in the failed combined run.
+- Nonproduction implementation: Android Credential Manager registration and step-up, passkey listing/removal, and password/TOTP fallback; backend ceremony origins add only explicitly configured certificate fingerprints, with no Android certificates trusted by default. App-link output supports separately configured Hub and Tailors targets. Existing Apple association output is unchanged. The locked WebAuthn 5.3.9 source matches non-URL origins exactly and its ceremony includes verification, backup-bit and counter checks.
+- Against a disposable PostgreSQL database, 15 passkey and association tests passed (114 assertions), including trusted/untrusted Android origins and continued web-origin acceptance. Both Android debug variants built; three provider/API tests and focused navigation tests passed. Real Credential Manager provider behavior, end-to-end enrollment/step-up, Apple device regression, production certificate fingerprints, deployed route behavior and shared-branch review remain open. No production config or account credentials were changed.
+- The updated test emulator loaded the empty passkey list and Add control; no passkey was enrolled or removed. Tailors and Hub lint each report two errors in `PeopleAttendance.kt` and their flavor manifests; the merged Tailors debug manifest does set `MainActivity` exported to true. The running iPhone test build returned to sign-in, so the signed-in comparison is still open.
+- `bundleTailorsRelease` produced `android/app/build/outputs/bundle/tailorsRelease/app-tailors-release.aab`; `jarsigner` reports it is unsigned. This is an unverified review artifact, not a Play-ready release. Upload signing, Play App Signing fingerprint, passkey associations, complete parity and release review remain open; nothing was uploaded or deployed.
+- Refreshed that unsigned bundle after the leave-heading change; SHA-256 `63ed5787b53f9261495b135141cd4488e2ac536f45c5e0c94e2bbeb384ce06c9`. The owner says this will be a new Play app; upload-key setup and secure custody have not yet been established.
+- Apple shared-package tests passed on macOS (127 tests). The `BethanyKit` Xcode scheme has no test action, so this is not an iPhone-simulator test run.
+
+### My Tasks task-row icons — 25 November 2026, Codex (claim released; verification open)
+
+- Replaced the Android task-list hanger and filled shield with outlined garment and quality icons, closer to the signed-in iPhone reference. Both Android debug variants and focused production tests passed; visually inspected the loaded test account on the emulator. Other typography, navigation and accessibility differences remain open. Claim released.
+- The TailorsMobile iPhone simulator build passed; the 127 Apple package tests were run on macOS, not the simulator.
+
+### Task count accessibility — 25 November 2026, Codex (claim released; verification open)
+
+- Added a “Draft count” accessibility label and value to the Android count editor. The focused tests passed, and the emulator accessibility tree shows the label and number. Signed-in comparison opened and cancelled both platforms' editors without saving. Full TalkBack/VoiceOver testing remains open. Claim released.
+- A full Tailors unit-suite retry with one worker again produced three Compose idling timeouts in the calendar and count-editor tests (195 tests, 108 skipped); the affected tests pass in isolation. The underlying test-order/environment issue remains unknown.
+- A further one-worker run combining `RouteRenderTest`, `CalendarMonthParityTest` and `TailorPieceCounterTest` passed. That combination alone did not reproduce the full-suite timeouts; the cause remains unknown.
+
+### Android Updates presentation — 25 November 2026, Codex (claim released; verification open)
+
+- Removed the duplicate Tailors page title and default subtitle, and styled the recognition action closer to iPhone; a nonzero must-read notice remains visible. The Hub flavor and feed actions are unchanged. Both Android debug variants and the focused route-render tests passed. Inspected both signed-in empty states; populated feed, must-read, posting, filtering, error and accessibility states remain unverified. Claim released.
+
+### Checklists comparison — 25 November 2026, Codex (claim released; verification open)
+
+- Both signed-in apps show the same opening/closing checklists and incident/damage report options. Android now displays a single “Checklists & forms” heading; Hub naming and form actions remain unchanged. Both debug variants and focused route/shell tests passed; the updated Android screen was checked on the test emulator. No form was opened or submitted. Entry, submission, accessibility and finer layout differences remain unverified. Claim released.
+
+### Android Handbook presentation — 25 November 2026, Codex (claim released; verification open)
+
+- Removed the duplicate Tailors Handbook heading and default subtitle; Hub, search and article behavior are unchanged. Both Android debug builds and focused route-render tests passed; inspected the signed-in empty screen on each device. Search results, article access, error, large-text and accessibility states remain unverified. Claim released.
+
+### Android Training presentation — 25 November 2026, Codex (claim released; verification open)
+
+- Removed the duplicate Tailors Training title and default subtitle; a nonzero course count remains visible. Hub, course and quiz behavior are unchanged. Both Android debug variants and focused route-render tests passed; checked the signed-in empty state on both devices. Populated courses, quizzes, errors and accessibility remain unverified. Claim released.
+
+### Android workday headings — 25 November 2026, Codex (claim released; verification open)
+
+- Removed duplicate Tailors headings on To sign, To-dos and Colleagues; meaningful pending and overdue/open counts remain visible. Both debug builds and focused route tests passed; checked all three updated pages on Android and compared their empty or top-level states with iPhone. No document, task, message, or visibility setting was changed. No directory screenshot is committed because it contains contact details. Populated, action, error and accessibility states remain unverified. Claim released.
+
+### Android shifts presentation — 25 November 2026, Codex (claim released; verification open)
+
+- Removed the duplicate Tailors My shifts heading. Both Android debug builds and focused route tests passed; checked the matching empty states on both devices. Shift and attendance actions were not used; populated, action, error and accessibility states remain unverified. Claim released.
+
+### Android leave heading — 25 November 2026, Codex (claim released; verification open)
+
+- Removed the duplicate Tailors My leave heading while retaining the year and leave data. Both Android debug builds and focused route tests passed; checked the single heading and request control on Android after a read-only iPhone comparison. No request was submitted or cancelled; no sensitive screenshot was committed. Values, request flow, error and accessibility parity remain unverified. Claim released.
+
+### Android profile presentation — 25 November 2026, Codex (claim released; verification open)
+
+- Aligned Tailors profile navigation labels, avatar, outlet placement and action hierarchy with the iPhone reference; removed the duplicate in-page title. Hub presentation and security operations were not changed.
+- Both Android debug variants built and focused profile-identifier and shell tests passed. In the signed-in test emulator, verified the profile controls and opened employment and activity tabs without editing data. Pixel comparison, photo upload, security actions, populated activity, large text, accessibility and failure states remain unverified. Claim released.
+
+### Android messages presentation — 25 November 2026, Codex (claim released; verification open)
+
+- Tailors Android now groups channel rows in cards, displays contextual descriptions and the iPhone's empty-message wording, and shows a production-order header with an Open record action in contextual conversations. Hub flavor keeps its prior list and header. Existing message loading, read marking and sending code was not changed.
+- Both Android debug builds and focused route/shell tests passed. Visually checked the signed-in test account's list and opened a test conversation; opening may have marked that test thread as read. No message was sent. Paired list screenshots and remaining differences are in `ANDROID_CHECKLIST.md`. Sending, attachments, unread transitions, failures, keyboard clearance, actual bottom navigation in a thread, large text, dark mode and TalkBack remain unverified. Claim released.
+
+### Android calendar presentation — 25 November 2026, Codex (claim released; verification open)
+
+- Added iPhone-style summary tiles, today outline and selected-date styling, monthly order count, compact order cards and a separate past-due list using existing schedule data. Android keeps 48dp date targets. Existing order resolution and permission checks remain in place.
+- Both Android debug builds and focused production tests passed; a Compose test verifies selecting a day filters orders and Show month restores the list. On the signed-in test emulator, visually checked the month and past-due card without changing an order. Reference screenshots and open gaps are recorded in `ANDROID_CHECKLIST.md`. Different months, calendar-to-task return, larger text, dark mode, TalkBack and error/offline states remain unverified. Claim released.
+
+### Android time-clock presentation — 25 November 2026, Codex (claim released; verification open)
+
+- The Tailors Android clock uses a compact status-and-time card and a labeled Your time summary; long last-punch flags wrap. It no longer claims the tailor is at an outlet when the outlet has no saved coordinates. Existing clock, mock-location, permission and attendance eligibility checks are unchanged; Hub retains its existing clock design.
+- Both Android debug builds, core ClockGate tests and Android kiosk tests passed. On the signed-in test emulator, visually checked the no-outlet-location state and wrapped last-punch flags without recording attendance. Screenshots and the differing iPhone location state are in `ANDROID_CHECKLIST.md`. iPhone source appears to show the same misleading “You are at…” hint when distance is unavailable; logged for iOS review without changing it. Clock-in/out, background trail, offline, other permission states, dark mode, large text and TalkBack remain unverified. Claim released.
+
+### Android task-detail actions — 25 November 2026, Codex (claim released; verification open)
+
+- Tailors task-detail counters now display a progress bar and an explicit Update count → draft → Save count flow. Draft changes make no request until saved, failed saves retain the draft, and queued counts display a waiting-to-sync label. Pending status actions disable conflicting Tailors controls, and blocked stages cannot start from the Tailors UI. Hub's immediate counter remains unchanged.
+- Tailors and Hub debug builds passed; focused production, queue and draft-counter tests passed. On the signed-in Android test emulator, visually inspected the task card and opened/cancelled the editor without saving. Paired reference screenshots and remaining UI differences are recorded in `ANDROID_CHECKLIST.md`. Offline replay races, real server validation, batch controls, dark mode, large text and TalkBack remain unverified. No task record was changed. Claim released.
+
+### My Tasks visual parity — 25 November 2026, Codex (claim released; verification open)
+
+- Matched the task list's centered Tailors mark, greeting, workshop icon, segmented Active/History control, lane dots, task-row icons and chevrons. Tailors phone navigation now uses a floating card and remains visible on nested pages. Hub flavor keeps its existing navigation. The owner confirmed the simulator account is a test environment; no records were changed in this slice.
+- Tailors and Hub debug APKs built, and focused Tailors production and shell tests passed, including bottom navigation in a conversation. Visually inspected the Android task list and recorded a paired reference and updated screenshot in `screenshots/my-tasks/`; see `ANDROID_CHECKLIST.md`. Font sizes, material icons and touch targets intentionally follow Android conventions and remain visibly different in places. Dark mode, largest text, TalkBack, tab restoration, nested-page keyboard behavior, and full device navigation remain unverified. Task detail, clock, calendar, messages and other pages have separate open gaps. This file claim is released.
+
+### Android task queue ordering — 25 November 2026, Codex (verification open)
+
+- Android now checks the current user's readable saved queue before sending a stage status or count. When that stage has saved work, the new change is saved for replay; an unavailable or unreadable queue blocks the update with an explanation. This aligns with the existing iPhone behavior and does not change server rules.
+- Tailors debug build, focused production and queue tests, and full Tailors unit suite passed. The new queue test checks exact task scoping and unreadable storage. End-to-end replay with a simultaneous in-flight update, process restart, server refusal and emulator offline transitions remain unverified; deduplication and concurrent replay deserve separate review on both platforms before claiming strict ordering. No live task was changed.
+
+### Android More and text size — 24 November 2026, Codex (verification open)
+
+- Tailors phone More is a grouped page with the iPhone's Workshop, My workday, Time & pay, App settings and account sections. Existing permission-filtered routes and the offline sign-out warning are preserved. The signed-in Android emulator showed More and returned to it from Production Orders; the final divider and heading polish has built but has not been visually rechecked. Other roles, deep links, tablet, dark appearance and accessibility sizes remain open.
+- Added a device-local text-size preference, device-setting switch and 9–36 reference slider. The emulator showed the dialog and live large-text resizing; the device setting was restored. Tailors debug build, focused Tailors and Hub shell/navigation tests and text-size persistence/range tests passed. Extreme-size screen usability and device restart remain open. The preview follows Android scaling and is not an exact iOS Dynamic Type mapping.
+- Passkey audit: the public `https://hub.bethanyhouse.co.ke/.well-known/assetlinks.json` currently redirects to `/admin/` and returns HTML, not an Android association. The checked-in association config names one Android package, and the passkey validator accepts one configured/request origin. Release signing fingerprints, deployed origin configuration and the exact server changes needed for Android remain UNKNOWN — NEEDS VERIFICATION. No authentication or production configuration was changed.
+
+### Android task disclosure preferences — 24 November 2026, Codex (verification open)
+
+- Specifications and measurements expansion choices are stored locally per signed-in user, matching the iPhone behavior. Tailors debug build and focused production tests passed; account switching, persistence across restart and accessibility announcement need device verification.
+
+### Android task detail parity — 24 November 2026, Codex (verification open)
+
+- Reordered the Tailors task workspace to show the job identity and actionable stages first, followed by separate specification and measurement cards, bench note, stage overview, journey and conversation. Completed stages are summarized with status, recorded time and note action. Existing stage actions, endpoints and permission rules remain in place; Hub flavor layout is unchanged.
+- Tailors debug build, focused production tests and the full Tailors unit suite passed. On the signed-in Android emulator, visually checked the job heading, active-stage controls, overview status colors and recorded timestamps without changing any records. History, QC notices, measurement disclosure interactions, conversation navigation, dark appearance, large text, and stage actions still require device verification. Disclosure preference persistence and native iPhone navigation presentation remain parity gaps.
+
+### Android navigation appearance — 24 November 2026, Codex (done)
+
+- Replaced the Tailors phone navigation's purple Material default with the app's orange selection and neutral indicator. The Hub flavor retains its existing colors. Tailors debug APK build and ShellRenderTest passed; visually checked the updated selected tab on the signed-in Android emulator. Dark mode and large text remain unverified.
+- Signed-in My Tasks and Calendar loaded account data; the task detail was opened read-only. Full screen and behavior parity, including signed-in profile/security flows, remain open. No production records were changed.
+
 ### Android parity with iPhone — 24 November 2026, Codex (in progress)
 
+- Android now exposes existing two-step setup, password-confirmed disable and recovery-code replacement with an explicit warning. Server authentication, role and step-up checks remain authoritative. Tailors APK build and mock-Hub tests for setup, confirmation, refusal and recovery requests passed; no live security setting was changed. Signed-in setup, QR scanning, step-up, recovery-code handling and screen accessibility remain unverified on an emulator. Android passkey registration remains open.
+- Android now offers the existing own terminal-PIN flow with password confirmation and the same PIN guidance as iPhone. The Tailors APK build, PIN-rule tests and a mock-server test for request fields and server rejection passed. No live PIN was changed; the screen and successful update remain unverified on a signed-in emulator. Two-step setup and Android passkey registration remain open.
+- Android Profile now has employment and activity tabs, personal-detail editing, masked identifiers, signed documents, profile editing and a photo picker. Existing server authentication and permission rules were not changed. Tailors APK build and focused identifier/task tests passed. The rebuilt app was installed and opened to sign-in; signed-in views, editing, document access and photo upload remain unverified. Showing a masked identifier does not establish deduction enrollment. Two-step setup, passkeys, terminal PIN management and wider parity remain open.
+- Android Tailors Hub sign-in now shows the tailor name and scissors. My Tasks groups orders into iPhone-style status lanes, opens an order for its existing stage actions, and shows recorded start/completion timestamps in the theme color. Task mutations and offline code were not changed.
+- Tailors debug APK built and ran on the Android emulator; the sign-in branding was visually checked. Focused ProductionParityTest passed, including lane classifications. Signed-in task list, task actions, timestamps and accessibility still need emulator verification using a suitable test account or fixture. My Tasks details, item conversations, profile, calendar order navigation and other screens still need parity work.
+- Android task details now load the matching production-order conversation and recent messages using the existing Messages models, with a link to the full conversation. Tailors debug build and focused production tests passed. Signed-in conversation, navigation, empty and error states remain unverified on the emulator.
+- Tailors task details now open measurements by default and show compact measurement tiles in the existing sheet order, with stage icons and recorded timestamps. Tailors debug build and focused production/identifier tests passed; signed-in layout, large text and stage interactions remain unverified.
+- A horizontal stage journey now displays assigned stages in order with explicit status labels and subdued unfinished stages. Android build and focused tests passed; the journey has not yet been visually checked on a signed-in emulator.
+- Tailors calendar order taps now resolve a unique exact order number, then open an assigned job in My Tasks or the permitted production-order view. The focused test covers exact, missing and ambiguous matches; Tailors APK and focused tests passed. Calendar-to-task, conversation return and permission behavior still need signed-in emulator testing.
+- Android unit suites now use flavor-appropriate route and shell expectations: Hub passed 269 tests (108 skipped) and Tailors passed 184 tests (108 skipped) in separate runs. The skipped live-Hub tests and signed-in emulator checks remain open.
+- Android clock now uses the same status gate as iPhone: a known status remains usable after an offline failure, but Hub errors block punching and overrides require a fresh status. ClockGate unit tests and the Tailors debug build passed; no live attendance records were changed. Emulator verification of offline and Hub-error states remains open.
 - Auditing Android Tailors Hub against the iPhone experience; starting with the production calendar. Android offline queue files remain outside this work.
 - Calendar: hides the stage breakdown in Tailors Hub, adds a past-due summary, date grid, selected-day filtering and Today/Next deadline shortcuts. Tailors debug APK built, installed and launched on the Android emulator; signed-in calendar appearance and interactions remain unverified. My Tasks, calendar order navigation, profile and other screens still require parity work and verification.
 
